@@ -43,6 +43,13 @@ struct PatchOverlap {
     std::vector<std::string> modIds;
 };
 
+// Files in the game's LayeredFS folders that Patchwork didn't put there (a randomizer,
+// mods copied by hand, another manager's installs).
+struct UnmanagedFiles {
+    std::vector<std::string> targets;  // relative to SD root
+    uint64_t bytes = 0;
+};
+
 using ProgressFn = std::function<void(size_t done, size_t total, const std::string& current)>;
 
 // Owns the mod library on the SD card and keeps the deployed LayeredFS files in
@@ -67,8 +74,17 @@ public:
 
     void setEnabled(const std::string& id, bool enabled, const ProgressFn& progress = {});
     void remove(const std::string& id, const ProgressFn& progress = {});
+    // Stop tracking an enabled mod but leave its files on the SD card (the reverse of
+    // importUnmanaged). Files another mod currently covers go back to backup/.
+    void forget(const std::string& id);
+    static bool isImported(const ModRecord& m) { return m.id.rfind("local-existing-", 0) == 0; }
     // Move a mod up (+1) or down (-1) in its game's priority order.
     void move(const std::string& id, int delta, const ProgressFn& progress = {});
+
+    UnmanagedFiles unmanagedFiles(Game game) const;
+    // Adopt the unmanaged files as a regular mod (lowest priority, enabled) so they can be
+    // turned off and back on. Copies them into the library; the SD card is left as is.
+    const ModRecord& importUnmanaged(Game game, const std::string& name, const ProgressFn& progress = {});
 
     std::vector<Conflict> conflicts(Game game) const;
     std::vector<PatchOverlap> patchOverlaps(Game game) const;

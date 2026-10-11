@@ -133,3 +133,46 @@ TEST("library: games are independent") {
     CHECK_EQ(f.lib.mods(Game::Botw).size(), 1u);
     CHECK_EQ(f.lib.find("b")->priority, 0);
 }
+
+TEST("library: files already on the SD card can be found and imported") {
+    Fixture f;
+    const std::string botw = "atmosphere/contents/01007EF00011E000/romfs/";
+    const std::string dlc = "atmosphere/contents/01007ef00011f001/romfs/";  // other casing on purpose
+    write(f.sd / (botw + "Pack/Bootup.pack"), "randomizer");
+    write(f.sd / (botw + "Actor/x"), "randomizer-x");
+    write(f.sd / (dlc + "Map/y"), "randomizer-y");
+    write(f.sd / "atmosphere/contents/01007EF00011E000/romfs_metadata.bin", "cache");
+    write(f.sd / (kRomfs + "totk-file"), "other game");
+
+    // A Patchwork mod overrides one of the randomizer's files.
+    f.addMod("m", {botw + "Actor/x"}, true, Game::Botw);
+    auto found = f.lib.unmanagedFiles(Game::Botw);
+    CHECK_EQ(found.targets.size(), 3u);  // Bootup.pack, DLC file, and the backed-up Actor/x
+
+    const auto& imported = f.lib.importUnmanaged(Game::Botw, "Existing files");
+    std::string id = imported.id;
+    CHECK(f.lib.unmanagedFiles(Game::Botw).targets.empty());
+    CHECK_EQ(f.lib.mods(Game::Botw).back()->id, id);  // lowest priority
+    CHECK_EQ(read(f.sd / (botw + "Actor/x")), "m:" + botw + "Actor/x");
+
+    // Turning the mod off brings back the randomizer's version from the imported copy.
+    f.lib.setEnabled("m", false);
+    CHECK_EQ(read(f.sd / (botw + "Actor/x")), std::string("randomizer-x"));
+    // Turning the import off removes its files; turning it on restores them.
+    f.lib.setEnabled(id, false);
+    CHECK(!fs::exists(f.sd / (botw + "Pack/Bootup.pack")));
+    CHECK(fs::exists(f.sd / "atmosphere/contents/01007EF00011E000/romfs_metadata.bin"));
+    f.lib.setEnabled(id, true);
+    CHECK_EQ(read(f.sd / (botw + "Pack/Bootup.pack")), std::string("randomizer"));
+    CHECK_EQ(read(f.sd / (dlc + "Map/y")), std::string("randomizer-y"));
+    CHECK_EQ(read(f.sd / (kRomfs + "totk-file")), std::string("other game"));
+
+    // Stop managing: files stay where they are and show up as unmanaged again.
+    f.lib.setEnabled("m", true);
+    f.lib.forget(id);
+    CHECK(f.lib.find(id) == nullptr);
+    CHECK_EQ(read(f.sd / (botw + "Pack/Bootup.pack")), std::string("randomizer"));
+    CHECK_EQ(f.lib.unmanagedFiles(Game::Botw).targets.size(), 3u);
+    f.lib.remove("m");  // the randomizer's Actor/x comes back from backup
+    CHECK_EQ(read(f.sd / (botw + "Actor/x")), std::string("randomizer-x"));
+}

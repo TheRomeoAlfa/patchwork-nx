@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace mm {
 
@@ -25,5 +26,7 @@ inline constexpr std::array<GameInfo, 2> kGames = {{
 const GameInfo& gameInfo(Game g);
 std::optional<Game> gameFromKey(std::string_view key);
 std::optional<Game> gameFromTitleId(std::string_view titleId);  // case-insensitive
+// Every title whose LayeredFS folder belongs to the game (BOTW keeps its DLC separately).
+std::vector<std::string> titleIdsFor(Game game);
 
 }  // namespace mm

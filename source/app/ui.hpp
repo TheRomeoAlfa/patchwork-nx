@@ -37,6 +37,7 @@ inline constexpr const char* file = "\uE24D";      // insert_drive_file
 inline constexpr const char* boxOn = "\uE834";     // check_box
 inline constexpr const char* boxOff = "\uE835";    // check_box_outline_blank
 inline constexpr const char* image = "\uE3F4";     // image
+inline constexpr const char* folder = "\uE2C7";    // folder
 }  // namespace icon
 
 brls::Label* label(const std::string& text, float size, NVGcolor color, bool singleLine = true);

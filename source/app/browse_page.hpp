@@ -13,7 +13,7 @@
 
 namespace app {
 
-class ModCell;
+class ModRow;
 
 // GameBanana mod list on the left, live preview of the highlighted mod on the right.
 // Pressing A on a mod turns the preview pane into the install flow.
@@ -24,13 +24,14 @@ public:
 
     brls::View* getDefaultFocus() override;
 
-    // Recycler plumbing (called by the data source)
+private:
     int rowCount() const { return static_cast<int>(items_.size()); }
-    ModCell* bindCell(brls::RecyclerFrame* recycler, int row);
     void onRowFocused(int row);
     void onRowClicked(int row);
+    void appendRows(size_t from);
+    void updateThumbnails(int around);
+    brls::View* rowFocus();
 
-private:
     void reload();
     void loadMore();
     void openSearchKeyboard();
@@ -65,11 +66,13 @@ private:
     std::shared_ptr<std::atomic<bool>> cancel_;
 
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-    std::set<ModCell*> cells_;
+    std::vector<ModRow*> rows_;
+    int generation_ = 0;  // bumped whenever rows_ is rebuilt; stale image callbacks check it
 
     brls::Label* title_ = nullptr;
     brls::Label* count_ = nullptr;
-    brls::RecyclerFrame* recycler_ = nullptr;
+    brls::ScrollingFrame* scroll_ = nullptr;
+    brls::Box* list_ = nullptr;
     brls::Box* pane_ = nullptr;          // right side
     brls::Label* workingLabel_ = nullptr;
     brls::Box* listEmpty_ = nullptr;

@@ -61,6 +61,39 @@ void MyModsPage::rebuild() {
     list_->clearViews();
     pane_->clearViews();
 
+    // Mod files on the card that Patchwork didn't install (a randomizer, manual copies…).
+    brls::View* unmanagedRow = nullptr;
+    auto unmanaged = st.snapshot().unmanaged.count(st.game()) ? st.snapshot().unmanaged.at(st.game()) : LibrarySnapshot::Unmanaged{};
+    auto addUnmanagedRow = [&] {
+        if (!unmanaged.files) return;
+        auto* row = ui::focusRow();
+        row->setMarginTop(10);
+        row->addView(ui::label(ui::icon::folder, 24, ui::warn()));
+        auto* text = ui::vbox();
+        text->setMarginLeft(12);
+        text->setGrow(1);
+        text->setShrink(1);
+        text->addView(ui::label("Files already on SD card", 18, ui::text()));
+        auto* sub = ui::label(std::to_string(unmanaged.files) + " files · " + formatSize(unmanaged.bytes) + " · not managed yet", 14, ui::muted());
+        sub->setMarginTop(3);
+        text->addView(sub);
+        row->addView(text);
+        row->getFocusEvent()->subscribe([this, unmanaged](brls::View*) { showUnmanaged(unmanaged.files, unmanaged.bytes); });
+        row->registerClickAction([this, unmanaged](brls::View*) {
+            importUnmanaged(unmanaged.files, unmanaged.bytes);
+            return true;
+        });
+        row->updateActionHint(brls::BUTTON_A, "Import");
+        list_->addView(row);
+        unmanagedRow = row;
+    };
+
+    if (mods.empty() && unmanaged.files) {
+        addUnmanagedRow();
+        if (hadFocus) brls::Application::giveFocus(unmanagedRow);
+        showUnmanaged(unmanaged.files, unmanaged.bytes);
+        return;
+    }
     if (mods.empty()) {
         auto* row = ui::focusRow();
         row->addView(ui::label(ui::icon::browse, 24, ui::accent()));
@@ -119,15 +152,52 @@ void MyModsPage::rebuild() {
             move(id, -1);
             return true;
         });
-        row->registerAction("Remove", brls::BUTTON_X, [this, id](brls::View*) {
+        row->registerAction(mm::Library::isImported(*m) ? "Stop managing" : "Remove", brls::BUTTON_X, [this, id](brls::View*) {
             remove(id);
             return true;
         });
         list_->addView(row);
         if (id == focusedId_ || !focusTarget) focusTarget = row;
     }
+    addUnmanagedRow();
     if (hadFocus && focusTarget) brls::Application::giveFocus(focusTarget);
     showDetails(focusedId_.empty() ? mods.front()->id : focusedId_);
+}
+
+void MyModsPage::showUnmanaged(size_t files, uint64_t bytes) {
+    pane_->clearViews();
+    pane_->addView(ui::label("Files already on SD card", 26, ui::text()));
+    auto* meta = ui::label(std::to_string(files) + " files · " + formatSize(bytes), 16, ui::muted());
+    meta->setMargins(4, 0, 16, 0);
+    pane_->addView(meta);
+    pane_->addView(ui::label(
+        "These mod files were put on the SD card some other way, for example by a randomizer, by copying them by hand, "
+        "or by another mod manager. They're active in the game right now.\n\n"
+        "Press A to import them as one entry in your list. You can then turn them off and on like any other mod. "
+        "Importing keeps a copy in Patchwork's library, so it needs about " + formatSize(bytes) + " of free space.\n\n"
+        "If you leave them alone, Patchwork still protects them: mods you install that replace one of these files "
+        "put it back when you turn the mod off.",
+        16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+}
+
+void MyModsPage::importUnmanaged(size_t files, uint64_t bytes) {
+    auto& st = AppState::get();
+    uint64_t free = st.freeSpace();
+    if (free && bytes + (64ull << 20) > free) {
+        auto* d = new brls::Dialog("Not enough free space to import " + formatSize(bytes) + " of files (" + formatSize(free) + " free).");
+        d->addButton("OK", [] {});
+        d->open();
+        return;
+    }
+    auto* dialog = new brls::Dialog("Import " + std::to_string(files) + " files (" + formatSize(bytes) +
+                                    ") so you can turn them on and off? A copy is kept in Patchwork's library.");
+    dialog->addButton("Cancel", [] {});
+    dialog->addButton("Import", [this] {
+        auto game = AppState::get().game();
+        auto name = std::string("Existing files (") + std::string(mm::gameInfo(game).displayName) + ")";
+        runJob("Importing files…", [game, name](mm::Library& lib) { lib.importUnmanaged(game, name); });
+    });
+    dialog->open();
 }
 
 void MyModsPage::showDetails(const std::string& id) {
@@ -246,6 +316,21 @@ void MyModsPage::move(const std::string& id, int delta) {
 void MyModsPage::remove(const std::string& id) {
     const auto* m = AppState::get().findMod(id);
     if (!m) return;
+    if (mm::Library::isImported(*m)) {
+        // Never delete files Patchwork didn't download: they may not exist anywhere else.
+        if (!m->enabled) {
+            brls::Application::notify("Turn it on first so its files are back on the SD card");
+            return;
+        }
+        auto* dialog = new brls::Dialog("Stop managing " + m->name + "? The files stay on your SD card and keep working; Patchwork just stops tracking them.");
+        dialog->addButton("Cancel", [] {});
+        dialog->addButton("Stop managing", [this, id] {
+            if (focusedId_ == id) focusedId_.clear();
+            runJob("Updating…", [id](mm::Library& lib) { lib.forget(id); });
+        });
+        dialog->open();
+        return;
+    }
     auto* dialog = new brls::Dialog("Remove " + m->name + "? Its files are deleted from the SD card. You can download it again from Browse.");
     dialog->addButton("Cancel", [] {});
     dialog->addButton("Remove", [this, id, name = m->name] {
