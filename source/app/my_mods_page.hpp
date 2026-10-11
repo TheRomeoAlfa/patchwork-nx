@@ -25,6 +25,8 @@ private:
     void toggle(const std::string& id);
     void move(const std::string& id, int delta);
     void remove(const std::string& id);
+    void showUnmanaged(size_t files, uint64_t bytes);
+    void importUnmanaged(size_t files, uint64_t bytes);
 
     std::string focusedId_;
     bool busy_ = false;

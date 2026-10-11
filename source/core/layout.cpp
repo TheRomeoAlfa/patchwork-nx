@@ -18,16 +18,8 @@ const char* packageKindMessage(PackageKind k) {
 
 namespace {
 
-// Title IDs whose LayeredFS folders a mod for `game` may write to. BOTW keeps its
-// DLC content under a separate title.
-std::vector<std::string> allowedTitleIds(Game game) {
-    std::vector<std::string> ids{std::string(gameInfo(game).titleId)};
-    if (game == Game::Botw) ids.emplace_back("01007EF00011F001");
-    return ids;
-}
-
 std::string matchTitleId(const std::string& name, Game game) {
-    for (const auto& id : allowedTitleIds(game))
+    for (const auto& id : titleIdsFor(game))
         if (iequals(name, id)) return id;
     return {};
 }

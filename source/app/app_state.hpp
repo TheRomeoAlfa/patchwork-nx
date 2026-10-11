@@ -45,6 +45,11 @@ struct LibrarySnapshot {
     std::map<mm::Game, std::vector<mm::Conflict>> conflicts;
     std::map<mm::Game, std::vector<mm::PatchOverlap>> overlaps;
     std::set<int64_t> installedGbMods;
+    struct Unmanaged {
+        size_t files = 0;
+        uint64_t bytes = 0;
+    };
+    std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
 };
 
 struct Settings {

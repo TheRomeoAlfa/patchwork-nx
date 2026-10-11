@@ -13,15 +13,18 @@ using mm::gb::ModFile;
 
 // ------------------------------------------------------------------ list cell
 
-class ModCell : public brls::RecyclerCell {
+class ModRow : public brls::Box {
 public:
-    ModCell() {
+    ModRow() {
         setAxis(brls::Axis::ROW);
         setAlignItems(brls::AlignItems::CENTER);
         setFocusable(true);
         setPadding(8, 12, 8, 10);
+        setHeight(74);
         setCornerRadius(4);
         setHighlightCornerRadius(6);
+        setLineBottom(1);
+        setLineColor(ui::line());
 
         thumb = new brls::Image();
         thumb->setDimensions(96, 54);
@@ -48,13 +51,8 @@ public:
     }
 
     void onFocusGained() override {
-        brls::RecyclerCell::onFocusGained();
+        brls::Box::onFocusGained();
         if (onFocus) onFocus(row);
-    }
-
-    void prepareForReuse() override {
-        thumb->clear();
-        modId = 0;
     }
 
     brls::Image* thumb;
@@ -63,24 +61,11 @@ public:
     brls::Label* status;
     int row = -1;
     int64_t modId = 0;
+    bool imageLoaded = false;
     std::function<void(int)> onFocus;
 };
 
 namespace {
-
-class BrowseSource : public brls::RecyclerDataSource {
-public:
-    explicit BrowseSource(BrowsePage* page) : page_(page) {}
-    int numberOfRows(brls::RecyclerFrame*, int) override { return page_->rowCount(); }
-    brls::RecyclerCell* cellForRow(brls::RecyclerFrame* r, brls::IndexPath i) override {
-        return reinterpret_cast<brls::RecyclerCell*>(page_->bindCell(r, static_cast<int>(i.row)));
-    }
-    float heightForRow(brls::RecyclerFrame*, brls::IndexPath) override { return 74; }
-    void didSelectRowAt(brls::RecyclerFrame*, brls::IndexPath i) override { page_->onRowClicked(static_cast<int>(i.row)); }
-
-private:
-    BrowsePage* page_;
-};
 
 const char* sortTitle(mm::gb::Sort s) {
     switch (s) {
@@ -160,10 +145,13 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
 
     auto* header = ui::hbox();
     header->setMargins(0, 6, 10, 6);
+    // The title takes the free space itself; a separate spacer left it measured too narrow.
     title_ = ui::label("", 22, ui::text());
+    title_->setGrow(1);
+    title_->setShrink(1);
     count_ = ui::label("", 15, ui::muted());
+    count_->setMarginLeft(10);
     header->addView(title_);
-    header->addView(ui::grow());
     header->addView(count_);
     left->addView(header);
 
@@ -171,17 +159,14 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     listEmpty_->setVisibility(brls::Visibility::GONE);
     left->addView(listEmpty_);
 
-    recycler_ = new brls::RecyclerFrame();
-    recycler_->setGrow(1);
-    recycler_->estimatedRowHeight = 74;
-    recycler_->registerCell("mod", [this] {
-        auto* c = new ModCell();
-        c->onFocus = [this](int row) { onRowFocused(row); };
-        cells_.insert(c);
-        return c;
-    });
-    recycler_->setDataSource(new BrowseSource(this));
-    left->addView(recycler_);
+    // A plain scrolling list: rows are appended as pages arrive, so loading more never
+    // moves the user's position (Borealis' RecyclerFrame can only reload everything).
+    list_ = ui::vbox();
+    scroll_ = new brls::ScrollingFrame();
+    scroll_->setGrow(1);
+    scroll_->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);  // keep the highlighted mod mid-screen
+    scroll_->setContentView(list_);
+    left->addView(scroll_);
     addView(left);
 
     // Right: preview / install pane
@@ -218,7 +203,7 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
         });
         listEmpty_->addView(row);
         listEmpty_->setVisibility(brls::Visibility::VISIBLE);
-        recycler_->setVisibility(brls::Visibility::GONE);
+        scroll_->setVisibility(brls::Visibility::GONE);
         updateHeader();
         clearPane();
         pane_->addView(ui::label("Find mods by name, author or keyword.", 18, ui::muted(), false));
@@ -237,7 +222,13 @@ BrowsePage::~BrowsePage() {
 brls::View* BrowsePage::getDefaultFocus() {
     if (installing_) return pane_->getDefaultFocus();
     if (listEmpty_->getVisibility() == brls::Visibility::VISIBLE) return listEmpty_->getDefaultFocus();
-    return recycler_->getDefaultFocus();
+    return rowFocus();
+}
+
+brls::View* BrowsePage::rowFocus() {
+    if (rows_.empty()) return scroll_;
+    int row = std::clamp(focusedRow_, 0, static_cast<int>(rows_.size()) - 1);
+    return rows_[row];
 }
 
 void BrowsePage::updateHeader() {
@@ -255,7 +246,10 @@ void BrowsePage::reload() {
     reachedEnd_ = false;
     focusedRow_ = -1;
     updateHeader();
-    recycler_->reloadData();
+    ++generation_;
+    rows_.clear();
+    list_->clearViews();
+    scroll_->setContentOffsetY(0, false);
     loadMore();
 }
 
@@ -295,11 +289,12 @@ void BrowsePage::loadMore() {
             total_ = result.totalCount;
             reachedEnd_ = result.isLast || result.mods.empty();
             bool wasEmpty = items_.empty();
+            size_t firstNew = items_.size();
             for (const auto& m : result.mods)
                 if (!(hideNsfw && m.nsfw)) items_.push_back(m);
             updateHeader();
             bool empty = items_.empty();
-            recycler_->setVisibility(empty ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
+            scroll_->setVisibility(empty ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
             if (empty && search) {
                 listEmpty_->setVisibility(brls::Visibility::VISIBLE);
                 clearPane();
@@ -307,13 +302,13 @@ void BrowsePage::loadMore() {
                 return;
             }
             listEmpty_->setVisibility(empty ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-            recycler_->reloadData();
+            appendRows(firstNew);
             if (wasEmpty && !empty) {
                 showPreview(0);
                 // Only grab focus if it was already inside this page.
                 for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
                     if (v == this) {
-                        brls::Application::giveFocus(recycler_->getDefaultFocus());
+                        brls::Application::giveFocus(rows_[0]);
                         break;
                     }
             }
@@ -338,26 +333,54 @@ void BrowsePage::openSearchKeyboard() {
         "Search mods", "Name, author or keyword", 48, query_);
 }
 
-ModCell* BrowsePage::bindCell(brls::RecyclerFrame* recycler, int row) {
-    auto* cell = static_cast<ModCell*>(recycler->dequeueReusableCell("mod"));
-    const auto& m = items_.at(row);
-    cell->row = row;
-    cell->modId = m.id;
-    cell->name->setText(m.name);
-    cell->meta->setText(m.author + " · " + m.category);
-    bool installed = AppState::get().snapshot().installedGbMods.count(m.id);
-    cell->status->setText(installed ? ui::icon::check : "");
+void BrowsePage::appendRows(size_t from) {
     auto alive = alive_;
-    int64_t id = m.id;
-    AppState::get().loadImage(cell->thumb, m.thumbnailUrl, [alive, cell, id] { return *alive && cell->modId == id; });
-    if (row >= static_cast<int>(items_.size()) - 8) loadMore();
-    return cell;
+    for (size_t i = from; i < items_.size(); ++i) {
+        const auto& m = items_[i];
+        auto* row = new ModRow();
+        row->row = static_cast<int>(i);
+        row->modId = m.id;
+        row->name->setText(m.name);
+        row->meta->setText(m.author + " · " + m.category);
+        row->status->setText(AppState::get().snapshot().installedGbMods.count(m.id) ? ui::icon::check : "");
+        row->onFocus = [this](int r) { onRowFocused(r); };
+        int index = static_cast<int>(i);
+        row->registerClickAction([this, index](brls::View*) {
+            onRowClicked(index);
+            return true;
+        });
+        row->updateActionHint(brls::BUTTON_A, "Install");
+        list_->addView(row);
+        rows_.push_back(row);
+    }
+    updateThumbnails(std::max(focusedRow_, 0));
+}
+
+void BrowsePage::updateThumbnails(int around) {
+    // Keep textures only for rows near the highlighted one; long lists would otherwise
+    // fill the Switch's limited applet memory with thumbnails.
+    auto alive = alive_;
+    for (int i = 0; i < static_cast<int>(rows_.size()); ++i) {
+        auto* row = rows_[i];
+        bool near = i >= around - 12 && i <= around + 20;
+        bool far = i < around - 50 || i > around + 60;
+        if (near && !row->imageLoaded) {
+            row->imageLoaded = true;
+            int64_t id = row->modId;
+            int gen = generation_;
+            AppState::get().loadImage(row->thumb, items_[i].thumbnailUrl, [this, alive, gen, row, id] {
+                return *alive && gen == generation_ && row->imageLoaded && row->modId == id;
+            });
+        } else if (far && row->imageLoaded) {
+            row->imageLoaded = false;
+            row->thumb->clear();
+        }
+    }
 }
 
 void BrowsePage::refreshCells() {
     const auto& installed = AppState::get().snapshot().installedGbMods;
-    for (auto* c : cells_)
-        if (c->modId) c->status->setText(installed.count(c->modId) ? ui::icon::check : "");
+    for (auto* r : rows_) r->status->setText(installed.count(r->modId) ? ui::icon::check : "");
 }
 
 void BrowsePage::onRowFocused(int row) {
@@ -368,6 +391,8 @@ void BrowsePage::onRowFocused(int row) {
     }
     if (installing_ || row == focusedRow_) return;
     focusedRow_ = row;
+    updateThumbnails(row);
+    if (row >= static_cast<int>(items_.size()) - 8) loadMore();
     // Wait for scrolling to settle before fetching details.
     if (previewDelay_) brls::cancelDelay(previewDelay_);
     showPreview(row);
@@ -418,7 +443,7 @@ void BrowsePage::backToPreview() {
     } else {
         clearPane();
     }
-    brls::Application::giveFocus(recycler_->getDefaultFocus());
+    brls::Application::giveFocus(rowFocus());
 }
 
 void BrowsePage::showPreview(int row) {
@@ -440,6 +465,7 @@ void BrowsePage::showPreview(int row) {
 
     auto* titleRow = ui::hbox();
     titleRow->setMarginTop(16);
+    titleRow->setMinHeight(38);
     auto* name = ui::label(summary.name, 26, ui::text());
     name->setShrink(1);
     titleRow->addView(name);
@@ -447,7 +473,7 @@ void BrowsePage::showPreview(int row) {
     titleRow->addView(ui::label(std::string(ui::icon::heart) + " " + formatCount(summary.likes), 16, ui::muted()));
     pane_->addView(titleRow);
     auto* meta = ui::label("by " + summary.author + " · " + summary.category, 16, ui::muted());
-    meta->setMarginTop(4);
+    meta->setMarginTop(6);
     pane_->addView(meta);
 
     auto* body = ui::vbox();

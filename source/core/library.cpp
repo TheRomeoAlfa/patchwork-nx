@@ -180,6 +180,33 @@ void Library::remove(const std::string& id, const ProgressFn& progress) {
     save();
 }
 
+void Library::forget(const std::string& id) {
+    auto* m = findMut(id);
+    if (!m) return;
+    if (!m->enabled) throw std::runtime_error("turn it on first so its files are back on the SD card");
+    auto dir = modDir(*m);
+    for (const auto& t : m->files) {
+        auto it = deployed_.find(t);
+        if (it != deployed_.end() && it->second == id) {
+            deployed_.erase(it);  // stays on the SD card, now unmanaged
+            continue;
+        }
+        // Another mod's file is on top: keep ours as that mod's backup so it comes back later.
+        bool covered = false;
+        for (const auto& [target, owner] : deployed_)
+            if (targetKey(target) == targetKey(t)) covered = true;
+        if (covered) {
+            copyFileCreatingDirs(dir / fs::path(t), dataDir_ / "backup" / fs::path(t));
+            backedUp_[t] = true;
+        }
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    mods_.erase(mods_.begin() + (m - mods_.data()));
+    save();
+    apply();  // nothing to copy, but keeps the deployed map consistent
+}
+
 void Library::renumber(std::vector<ModRecord*> ordered) {
     // `ordered` is highest priority first.
     int p = static_cast<int>(ordered.size()) - 1;
@@ -286,6 +313,100 @@ void Library::apply(const ProgressFn& progress) {
     }
     if (progress) progress(total, total, "");
     save();
+}
+
+namespace {
+
+// Things that live in a title's folder but aren't mod content.
+bool isIgnoredFile(const std::string& name) {
+    return name == "romfs_metadata.bin"  // Atmosphère's LayeredFS cache
+           || name.rfind("._", 0) == 0 || name == ".DS_Store" || name == "Thumbs.db";
+}
+
+}  // namespace
+
+UnmanagedFiles Library::unmanagedFiles(Game game) const {
+    UnmanagedFiles out;
+    std::set<std::string> managed;
+    for (const auto& [t, id] : deployed_) managed.insert(targetKey(t));
+    for (const auto& [t, b] : backedUp_) managed.insert(targetKey(t));  // counted from the backup below
+
+    std::error_code ec;
+    auto contents = sdRoot_ / "atmosphere" / "contents";
+    for (const auto& tid : titleIdsFor(game)) {
+        // The folder may use any casing on a FAT card.
+        for (fs::directory_iterator dir(contents, ec), end; dir != end; dir.increment(ec)) {
+            if (!iequals(dir->path().filename().string(), tid) || !dir->is_directory(ec)) continue;
+            for (fs::recursive_directory_iterator it(dir->path(), ec), e; it != e; it.increment(ec)) {
+                if (!it->is_regular_file(ec) || isIgnoredFile(it->path().filename().string())) continue;
+                auto rel = it->path().lexically_relative(sdRoot_).generic_string();
+                if (managed.count(targetKey(rel))) continue;
+                out.targets.push_back(rel);
+                out.bytes += it->file_size(ec);
+            }
+        }
+    }
+    // Originals we moved aside for a mod still belong to whoever installed them.
+    for (const auto& [t, b] : backedUp_) {
+        auto parts = pathParts(t);
+        if (parts.size() < 3) continue;
+        bool forGame = false;
+        for (const auto& tid : titleIdsFor(game)) forGame |= iequals(parts[2], tid);
+        if (!forGame) continue;
+        out.targets.push_back(t);
+        out.bytes += fs::file_size(dataDir_ / "backup" / fs::path(t), ec);
+    }
+    return out;
+}
+
+const ModRecord& Library::importUnmanaged(Game game, const std::string& name, const ProgressFn& progress) {
+    auto found = unmanagedFiles(game);
+    if (found.targets.empty()) throw std::runtime_error("no unmanaged files to import");
+
+    ModRecord r;
+    r.id = "local-existing-" + std::string(gameInfo(game).key) + "-" + std::to_string(std::time(nullptr));
+    r.game = game;
+    r.name = name;
+    r.sourceFile = "Already on SD card";
+    r.installedAt = static_cast<int64_t>(std::time(nullptr));
+    r.enabled = true;
+    int minPriority = 0;
+    for (const auto& m : mods_)
+        if (m.game == game) minPriority = std::min(minPriority, m.priority);
+    r.priority = mods(game).empty() ? 0 : minPriority - 1;  // below everything Patchwork installed
+
+    auto dir = modDir(r);
+    size_t done = 0;
+    try {
+        for (const auto& t : found.targets) {
+            if (progress) progress(done++, found.targets.size(), t);
+            auto bk = backedUp_.find(t);
+            if (bk != backedUp_.end()) {
+                // A mod sits on top of this file; the original now lives in the library instead.
+                auto bkPath = dataDir_ / "backup" / fs::path(t);
+                copyFileCreatingDirs(bkPath, dir / fs::path(t));
+                std::error_code ec;
+                fs::remove(bkPath, ec);
+                pruneEmptyDirs(bkPath.parent_path(), dataDir_ / "backup");
+                backedUp_.erase(bk);
+            } else {
+                copyFileCreatingDirs(sdRoot_ / fs::path(t), dir / fs::path(t));
+                deployed_[t] = r.id;  // already on the SD card, identical
+            }
+            r.files.push_back(t);
+        }
+    } catch (...) {
+        // Roll back so nothing points at a half-copied library entry.
+        for (auto it = deployed_.begin(); it != deployed_.end();)
+            it = it->second == r.id ? deployed_.erase(it) : std::next(it);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        save();
+        throw;
+    }
+    mods_.push_back(r);
+    save();
+    return *find(r.id);
 }
 
 std::vector<Conflict> Library::conflicts(Game game) const {

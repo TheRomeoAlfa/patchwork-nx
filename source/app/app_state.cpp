@@ -133,6 +133,8 @@ void AppState::publishSnapshot(mm::Library& lib) {
         }
         snap->conflicts[g.game] = lib.conflicts(g.game);
         snap->overlaps[g.game] = lib.patchOverlaps(g.game);
+        auto un = lib.unmanagedFiles(g.game);
+        snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
     }
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);
