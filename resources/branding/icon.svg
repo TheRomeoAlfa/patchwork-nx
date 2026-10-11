@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Patchwork app icon: a quilt of mods, with one new patch being sewn in. -->
+  <rect width="512" height="512" fill="#1b2228"/>
+
+  <!-- empty slot where the new patch goes (top-right) -->
+  <path d="M264 80 H392 A40 40 0 0 1 432 120 V248 H264 Z" fill="none" stroke="#3a4a55" stroke-width="6" stroke-dasharray="16 12"/>
+
+  <!-- placed patches -->
+  <path d="M80 120 A40 40 0 0 1 120 80 H248 V248 H80 Z" fill="#00c3e3"/>
+  <path d="M80 264 H248 V432 H120 A40 40 0 0 1 80 392 Z" fill="#e0b552"/>
+  <path d="M264 264 H432 V392 A40 40 0 0 1 392 432 H264 Z" fill="#147f8f"/>
+
+  <!-- quilting stitches inside each placed patch -->
+  <g fill="none" stroke="#1b2228" stroke-width="7" stroke-linecap="round" stroke-dasharray="1 17" opacity="0.55">
+    <path d="M100 124 A24 24 0 0 1 124 100 H228 V228 H100 Z"/>
+    <path d="M100 284 H228 V412 H124 A24 24 0 0 1 100 388 Z"/>
+    <path d="M284 284 H412 V388 A24 24 0 0 1 388 412 H284 Z"/>
+  </g>
+
+  <!-- the new patch, lifted and tilted on its way in -->
+  <g transform="translate(18 -26) rotate(9 348 164)">
+    <path d="M264 80 H392 A40 40 0 0 1 432 120 V248 H264 Z" fill="#0d1215" opacity="0.45" transform="translate(8 12)"/>
+    <path d="M264 80 H392 A40 40 0 0 1 432 120 V248 H264 Z" fill="#eef3f5"/>
+    <path d="M284 100 H388 A24 24 0 0 1 412 124 V228 H284 Z" fill="none" stroke="#00c3e3" stroke-width="7" stroke-linecap="round" stroke-dasharray="1 17"/>
+  </g>
+
+  <!-- thread from the quilt up to the new patch -->
+  <path d="M250 254 C 262 214, 300 214, 330 196" stroke="#e0b552" stroke-width="7" fill="none" stroke-linecap="round"/>
+</svg>

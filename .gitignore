@@ -1,0 +1,10 @@
+build/
+*.nro
+*.nacp
+*.elf
+*.nso
+*.pfs0
+/out/
+.DS_Store
+build-switch/
+build-desktop/

@@ -1,0 +1,77 @@
+<p align="center"><img src="resources/branding/icon-512.png" width="160" alt="Patchwork icon"></p>
+
+# Patchwork
+
+A mod manager that runs on your modded Switch. Browse mods for *The Legend of Zelda: Breath of the Wild*
+and *Tears of the Kingdom* on [GameBanana](https://gamebanana.com), then download, install, turn on/off,
+reorder and remove them, all from the console.
+
+Patchwork is an unofficial fan project. It isn't affiliated with or endorsed by Nintendo or GameBanana.
+Mods belong to their authors.
+
+## Features
+
+- **Browse and search** GameBanana with a live preview of each mod
+- **Picks the right file** for your installed game version and warns about mismatches
+- **One-press install** from zip, 7z and rar, including archives with several options or nested archives
+- **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
+- **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash
+- **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
+- **Hides NSFW mods** by default (uses GameBanana's own content ratings)
+
+Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods: packages made for
+BCML (`.bnp`) or TKMM (`.tkcl`) are detected and flagged as needing those PC tools.
+
+## Install
+
+1. Download `patchwork.nro` from the releases page.
+2. Copy it to `sd:/switch/patchwork/patchwork.nro`.
+3. Launch it from the Homebrew Menu. For the most memory, open the Homebrew Menu by holding **R** while starting a game.
+
+Requires Atmosphère and an internet connection. Mods are stored in `sd:/switch/patchwork/`.
+
+## Controls
+
+| Button | Browse | My mods |
+|---|---|---|
+| A | Install | Turn on / off |
+| Y | Change sort | |
+| X | Search | Remove |
+| L / R | | Move up / down in load order |
+| ZL / ZR | Switch game | Switch game |
+| + | Quit | Quit |
+
+## Building
+
+Requires [devkitPro](https://devkitpro.org/wiki/Getting_Started) with `switch-dev` and `switch-portlibs`.
+
+```bash
+git clone --recursive https://github.com/<you>/patchwork-nx
+cd patchwork-nx
+export DEVKITPRO=/opt/devkitpro
+cmake -S . -B build-switch -DPLATFORM_SWITCH=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-switch --target patchwork.nro
+```
+
+Desktop build for UI development (macOS/Linux, needs `libarchive` and `curl`):
+
+```bash
+cmake -S . -B build-desktop -DPLATFORM_DESKTOP=ON
+cmake --build build-desktop
+cd build-desktop && MM_SD_ROOT=/tmp/fake-sd MM_TOTK_VERSION=1.2.1 ./patchwork
+```
+
+Core logic tests (no UI):
+
+```bash
+cmake -S . -B build && cmake --build build && ./build/mmtests
+```
+
+## Layout
+
+- `source/core/`: portable logic: GameBanana API, archive extraction, layout detection, install/enable/priority engine
+- `source/app/`: the Borealis UI
+- `tools/mmcli.cpp`: desktop command-line driver for the core
+- `tests/`: unit tests
+
+Built with [Borealis](https://github.com/xfangfang/borealis), libcurl, libarchive and nlohmann/json.

@@ -1,0 +1,922 @@
+{
+    "_aMetadata": {
+        "_nRecordCount": 1681,
+        "_bIsComplete": false,
+        "_nPerpage": 5
+    },
+    "_aRecords": [
+        {
+            "_idRow": 480138,
+            "_sModelName": "Mod",
+            "_sSingularTitle": "Mod",
+            "_sIconClasses": "SubmissionType Mod",
+            "_sName": "UltraCam (Resolution, FPS, FreeCam)(MANY FEATURES)",
+            "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/480138",
+            "_tsDateAdded": 1700501777,
+            "_tsDateModified": 1735223841,
+            "_bHasFiles": true,
+            "_aTags": [],
+            "_aPreviewMedia": {
+                "_aImages": [
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "65f22151ad0d3.jpg",
+                        "_sFile220": "220-90_65f22151ad0d3.jpg",
+                        "_hFile220": 124,
+                        "_wFile220": 220,
+                        "_sFile530": "530-90_65f22151ad0d3.jpg",
+                        "_hFile530": 298,
+                        "_wFile530": 530,
+                        "_sFile100": "100-90_65f22151ad0d3.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "(NEW)",
+                        "_sFile": "65f221a3b56aa.jpg",
+                        "_sFile100": "100-90_65f221a3b56aa.jpg",
+                        "_hFile100": 69,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "65edf9885b72e.jpg",
+                        "_sFile100": "100-90_65edf9885b72e.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "UC BEYOND",
+                        "_sFile": "65edf8dce8a2a.jpg",
+                        "_sFile100": "100-90_65edf8dce8a2a.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "65edfa30dff66.jpg",
+                        "_sFile100": "100-90_65edfa30dff66.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Purah",
+                        "_sFile": "655b63355b722.jpg",
+                        "_sFile100": "100-90_655b63355b722.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Link On The Horizon",
+                        "_sFile": "655b63dab54cf.jpg",
+                        "_sFile100": "100-90_655b63dab54cf.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Hyrule Castle",
+                        "_sFile": "655b63c5becb3.jpg",
+                        "_sFile100": "100-90_655b63c5becb3.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Beautiful Landscape",
+                        "_sFile": "655b62cce92f9.jpg",
+                        "_sFile100": "100-90_655b62cce92f9.jpg",
+                        "_hFile100": 37,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Beautiful Landscape 2",
+                        "_sFile": "655b62db7b614.jpg",
+                        "_sFile100": "100-90_655b62db7b614.jpg",
+                        "_hFile100": 31,
+                        "_wFile100": 100
+                    }
+                ]
+            },
+            "_aSubmitter": {
+                "_idRow": 2745192,
+                "_sName": "MaxLastBreath",
+                "_bIsOnline": false,
+                "_bHasRipe": false,
+                "_sProfileUrl": "https:\/\/gamebanana.com\/members\/2745192",
+                "_sAvatarUrl": "https:\/\/images.gamebanana.com\/static\/img\/defaults\/avatar.gif"
+            },
+            "_aGame": {
+                "_idRow": 7617,
+                "_sName": "The Legend of Zelda: Tears of the Kingdom",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/games\/7617",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/games\/6320d0fcae0d2.png"
+            },
+            "_aRootCategory": {
+                "_sName": "Visual Overhaul",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22760",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/646d39a892697.png"
+            },
+            "_sVersion": "2.6.1",
+            "_tsDateUpdated": 1735223742,
+            "_bIsObsolete": false,
+            "_sInitialVisibility": "show",
+            "_bHasContentRatings": false,
+            "_nLikeCount": 159,
+            "_nPostCount": 178,
+            "_bWasFeatured": true,
+            "_nViewCount": 298934,
+            "_bIsOwnedByAccessor": false
+        },
+        {
+            "_idRow": 443336,
+            "_sModelName": "Mod",
+            "_sSingularTitle": "Mod",
+            "_sIconClasses": "SubmissionType Mod",
+            "_sName": "Xbox UI v2 (+ PE, western, 60fpsfix)",
+            "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/443336",
+            "_tsDateAdded": 1683981190,
+            "_tsDateModified": 1699784937,
+            "_bHasFiles": true,
+            "_aTags": [
+                "Game Version: Version 1.1.0",
+                "Game Version: Version 1.1.1",
+                "Game Version: Version 1.1.2",
+                "Game Version: Version 1.2.0",
+                "Game Version: Version 1.2.1"
+            ],
+            "_aPreviewMedia": {
+                "_aImages": [
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "pro controller with xbox skin",
+                        "_sFile": "646225ee3d0d8.jpg",
+                        "_sFile220": "220-90_646225ee3d0d8.jpg",
+                        "_hFile220": 124,
+                        "_wFile220": 220,
+                        "_sFile530": "530-90_646225ee3d0d8.jpg",
+                        "_hFile530": 298,
+                        "_wFile530": 530,
+                        "_sFile100": "100-90_646225ee3d0d8.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "detail of special controls",
+                        "_sFile": "646d504b5b635.jpg",
+                        "_sFile100": "100-90_646d504b5b635.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "small controller for post",
+                        "_sFile": "64665ea5122ae.jpg",
+                        "_sFile100": "100-90_64665ea5122ae.jpg",
+                        "_hFile100": 54,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "special action screens",
+                        "_sFile": "646d4e6c2541a.jpg",
+                        "_sFile100": "100-90_646d4e6c2541a.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "all controllers are tweaked",
+                        "_sFile": "645f820406922.jpg",
+                        "_sFile100": "100-90_645f820406922.jpg",
+                        "_hFile100": 57,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "working radial menus",
+                        "_sFile": "646d4ec4df775.jpg",
+                        "_sFile100": "100-90_646d4ec4df775.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "646d4f4250467.jpg",
+                        "_sFile100": "100-90_646d4f4250467.jpg",
+                        "_hFile100": 31,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "perspective controllers also tweaked",
+                        "_sFile": "64665bcd0651c.jpg",
+                        "_sFile100": "100-90_64665bcd0651c.jpg",
+                        "_hFile100": 54,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "western layout",
+                        "_sFile": "645feabf1ccb5.jpg",
+                        "_sFile100": "100-90_645feabf1ccb5.jpg",
+                        "_hFile100": 58,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "comparison of different layouts",
+                        "_sFile": "646225ed315c8.jpg",
+                        "_sFile100": "100-90_646225ed315c8.jpg",
+                        "_hFile100": 26,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Includes greyed out buttons",
+                        "_sFile": "645f820261423.jpg",
+                        "_sFile100": "100-90_645f820261423.jpg",
+                        "_hFile100": 59,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "proper orientation for radial button highlights",
+                        "_sFile": "64665f32838dd.jpg",
+                        "_sFile100": "100-90_64665f32838dd.jpg",
+                        "_hFile100": 44,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "646d01b20b10f.jpg",
+                        "_sFile100": "100-90_646d01b20b10f.jpg",
+                        "_hFile100": 33,
+                        "_wFile100": 100
+                    }
+                ]
+            },
+            "_aSubmitter": {
+                "_idRow": 2637253,
+                "_sName": "balinwon",
+                "_bIsOnline": false,
+                "_bHasRipe": false,
+                "_sProfileUrl": "https:\/\/gamebanana.com\/members\/2637253",
+                "_sAvatarUrl": "https:\/\/images.gamebanana.com\/static\/img\/defaults\/avatar.gif"
+            },
+            "_aGame": {
+                "_idRow": 7617,
+                "_sName": "The Legend of Zelda: Tears of the Kingdom",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/games\/7617",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/games\/6320d0fcae0d2.png"
+            },
+            "_aRootCategory": {
+                "_sName": "UI",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22561",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/646770f21e004.png"
+            },
+            "_sVersion": "0.8.2",
+            "_tsDateUpdated": 1686647312,
+            "_bIsObsolete": false,
+            "_sInitialVisibility": "show",
+            "_bHasContentRatings": false,
+            "_nLikeCount": 68,
+            "_nPostCount": 173,
+            "_bWasFeatured": true,
+            "_nViewCount": 206108,
+            "_bIsOwnedByAccessor": false
+        },
+        {
+            "_idRow": 446995,
+            "_sModelName": "Mod",
+            "_sSingularTitle": "Mod",
+            "_sIconClasses": "SubmissionType Mod",
+            "_sName": "Serfrost's Defogger (Native)",
+            "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/446995",
+            "_tsDateAdded": 1685501488,
+            "_tsDateModified": 1750791322,
+            "_bHasFiles": true,
+            "_aTags": [
+                "\u2e24 Console and Emulators \u2e23",
+                "\u2e24\u3000\u3000\u30001.0.0 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.1.0 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.1.1 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.1.2 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.2.0 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.2.1 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.4.0 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u3000\u3000\u30001.4.1 [ \u2714 ]\u3000\u3000\u3000\u2e23",
+                "\u2e24\u30001.4.0 Add-on [ \ufffd ]\u3000\u2e23",
+                "\u2e24\u30001.4.1 Add-on [ \ufffd ]\u3000\u2e23"
+            ],
+            "_aPreviewMedia": {
+                "_aImages": [
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Bonus Dark Title Screen variant.",
+                        "_sFile": "6480e18e1737c.jpg",
+                        "_sFile220": "220-90_6480e18e1737c.jpg",
+                        "_hFile220": 124,
+                        "_wFile220": 220,
+                        "_sFile530": "530-90_6480e18e1737c.jpg",
+                        "_hFile530": 298,
+                        "_wFile530": 530,
+                        "_sFile100": "100-90_6480e18e1737c.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Sunny, Vanilla",
+                        "_sFile": "64793454e4f10.jpg",
+                        "_sFile100": "100-90_64793454e4f10.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Sunny, Defogger",
+                        "_sFile": "6479345b60e17.jpg",
+                        "_sFile100": "100-90_6479345b60e17.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Cloudy, Vanilla",
+                        "_sFile": "64793460f1bfe.jpg",
+                        "_sFile100": "100-90_64793460f1bfe.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Cloudy, Defogger",
+                        "_sFile": "6479346665165.jpg",
+                        "_sFile100": "100-90_6479346665165.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Storming, Vanilla",
+                        "_sFile": "6479347c8c5bf.jpg",
+                        "_sFile100": "100-90_6479347c8c5bf.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Storming, Defogger",
+                        "_sFile": "647934811c94d.jpg",
+                        "_sFile100": "100-90_647934811c94d.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Sky Island, Vanilla",
+                        "_sFile": "647934bd1802f.jpg",
+                        "_sFile100": "100-90_647934bd1802f.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Sky Island, Defogger",
+                        "_sFile": "647934c176991.jpg",
+                        "_sFile100": "100-90_647934c176991.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Cave, Vanilla",
+                        "_sFile": "647934d1e3899.jpg",
+                        "_sFile100": "100-90_647934d1e3899.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Cave, Defogger",
+                        "_sFile": "6479aed57b7d9.jpg",
+                        "_sFile100": "100-90_6479aed57b7d9.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Shrine, Vanilla",
+                        "_sFile": "647934e5b43db.jpg",
+                        "_sFile100": "100-90_647934e5b43db.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Shrine, Defogger",
+                        "_sFile": "6479aebda1601.jpg",
+                        "_sFile100": "100-90_6479aebda1601.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Depths, Defogger",
+                        "_sFile": "647934f27b624.jpg",
+                        "_sFile100": "100-90_647934f27b624.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Faron Jungle, Vanilla",
+                        "_sFile": "647934f6951a6.jpg",
+                        "_sFile100": "100-90_647934f6951a6.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Faron Jungle, Defogger",
+                        "_sFile": "647934fa8e070.jpg",
+                        "_sFile100": "100-90_647934fa8e070.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Hebra, Vanilla",
+                        "_sFile": "647934fe602b3.jpg",
+                        "_sFile100": "100-90_647934fe602b3.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Hebra, Defogger",
+                        "_sFile": "64793501c58e2.jpg",
+                        "_sFile100": "100-90_64793501c58e2.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Desert Day, Vanilla",
+                        "_sFile": "647935060b694.jpg",
+                        "_sFile100": "100-90_647935060b694.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Desert Day, Defogger",
+                        "_sFile": "6479350a2aa61.jpg",
+                        "_sFile100": "100-90_6479350a2aa61.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Desert Night, Vanilla",
+                        "_sFile": "6479350dd25d4.jpg",
+                        "_sFile100": "100-90_6479350dd25d4.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Desert Night, Defogger",
+                        "_sFile": "647935111a949.jpg",
+                        "_sFile100": "100-90_647935111a949.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Domain, Vanilla",
+                        "_sFile": "64793514a72f1.jpg",
+                        "_sFile100": "100-90_64793514a72f1.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Domain, Defogger",
+                        "_sFile": "647935182c9f5.jpg",
+                        "_sFile100": "100-90_647935182c9f5.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Goron, Vanilla",
+                        "_sFile": "6479351b5d409.jpg",
+                        "_sFile100": "100-90_6479351b5d409.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Goron, Defogger",
+                        "_sFile": "6479351ef3345.jpg",
+                        "_sFile100": "100-90_6479351ef3345.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Forest, Vanilla",
+                        "_sFile": "64793522673f8.jpg",
+                        "_sFile100": "100-90_64793522673f8.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Forest, Defogger",
+                        "_sFile": "64793525e16fc.jpg",
+                        "_sFile100": "100-90_64793525e16fc.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Gerudo Story Area, Vanilla",
+                        "_sFile": "647bd790ab82b.jpg",
+                        "_sFile100": "100-90_647bd790ab82b.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Gerudo Story Area, Defogger",
+                        "_sFile": "647bd796715be.jpg",
+                        "_sFile100": "100-90_647bd796715be.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Castle Pit, Vanilla",
+                        "_sFile": "6480dcc298d29.jpg",
+                        "_sFile100": "100-90_6480dcc298d29.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Castle Pit, Defogger",
+                        "_sFile": "6480dcc7359b6.jpg",
+                        "_sFile100": "100-90_6480dcc7359b6.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Post-Intro Area, Vanilla",
+                        "_sFile": "6480dccd2d688.jpg",
+                        "_sFile100": "100-90_6480dccd2d688.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Restored Post-Intro Area, Defogger",
+                        "_sFile": "6480dcd086a7e.jpg",
+                        "_sFile100": "100-90_6480dcd086a7e.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Indoor Fog, Vanilla",
+                        "_sFile": "6480dcd5bfa5d.jpg",
+                        "_sFile100": "100-90_6480dcd5bfa5d.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Indoor Fog, Interior Add-on",
+                        "_sFile": "6480dcd96140f.jpg",
+                        "_sFile100": "100-90_6480dcd96140f.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    }
+                ]
+            },
+            "_aSubmitter": {
+                "_idRow": 1779527,
+                "_sName": "Serfrost",
+                "_bIsOnline": false,
+                "_bHasRipe": false,
+                "_sProfileUrl": "https:\/\/gamebanana.com\/members\/1779527",
+                "_sAvatarUrl": "https:\/\/images.gamebanana.com\/img\/av\/6019583df31e8.png",
+                "_sHdAvatarUrl": "https:\/\/images.gamebanana.com\/img\/av\/6859d312a2fa0.png",
+                "_sUpicUrl": "https:\/\/images.gamebanana.com\/img\/upic\/64868c807b0af.png",
+                "_aSubjectShaper": {
+                    "_sBorderStyle": "Stroke",
+                    "_sFont": "Arial Black",
+                    "_sTextColor": "#40B886",
+                    "_sTextHoverColor": "#267355",
+                    "_sBorderColor": "#21727F",
+                    "_sBorderHoverColor": "#37B0C2"
+                },
+                "_sSubjectShaperCssCode": "font-family:'Arial Black';color:#40B886;"
+            },
+            "_aGame": {
+                "_idRow": 7617,
+                "_sName": "The Legend of Zelda: Tears of the Kingdom",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/games\/7617",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/games\/6320d0fcae0d2.png"
+            },
+            "_aRootCategory": {
+                "_sName": "Visual Overhaul",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22760",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/646d39a892697.png"
+            },
+            "_sVersion": "\u221e",
+            "_tsDateUpdated": 1750707960,
+            "_bIsObsolete": false,
+            "_sInitialVisibility": "show",
+            "_bHasContentRatings": false,
+            "_nLikeCount": 224,
+            "_nPostCount": 164,
+            "_bWasFeatured": true,
+            "_nViewCount": 237598,
+            "_bIsOwnedByAccessor": false
+        },
+        {
+            "_idRow": 537404,
+            "_sModelName": "Mod",
+            "_sSingularTitle": "Mod",
+            "_sIconClasses": "SubmissionType Mod",
+            "_sName": "Challenge Mode Complete Version",
+            "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/537404",
+            "_tsDateAdded": 1724443171,
+            "_tsDateModified": 1790941485,
+            "_bHasFiles": true,
+            "_aTags": [
+                "Game Version (no TKMM): 1.4.2",
+                "Game Versions (TKMM): 1.1.0 to 1.4.3"
+            ],
+            "_aPreviewMedia": {
+                "_aImages": [
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Tears of the Kingdom Challenge Mode",
+                        "_sFile": "66c8e6ae9df89.jpg",
+                        "_sFile220": "220-90_66c8e6ae9df89.jpg",
+                        "_hFile220": 124,
+                        "_wFile220": 220,
+                        "_sFile530": "530-90_66c8e6ae9df89.jpg",
+                        "_hFile530": 298,
+                        "_wFile530": 530,
+                        "_sFile100": "100-90_66c8e6ae9df89.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode Golden Lynel",
+                        "_sFile": "66c8e6b80cab3.jpg",
+                        "_sFile100": "100-90_66c8e6b80cab3.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode Golden Horriblins",
+                        "_sFile": "66c8e6bf184ee.jpg",
+                        "_sFile100": "100-90_66c8e6bf184ee.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode Golden Lizalfos",
+                        "_sFile": "66c8e8be36028.jpg",
+                        "_sFile100": "100-90_66c8e8be36028.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode Golden Boss Bokoblin",
+                        "_sFile": "66c8e6d3a33cd.jpg",
+                        "_sFile100": "100-90_66c8e6d3a33cd.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode enemy camp",
+                        "_sFile": "66c8e6e28d703.jpg",
+                        "_sFile100": "100-90_66c8e6e28d703.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sCaption": "Challenge Mode Golden Lynel",
+                        "_sFile": "66c8e8d10b8eb.jpg",
+                        "_sFile100": "100-90_66c8e8d10b8eb.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "66c8ea17e1cd0.jpg",
+                        "_sFile100": "100-90_66c8ea17e1cd0.jpg",
+                        "_hFile100": 56,
+                        "_wFile100": 100
+                    }
+                ]
+            },
+            "_aSubmitter": {
+                "_idRow": 1771411,
+                "_sName": "Echocolat",
+                "_bIsOnline": false,
+                "_bHasRipe": false,
+                "_sProfileUrl": "https:\/\/gamebanana.com\/members\/1771411",
+                "_sAvatarUrl": "https:\/\/images.gamebanana.com\/img\/av\/6763f9c7ec283.jpg",
+                "_sHdAvatarUrl": "https:\/\/images.gamebanana.com\/img\/av\/6763f9e0e8f3c.jpg"
+            },
+            "_aGame": {
+                "_idRow": 7617,
+                "_sName": "The Legend of Zelda: Tears of the Kingdom",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/games\/7617",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/games\/6320d0fcae0d2.png"
+            },
+            "_aRootCategory": {
+                "_sName": "Gameplay",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22865",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/64682971f139e.png"
+            },
+            "_sVersion": "1.8.0",
+            "_tsDateUpdated": 1779628124,
+            "_bIsObsolete": false,
+            "_sInitialVisibility": "show",
+            "_bHasContentRatings": false,
+            "_nLikeCount": 179,
+            "_nPostCount": 475,
+            "_bWasFeatured": true,
+            "_nViewCount": 277389,
+            "_bIsOwnedByAccessor": false
+        },
+        {
+            "_idRow": 443924,
+            "_sModelName": "Mod",
+            "_sSingularTitle": "Mod",
+            "_sIconClasses": "SubmissionType Mod",
+            "_sName": "Unbreakable Equipment",
+            "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/443924",
+            "_tsDateAdded": 1684246488,
+            "_tsDateModified": 1750603626,
+            "_bHasFiles": true,
+            "_aTags": [
+                "Game Version: Version 1.0.0",
+                "Game Version: Version 1.1.0",
+                "Game Version: Version 1.1.1",
+                "Game Version: Version 1.2.0",
+                "Game Version: Version 1.2.1",
+                "Game Version: Version 1.4.1"
+            ],
+            "_aPreviewMedia": {
+                "_aImages": [
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "64638f4b47e5e.jpg",
+                        "_sFile220": "220-90_64638f4b47e5e.jpg",
+                        "_hFile220": 232,
+                        "_wFile220": 220,
+                        "_sFile530": "530-90_64638f4b47e5e.jpg",
+                        "_hFile530": 558,
+                        "_wFile530": 530,
+                        "_sFile100": "100-90_64638f4b47e5e.jpg",
+                        "_hFile100": 105,
+                        "_wFile100": 100
+                    },
+                    {
+                        "_sType": "screenshot",
+                        "_sBaseUrl": "https:\/\/images.gamebanana.com\/img\/ss\/mods",
+                        "_sFile": "64638f4a939fa.jpg",
+                        "_sFile100": "100-90_64638f4a939fa.jpg",
+                        "_hFile100": 25,
+                        "_wFile100": 100
+                    }
+                ]
+            },
+            "_aSubmitter": {
+                "_idRow": 1637912,
+                "_sName": "HylianLZ",
+                "_bIsOnline": false,
+                "_bHasRipe": false,
+                "_sProfileUrl": "https:\/\/gamebanana.com\/members\/1637912",
+                "_sAvatarUrl": "https:\/\/images.gamebanana.com\/img\/av\/5cf07d0e6b27c.png"
+            },
+            "_aGame": {
+                "_idRow": 7617,
+                "_sName": "The Legend of Zelda: Tears of the Kingdom",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/games\/7617",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/games\/6320d0fcae0d2.png"
+            },
+            "_aRootCategory": {
+                "_sName": "Effects",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22560",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/6467714a12252.png"
+            },
+            "_aSubCategory": {
+                "_sName": "Weapons & Shields",
+                "_sProfileUrl": "https:\/\/gamebanana.com\/mods\/cats\/22669",
+                "_sIconUrl": "https:\/\/images.gamebanana.com\/img\/ico\/ModCategory\/6467733742431.png"
+            },
+            "_sVersion": "1.4.1",
+            "_tsDateUpdated": 1750603214,
+            "_bIsObsolete": false,
+            "_sInitialVisibility": "show",
+            "_bHasContentRatings": false,
+            "_nLikeCount": 131,
+            "_nPostCount": 228,
+            "_bWasFeatured": true,
+            "_nViewCount": 212728,
+            "_bIsOwnedByAccessor": false
+        }
+    ]
+}
