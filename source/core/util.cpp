@@ -1,0 +1,122 @@
+#include "util.hpp"
+
+#include <cctype>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+
+namespace mm {
+
+bool iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
+
+std::string toLower(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+std::string toUpper(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return out;
+}
+
+bool isHex(std::string_view s) {
+    if (s.empty()) return false;
+    for (char c : s)
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    return true;
+}
+
+bool endsWithI(std::string_view s, std::string_view suffix) {
+    return s.size() >= suffix.size() && iequals(s.substr(s.size() - suffix.size()), suffix);
+}
+
+std::string slugify(std::string_view s, size_t maxLen) {
+    std::string out;
+    bool lastDash = false;
+    for (char c : s) {
+        auto uc = static_cast<unsigned char>(c);
+        if (std::isalnum(uc) || c == '_' || c == '.') {
+            out += c;
+            lastDash = false;
+        } else if (!lastDash && !out.empty()) {
+            out += '-';
+            lastDash = true;
+        }
+        if (out.size() >= maxLen) break;
+    }
+    while (!out.empty() && (out.back() == '-' || out.back() == '.')) out.pop_back();
+    return out.empty() ? "mod" : out;
+}
+
+std::vector<std::string> pathParts(const fs::path& p) {
+    std::vector<std::string> parts;
+    for (const auto& part : p) {
+        auto s = part.generic_string();
+        if (!s.empty() && s != "/" && s != ".") parts.push_back(s);
+    }
+    return parts;
+}
+
+bool isSafeRelativePath(std::string_view p) {
+    if (p.empty() || p[0] == '/' || p[0] == '\\') return false;
+    if (p.find(':') != std::string_view::npos) return false;  // "C:" or "sdmc:"
+    std::string norm(p);
+    for (auto& c : norm)
+        if (c == '\\') c = '/';
+    std::stringstream ss(norm);
+    std::string part;
+    while (std::getline(ss, part, '/'))
+        if (part == "..") return false;
+    return true;
+}
+
+void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt) {
+    std::error_code ec;
+    auto cur = dir;
+    auto stop = stopAt.lexically_normal();
+    while (!cur.empty() && cur.lexically_normal() != stop) {
+        if (!fs::is_directory(cur, ec) || !fs::is_empty(cur, ec)) break;
+        fs::remove(cur, ec);
+        if (ec) break;
+        cur = cur.parent_path();
+    }
+}
+
+void copyFileCreatingDirs(const fs::path& from, const fs::path& to) {
+    fs::create_directories(to.parent_path());
+    fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+}
+
+std::string readFile(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot open " + p.string());
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+void writeFileAtomic(const fs::path& p, std::string_view data) {
+    fs::create_directories(p.parent_path());
+    auto tmp = p;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot write " + tmp.string());
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+        if (!out) throw std::runtime_error("write failed " + tmp.string());
+    }
+    // FAT32 rename does not replace an existing file on every platform; remove first.
+    std::error_code ec;
+    fs::remove(p, ec);
+    fs::rename(tmp, p);
+}
+
+}  // namespace mm

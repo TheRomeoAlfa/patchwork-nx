@@ -1,0 +1,126 @@
+#pragma once
+
+#include <borealis.hpp>
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "gamebanana.hpp"
+#include "library.hpp"
+
+namespace app {
+
+// Fixed set of threads draining a queue of jobs.
+class WorkQueue {
+public:
+    explicit WorkQueue(int threads);
+    ~WorkQueue();
+    void post(std::function<void()> job);
+    bool idle() const { return active_ == 0; }
+
+private:
+    std::vector<std::thread> threads_;
+    std::deque<std::function<void()>> jobs_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::atomic<int> active_{0};
+    bool stop_ = false;
+};
+
+// Copy of the library state for the UI thread; the real Library is only touched by
+// the file worker so long installs never block drawing.
+struct LibrarySnapshot {
+    std::vector<mm::ModRecord> mods;  // all games, highest priority first within a game
+    std::map<mm::Game, std::vector<mm::Conflict>> conflicts;
+    std::map<mm::Game, std::vector<mm::PatchOverlap>> overlaps;
+    std::set<int64_t> installedGbMods;
+};
+
+struct Settings {
+    bool hideNsfw = true;  // hide mods GameBanana treats as NSFW
+};
+
+class AppState {
+public:
+    static AppState& get();
+
+    void init();
+    void shutdown();
+
+    // ---- current game
+    mm::Game game() const { return game_; }
+    void setGame(mm::Game g);
+    brls::VoidEvent* gameChanged() { return &gameChanged_; }
+    const std::string& gameVersion(mm::Game g) const { return gameVersions_.at(g); }
+
+    // ---- network (runs on a small thread pool; callbacks must hop back with brls::sync)
+    mm::gb::Client& gamebanana() { return *gb_; }
+    mm::HttpClient& http() { return *http_; }
+    void runNetwork(std::function<void()> job) { net_.post(std::move(job)); }
+
+    // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
+    void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
+    bool fileJobRunning() const { return fileJobs_ > 0; }
+    const LibrarySnapshot& snapshot() const { return snapshot_; }
+    brls::VoidEvent* libraryChanged() { return &libraryChanged_; }
+    std::vector<const mm::ModRecord*> mods(mm::Game g) const;
+    const mm::ModRecord* findMod(const std::string& id) const;
+
+    // ---- caches (UI thread only)
+    std::optional<mm::gb::ModDetails> cachedDetails(int64_t modId) const;
+    void cacheDetails(const mm::gb::ModDetails& d);
+    // Load an image URL into `image` unless `stillWanted` says the view moved on.
+    void loadImage(brls::Image* image, const std::string& url, std::function<bool()> stillWanted);
+
+    // ---- settings
+    Settings& settings() { return settings_; }
+    void saveSettings();
+
+    const mm::fs::path& dataDir() const { return dataDir_; }
+    mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
+    mm::fs::path workDir() const { return dataDir_ / "work"; }
+    uint64_t freeSpace() const;
+
+private:
+    AppState();
+    void publishSnapshot(mm::Library& lib);
+
+    mm::Game game_ = mm::Game::Totk;
+    std::map<mm::Game, std::string> gameVersions_;
+    mm::fs::path dataDir_;
+    std::unique_ptr<mm::HttpClient> http_;
+    std::unique_ptr<mm::gb::Client> gb_;
+    std::unique_ptr<mm::Library> library_;
+    LibrarySnapshot snapshot_;
+    Settings settings_;
+
+    WorkQueue net_{3};
+    WorkQueue files_{1};
+    std::atomic<int> fileJobs_{0};
+
+    brls::VoidEvent gameChanged_;
+    brls::VoidEvent libraryChanged_;
+
+    std::map<int64_t, mm::gb::ModDetails> details_;
+    // Small LRU of downloaded image bytes keyed by URL.
+    std::list<std::pair<std::string, std::shared_ptr<std::string>>> images_;
+    std::set<std::string> imagesInFlight_;
+};
+
+// Text helpers shared by the views.
+std::string formatSize(uint64_t bytes);
+std::string formatCount(int64_t n);
+std::string stripHtml(const std::string& html, size_t maxLen = 600);
+
+}  // namespace app
