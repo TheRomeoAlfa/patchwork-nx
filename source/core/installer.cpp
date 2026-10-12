@@ -1,13 +1,14 @@
 #include "installer.hpp"
 
 #include <map>
+#include <stdexcept>
 
 namespace mm {
 
 PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir, Game game, const std::string& modSlug,
                                const ExtractProgressFn& progress) {
-    std::error_code ec;
-    fs::remove_all(workDir, ec);
+    std::string err;
+    if (!removeTree(workDir, &err)) throw std::runtime_error("couldn't clear the unpack folder: " + err);
     PreparedArchive p{workDir, {}};
     // A .bnp is a 7z with BCML's own layout; don't bother extracting it.
     if (endsWithI(archive.filename().string(), ".bnp")) {

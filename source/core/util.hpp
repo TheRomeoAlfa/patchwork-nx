@@ -24,6 +24,12 @@ std::vector<std::string> pathParts(const fs::path& p);
 // True if a relative path from an archive is safe to extract (no "..", not absolute).
 bool isSafeRelativePath(std::string_view p);
 
+// Delete a file or directory tree. Collects every entry first and deletes afterwards:
+// std::filesystem::remove_all deletes while it is still reading a directory, which the
+// Switch's SD card driver reports as an I/O error. Returns false (and the first error)
+// if anything is left behind. A missing path counts as success.
+bool removeTree(const fs::path& p, std::string* error = nullptr);
+
 // Remove empty directories walking upward from `dir` until (not including) `stopAt`.
 void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt);
 

@@ -84,7 +84,11 @@ void AppState::init() {
         for (const auto& g : mm::kGames)
             if (!gameVersions_[g.game].empty()) game_ = g.game;
 
-    runFileJob([](mm::Library& lib) { lib.load(); }, [](const std::string& err) {
+    auto staleWork = workDir();
+    runFileJob([staleWork](mm::Library& lib) {
+        mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
+        lib.load();
+    }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });
 }
@@ -194,6 +198,101 @@ void AppState::loadImage(brls::Image* image, const std::string& url, std::functi
 }
 
 uint64_t AppState::freeSpace() const { return platform::freeSpaceBytes(); }
+
+// ------------------------------------------------------------------ pending installs
+
+mm::fs::path AppState::archivePathFor(const mm::gb::ModFile& f) const {
+    // slugify keeps the extension, which prepareArchive checks for .bnp/.tkcl.
+    return downloadsDir() / (std::to_string(f.id) + "-" + mm::slugify(f.filename, 80));
+}
+
+bool AppState::isDownloaded(const mm::gb::ModFile& f) const {
+    std::error_code ec;
+    auto size = mm::fs::file_size(archivePathFor(f), ec);
+    return !ec && size > 0 && (f.size <= 0 || static_cast<int64_t>(size) == f.size);
+}
+
+namespace {
+
+json fileToJson(const mm::gb::ModFile& f) {
+    return {{"id", f.id}, {"filename", f.filename}, {"size", f.size}, {"downloadUrl", f.downloadUrl},
+            {"md5", f.md5}, {"version", f.version}, {"description", f.description}, {"dateAdded", f.dateAdded}};
+}
+
+mm::gb::ModFile fileFromJson(const json& j) {
+    mm::gb::ModFile f;
+    f.id = j.value("id", int64_t{0});
+    f.filename = j.value("filename", "");
+    f.size = j.value("size", int64_t{0});
+    f.downloadUrl = j.value("downloadUrl", "");
+    f.md5 = j.value("md5", "");
+    f.version = j.value("version", "");
+    f.description = j.value("description", "");
+    f.dateAdded = j.value("dateAdded", int64_t{0});
+    return f;
+}
+
+}  // namespace
+
+void AppState::savePending(const PendingInstall& p) const {
+    const auto& d = p.details;
+    json j{{"game", std::string(mm::gameInfo(p.game).key)},
+           {"modId", d.summary.id},
+           {"name", d.summary.name},
+           {"author", d.summary.author},
+           {"category", d.summary.category},
+           {"thumbnailUrl", d.summary.thumbnailUrl},
+           {"profileUrl", d.summary.profileUrl},
+           {"version", d.version},
+           {"descriptionHtml", d.descriptionHtml.substr(0, 6000)},
+           {"file", fileToJson(p.file)}};
+    mm::writeFileAtomic(downloadsDir() / (std::to_string(p.file.id) + ".json"), j.dump(1));
+}
+
+std::vector<PendingInstall> AppState::pendingInstalls(mm::Game g) const {
+    std::vector<PendingInstall> out;
+    std::error_code ec;
+    for (mm::fs::directory_iterator it(downloadsDir(), ec), end; it != end; it.increment(ec)) {
+        if (it->path().extension() != ".json") continue;
+        try {
+            auto j = json::parse(mm::readFile(it->path()));
+            PendingInstall p;
+            p.game = mm::gameFromKey(j.value("game", "totk")).value_or(mm::Game::Totk);
+            if (p.game != g) continue;
+            p.details.summary.id = j.value("modId", int64_t{0});
+            p.details.summary.name = j.value("name", "");
+            p.details.summary.author = j.value("author", "");
+            p.details.summary.category = j.value("category", "");
+            p.details.summary.thumbnailUrl = j.value("thumbnailUrl", "");
+            p.details.summary.profileUrl = j.value("profileUrl", "");
+            p.details.version = j.value("version", "");
+            p.details.descriptionHtml = j.value("descriptionHtml", "");
+            p.file = fileFromJson(j.value("file", json::object()));
+            p.details.files = {p.file};
+            p.archive = archivePathFor(p.file);
+            if (isDownloaded(p.file)) out.push_back(std::move(p));
+        } catch (...) {
+            // unreadable sidecar: ignore it
+        }
+    }
+    return out;
+}
+
+std::optional<PendingInstall> AppState::pendingFor(int64_t modId) const {
+    for (auto& p : pendingInstalls(game_))
+        if (p.details.summary.id == modId) return p;
+    return std::nullopt;
+}
+
+void AppState::discardPending(int64_t fileId) const {
+    std::error_code ec;
+    for (mm::fs::directory_iterator it(downloadsDir(), ec), end; it != end; it.increment(ec)) {
+        auto name = it->path().filename().string();
+        auto prefix = std::to_string(fileId);
+        if (name == prefix + ".json" || name.rfind(prefix + "-", 0) == 0) mm::removeTree(it->path());
+    }
+    mm::removeTree(workDirFor(fileId));
+}
 
 // ------------------------------------------------------------------ text helpers
 

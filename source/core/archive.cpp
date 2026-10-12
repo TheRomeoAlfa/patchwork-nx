@@ -3,6 +3,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -28,6 +29,8 @@ void extractArchive(const fs::path& archivePath, const fs::path& destDir, const 
         throw std::runtime_error(std::string("cannot open archive: ") + archive_error_string(a.get()));
 
     fs::create_directories(destDir);
+    std::error_code sizeEc;
+    uint64_t archiveSize = fs::file_size(archivePath, sizeEc);
     uint64_t total = 0;
     uint32_t entries = 0;
     std::vector<char> buf(1 << 17);
@@ -68,7 +71,10 @@ void extractArchive(const fs::path& archivePath, const fs::path& destDir, const 
             f.write(buf.data(), n);
             if (!f) throw std::runtime_error("write failed (SD card full?) " + out.string());
         }
-        if (progress && !progress(total, rel)) throw std::runtime_error("cancelled");
+        if (progress) {
+            auto read = static_cast<uint64_t>(std::max<la_int64_t>(0, archive_filter_bytes(a.get(), -1)));
+            if (!progress(std::min(read, archiveSize), archiveSize, rel)) throw std::runtime_error("cancelled");
+        }
     }
     if (r != ARCHIVE_EOF) throw std::runtime_error(std::string("archive error: ") + archive_error_string(a.get()));
 }
@@ -84,8 +90,7 @@ void extractNestedArchives(const fs::path& dir, const ExtractLimits& limits) {
             extractArchive(p, out, limits);
         } catch (const std::exception&) {
             // Not fatal: the outer archive may still contain usable files.
-            std::error_code ec;
-            fs::remove_all(out, ec);
+            removeTree(out);
         }
     }
 }

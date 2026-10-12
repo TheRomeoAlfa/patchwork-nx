@@ -52,6 +52,15 @@ struct LibrarySnapshot {
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
 };
 
+// A mod file that finished downloading but isn't installed yet (failed or abandoned
+// install). Kept so trying again doesn't download it again.
+struct PendingInstall {
+    mm::Game game = mm::Game::Totk;
+    mm::gb::ModDetails details;
+    mm::gb::ModFile file;
+    mm::fs::path archive;
+};
+
 struct Settings {
     bool hideNsfw = true;  // hide mods GameBanana treats as NSFW
 };
@@ -95,6 +104,17 @@ public:
     const mm::fs::path& dataDir() const { return dataDir_; }
     mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
     mm::fs::path workDir() const { return dataDir_ / "work"; }
+    // Each install unpacks into its own folder so two attempts can never mix files.
+    mm::fs::path workDirFor(int64_t fileId) const { return workDir() / std::to_string(fileId); }
+    mm::fs::path archivePathFor(const mm::gb::ModFile& f) const;
+    bool isDownloaded(const mm::gb::ModFile& f) const;
+
+    // Downloads waiting to be installed. The sidecar is written before downloading starts.
+    std::vector<PendingInstall> pendingInstalls(mm::Game g) const;
+    std::optional<PendingInstall> pendingFor(int64_t modId) const;
+    void savePending(const PendingInstall& p) const;
+    // Thread-safe (filesystem only): delete the archive, its sidecar and its unpack folder.
+    void discardPending(int64_t fileId) const;
     uint64_t freeSpace() const;
 
 private:

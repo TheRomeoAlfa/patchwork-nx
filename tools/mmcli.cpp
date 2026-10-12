@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
             for (auto i : sel) r.variants.push_back(prep.layout.variants.at(i).name);
             auto& rec = lib.add(r, mergeVariants(prep.layout, sel), true);
             std::cout << "installed " << rec.id << " with " << rec.files.size() << " files\n";
-            fs::remove_all(prep.extractDir);
+            removeTree(prep.extractDir);
             fs::remove(dl);
         } else if (cmd == "mods") {
             auto game = parseGame(args.at(0));

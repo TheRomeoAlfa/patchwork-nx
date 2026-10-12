@@ -13,8 +13,9 @@ struct ExtractLimits {
     uint32_t maxEntries = 200000;
 };
 
-// Called with bytes written so far; return false to cancel.
-using ExtractProgressFn = std::function<bool(uint64_t bytesWritten, const std::string& current)>;
+// Called with how much of the archive file has been read (done of total bytes), which
+// tracks unpacking progress closely; return false to cancel.
+using ExtractProgressFn = std::function<bool(uint64_t done, uint64_t total, const std::string& current)>;
 
 // Extract a zip / 7z / rar (any format libarchive reads) into `destDir`.
 // Entries with absolute paths, "..", or link types are skipped. Throws on error.

@@ -1,6 +1,23 @@
 #include "ui.hpp"
 
+#include <algorithm>
+
 namespace app::ui {
+
+ProgressBar::ProgressBar() : brls::Box(brls::Axis::ROW) {
+    setHeight(10);
+    setCornerRadius(5);
+    setBackgroundColor(line());
+    fill_ = new brls::Box();
+    fill_->setCornerRadius(5);
+    fill_->setBackgroundColor(accent());
+    fill_->setWidthPercentage(0);
+    addView(fill_);
+}
+
+void ProgressBar::setProgress(float fraction) {
+    fill_->setWidthPercentage(std::clamp(fraction, 0.0f, 1.0f) * 100.0f);
+}
 
 brls::Label* label(const std::string& text, float size, NVGcolor color, bool singleLine) {
     auto* l = new brls::Label();

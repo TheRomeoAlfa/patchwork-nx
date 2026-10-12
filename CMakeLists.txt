@@ -74,6 +74,12 @@ endif()
 # ---------------------------------------------------------------- the app
 add_subdirectory(library/borealis/library)
 find_package(Threads REQUIRED)
+# Yoga is built with -fno-rtti, which on macOS gives it a private copy of std::exception's
+# typeinfo that the linker then uses for our catch clauses too: errors thrown by the
+# system C++ library (e.g. std::filesystem) became uncatchable and crashed the app.
+if(TARGET yogacore)
+    target_compile_options(yogacore PRIVATE -frtti)
+endif()
 
 # Resources: Borealis' icon font (+ the UI font on desktop) plus our own files.
 set(APP_RESOURCES ${CMAKE_BINARY_DIR}/resources)
