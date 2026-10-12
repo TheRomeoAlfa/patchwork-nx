@@ -113,6 +113,7 @@ void AddModsPage::clearPane() {
     ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
     linkStatus_ = nullptr;
+    ++linkGen_;  // stops refreshLinkStatus() for the old screen
 }
 
 bool AddModsPage::paneFree() {
@@ -147,6 +148,7 @@ void AddModsPage::rebuild() {
     const auto& installed = AppState::get().snapshot().installedKeys;
     for (const auto& path : files) {
         auto* row = ui::focusRow();
+        ui::tappable(row);
         row->addView(ui::label(ui::icon::file, 24, ui::accent()));
         auto* text = ui::vbox();
         text->setWidth(330);
@@ -183,6 +185,7 @@ void AddModsPage::rebuild() {
 
     section("From your phone");
     auto* row = ui::focusRow();
+    ui::tappable(row, ui::Tap::Act);
     row->addView(ui::label("", 24, ui::accent()));  // smartphone
     auto* text = ui::vbox();
     text->setWidth(330);
@@ -284,13 +287,19 @@ void AddModsPage::openLinkScreen() {
     if (!paneFree()) return;
     auto alive = alive_;
     receivedLink_.clear();
-    bool ok = server_.start([this, alive](const std::string& url) {
-        brls::sync([this, alive, url] {
-            if (!*alive || !server_.running()) return;
-            receivedLink_ = url;
-            if (!flow_->active()) showLinkScreen();
+    bool ok = server_.start(
+        [this, alive](const std::string& url) {
+            brls::sync([this, alive, url] {
+                if (!*alive || !server_.running()) return;
+                receivedLink_ = url;
+                if (!flow_->active()) showLinkScreen();
+            });
+        },
+        [this, alive] {
+            brls::sync([this, alive] {
+                if (*alive) refreshLinkStatus();
+            });
         });
-    });
     if (!ok) {
         flow_->showMessage("Couldn't start", server_.error(), true);
         return;
@@ -304,6 +313,7 @@ void AddModsPage::showLinkScreen() {
     box->setGrow(1);
     box->setFocusable(true);
     box->setHideHighlight(true);
+    ui::tappable(box, ui::Tap::Act);  // a tap opens a received link
     auto* top = ui::hbox();
     top->setAlignItems(brls::AlignItems::FLEX_START);
     top->addView(new QrView("http://" + server_.address()));
@@ -333,7 +343,7 @@ void AddModsPage::showLinkScreen() {
     card->setLineLeft(4);
     card->setLineColor(ui::accent());
     if (receivedLink_.empty()) {
-        linkStatus_ = ui::label("Waiting for a link…", 17, ui::muted());
+        linkStatus_ = ui::label("", 17, ui::muted(), false);
         card->addView(linkStatus_);
     } else {
         card->addView(ui::label("Link received", 18, ui::text()));
@@ -356,6 +366,29 @@ void AddModsPage::showLinkScreen() {
     });
     pane_->addView(box);
     brls::Application::giveFocus(box);
+    refreshLinkStatus();
+    scheduleLinkStatus(linkGen_);
+}
+
+// Keep the status line current while this screen is shown (network errors don't announce themselves).
+void AddModsPage::scheduleLinkStatus(int gen) {
+    auto alive = alive_;
+    brls::delay(1000, [this, alive, gen] {
+        if (!*alive || gen != linkGen_ || !server_.running()) return;
+        refreshLinkStatus();
+        scheduleLinkStatus(gen);
+    });
+}
+
+void AddModsPage::refreshLinkStatus() {
+    if (!linkStatus_) return;
+    auto error = server_.status();
+    if (!error.empty())
+        linkStatus_->setText(std::string(ui::icon::warning) + "  " + error);
+    else if (server_.visits() > 0)
+        linkStatus_->setText("Your phone opened the page. Paste a link there and tap Send.");
+    else
+        linkStatus_->setText("Waiting for your phone to open the page…\nNothing yet? Make sure both are on the same Wi-Fi (not a guest network).");
 }
 
 void AddModsPage::closeLinkScreen() {

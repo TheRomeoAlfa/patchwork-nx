@@ -82,4 +82,11 @@ brls::View* grow();
 // A focusable row with the app's highlight style.
 brls::Box* focusRow();
 
+// Touch support: Borealis views only react to taps if they carry a tap recognizer.
+// Lists work like the HOME menu: the first tap selects (shows the preview), a second tap
+// on the selected item presses A. Toggles and navigation act on the first tap.
+// Taps are ignored while an install or file job holds the screen.
+enum class Tap { SelectThenAct, Act };
+void tappable(brls::View* view, Tap mode = Tap::SelectThenAct);
+
 }  // namespace app::ui

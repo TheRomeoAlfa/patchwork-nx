@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the desktop build with a scripted button sequence and collect screenshots + log.
 #   tools/qa-run.sh <name> <fake-sd-dir> "<script>" [ENV=value ...]
-# Script steps (see source/app/debug_script.hpp): w<ms> wait, k<button> press, s<name> screenshot, q quit.
+# Script steps (see source/app/debug_script.hpp): w<ms> wait, t<x>,<y> tap, k<button> press, s<name> screenshot, q quit.
 # Output goes to qa-out/<name>/; the summary line flags crashes and logged errors.
 name=$1; sd=$2; script=$3; shift 3
 repo=$(cd "$(dirname "$0")/.." && pwd)

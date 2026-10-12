@@ -27,6 +27,7 @@ public:
         setHighlightCornerRadius(6);
         setLineBottom(1);
         setLineColor(ui::line());
+        ui::tappable(this);
 
         thumb = new brls::Image();
         thumb->setDimensions(96, 54);
@@ -144,6 +145,9 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
             pill->setJustifyContent(brls::JustifyContent::CENTER);
             tabLabels_[i] = ui::label(names[i], 15, ui::muted());
             pill->addView(tabLabels_[i]);
+            pill->addGestureRecognizer(new brls::TapGestureRecognizer(pill, [this, i] {
+                if (!AppState::get().installBusy()) setSource(i == 0 ? Source::GameBanana : Source::Waikuteru);
+            }));
             tabs_->addView(pill);
         }
         left->addView(tabs_);
@@ -261,6 +265,7 @@ void BrowsePage::showEmptyState(const std::string& message, const std::string& a
     ui::parkFocusIfInside(listEmpty_, sink_);
     listEmpty_->clearViews();
     auto* row = ui::focusRow();
+    ui::tappable(row, ui::Tap::Act);
     row->addView(ui::label(searchMode_ ? ui::icon::search : ui::icon::browse, 24, ui::accent()));
     auto* l = ui::label(action, 18, ui::text());
     l->setMarginLeft(12);

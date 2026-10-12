@@ -71,6 +71,7 @@ void MyModsPage::rebuild() {
     auto addUnmanagedRow = [&] {
         if (!unmanaged.files) return;
         auto* row = ui::focusRow();
+        ui::tappable(row);
         row->setMarginTop(10);
         row->addView(ui::label(ui::icon::folder, 24, ui::warn()));
         auto* text = ui::vbox();
@@ -104,6 +105,7 @@ void MyModsPage::rebuild() {
         list_->addView(head);
         for (const auto& p : pending) {
             auto* row = ui::focusRow();
+        ui::tappable(row);
             row->addView(ui::label(ui::icon::file, 24, ui::accent()));
             auto* text = ui::vbox();
             text->setMarginLeft(12);
@@ -146,6 +148,7 @@ void MyModsPage::rebuild() {
     }
     if (mods.empty()) {
         auto* row = ui::focusRow();
+        ui::tappable(row, ui::Tap::Act);
         row->addView(ui::label(ui::icon::browse, 24, ui::accent()));
         auto* l = ui::label("No mods yet. Open Browse to find some.", 17, ui::text());
         l->setMarginLeft(12);
@@ -167,6 +170,7 @@ void MyModsPage::rebuild() {
     for (const auto* m : mods) {
         std::string id = m->id;
         auto* row = ui::focusRow();
+        ui::tappable(row);
         row->addView(ui::label(std::to_string(n++), 15, ui::muted()));
         auto* name = ui::label(m->name, 18, m->enabled ? ui::text() : ui::muted());
         name->setMarginLeft(14);

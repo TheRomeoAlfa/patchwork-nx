@@ -1,5 +1,7 @@
 #include "ui.hpp"
 
+#include "app_state.hpp"
+
 #include <algorithm>
 
 namespace app::ui {
@@ -85,6 +87,49 @@ brls::View* grow() {
     auto* v = new brls::Box();
     v->setGrow(1.0f);
     return v;
+}
+
+void tappable(brls::View* view, Tap mode) {
+    auto wasFocused = std::make_shared<bool>(false);
+    auto tracking = std::make_shared<bool>(false);
+    view->addGestureRecognizer(new brls::TapGestureRecognizer([view, mode, wasFocused, tracking](brls::TapGestureStatus status, brls::Sound* sound) {
+        if (AppState::get().installBusy()) {
+            *tracking = false;
+            return;
+        }
+        switch (status.state) {
+            case brls::GestureState::UNSURE:
+            case brls::GestureState::START:  // touch down (START while the list is still scrolling)
+                if (!*tracking) {
+                    *tracking = true;
+                    *wasFocused = brls::Application::getCurrentFocus() == view;
+                }
+                break;
+            case brls::GestureState::END: {
+                *tracking = false;
+                bool act = mode == Tap::Act || *wasFocused;
+                brls::Application::giveFocus(view);
+                if (!act) {
+                    *sound = brls::SOUND_FOCUS_CHANGE;
+                    break;
+                }
+                // Like pressing A: the nearest view up the chain that handles A (some pages
+                // register it on the list rather than on each row).
+                for (auto* v = view; v; v = v->getParent()) {
+                    for (auto& action : v->getActions()) {
+                        if (action->getType() != brls::ACTION_GAMEPAD || action->getButton() != brls::BUTTON_A || !action->isAvailable()) continue;
+                        view->playClickAnimation();
+                        if (action->getActionListener()(v)) *sound = action->getSound();
+                        return;
+                    }
+                }
+                break;
+            }
+            default:
+                *tracking = false;
+                break;
+        }
+    }));
 }
 
 brls::Box* focusRow() {
