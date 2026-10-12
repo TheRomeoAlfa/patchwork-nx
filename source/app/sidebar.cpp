@@ -39,6 +39,7 @@ Sidebar::Sidebar() : brls::Box(brls::Axis::COLUMN) {
 
     // Game switcher: A swaps between the two games.
     gameRow_ = makeRow(ui::icon::game, "", &gameIcon_, &gameName_);
+    ui::tappable(gameRow_);  // switching game on a stray tap would be surprising
     gameRow_->setHeight(64);
     gameRow_->setMarginBottom(14);
     gameName_->setFontSize(18);
@@ -72,6 +73,7 @@ Sidebar::Sidebar() : brls::Box(brls::Axis::COLUMN) {
     for (const auto& [page, d] : defs) {
         Item item{page, nullptr, nullptr, nullptr, nullptr};
         item.row = makeRow(d.first, d.second, &item.icon, &item.text);
+        ui::tappable(item.row, ui::Tap::Act);
         item.badge = ui::label("", 15, ui::muted());
         item.badge->setWidth(36);
         item.badge->setHorizontalAlign(brls::HorizontalAlign::RIGHT);

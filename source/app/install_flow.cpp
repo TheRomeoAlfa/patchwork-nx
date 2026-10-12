@@ -159,6 +159,7 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     auto* b = ui::label(body, 17, ui::text(), false);
     b->setMarginTop(14);
     box->addView(b);
+    ui::tappable(box, ui::Tap::Act);
     box->registerAction("OK", brls::BUTTON_A, [this](brls::View*) {
         leave();
         return true;
@@ -207,6 +208,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         auto note = noteFor(file, game, installed, versionWordIsMod);
         bool downloaded = st.isDownloaded(file);
         auto* row = ui::focusRow();
+        ui::tappable(row);
         row->addView(ui::label(ui::icon::file, 24, ui::muted()));
         auto* text = ui::vbox();
         text->setGrow(1);
@@ -432,6 +434,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     for (size_t i = 0; i < variants.size(); ++i) {
         const auto& v = variants[i];
         auto* row = ui::focusRow();
+        ui::tappable(row, ui::Tap::Act);
         auto* box = ui::label((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff, 26, ui::accent());
         row->addView(box);
         auto* name = ui::label(v.name.substr(common), 18, ui::text());

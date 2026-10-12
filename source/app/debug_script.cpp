@@ -67,6 +67,35 @@ void runNext() {
             brls::Application::quit();
             return;
         }
+        if (op == 't') {
+            // Tap at x,y (1280x720 layout coordinates): touch down, then up 80 ms later.
+            auto comma = arg.find(',');
+            brls::Point pos{std::stof(arg.substr(0, comma)), std::stof(arg.substr(comma + 1))};
+            auto stack = brls::Application::getActivitiesStack();
+            if (stack.empty()) return runNext();
+            auto* view = stack.back()->getContentView()->hitTest(pos);
+            if (!view) {
+                brls::Logger::info("tap {}: nothing there", arg);
+                return runNext();
+            }
+            brls::TouchState touch;
+            touch.position = pos;
+            touch.view = view;
+            touch.phase = brls::TouchPhase::START;
+            view->gestureRecognizerRequest(touch, brls::MouseState(), view);
+            brls::delay(80, [arg, view, touch]() mutable {
+                touch.phase = brls::TouchPhase::END;
+                view->gestureRecognizerRequest(touch, brls::MouseState(), view);
+                brls::delay(150, [arg] {
+                    std::string chain;
+                    for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
+                        chain += v->describe() + " < ";
+                    brls::Logger::info("after tap {}: focus = {}", arg, chain);
+                    runNext();
+                });
+            });
+            return;
+        }
         if (op == 'k') {
             static const std::map<std::string, brls::ControllerButton> buttons = {
                 {"up", brls::BUTTON_NAV_UP},       {"down", brls::BUTTON_NAV_DOWN}, {"left", brls::BUTTON_NAV_LEFT},

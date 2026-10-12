@@ -6,7 +6,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cstring>
+#include <vector>
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -75,12 +79,15 @@ void respond(int fd, const char* status, const std::string& body) {
     sendAll(fd, head + body);
 }
 
-bool waitReadable(int fd, int ms) {
-    fd_set set;
-    FD_ZERO(&set);
-    FD_SET(fd, &set);
-    timeval tv{ms / 1000, (ms % 1000) * 1000};
-    return ::select(fd + 1, &set, nullptr, nullptr, &tv) > 0;
+// A request is complete once its headers and Content-Length bytes of body have arrived.
+bool requestComplete(const std::string& req, size_t* headerEnd) {
+    *headerEnd = req.find("\r\n\r\n");
+    if (*headerEnd == std::string::npos) return false;
+    auto lower = mm::toLower(req.substr(0, *headerEnd));
+    size_t contentLength = 0;
+    auto cl = lower.find("content-length:");
+    if (cl != std::string::npos) contentLength = std::strtoul(lower.c_str() + cl + 15, nullptr, 10);
+    return req.size() >= *headerEnd + 4 + std::min(contentLength, kMaxRequest);
 }
 
 }  // namespace
@@ -110,9 +117,15 @@ std::string localIpAddress() {
 
 LinkServer::~LinkServer() { stop(); }
 
-bool LinkServer::start(std::function<void(const std::string&)> onLink) {
+bool LinkServer::start(std::function<void(const std::string&)> onLink, std::function<void()> onVisit) {
     stop();
     onLink_ = std::move(onLink);
+    onVisit_ = std::move(onVisit);
+    visits_ = 0;
+    {
+        std::lock_guard lock(mutex_);
+        error_.clear();
+    }
     auto ip = localIpAddress();
     if (ip.empty()) {
         error_ = "This Switch isn't connected to a network.";
@@ -155,35 +168,83 @@ void LinkServer::stop() {
     running_ = false;
 }
 
-void LinkServer::loop() {
-    while (!stop_) {
-        if (!waitReadable(fd_, 250)) continue;  // wake up regularly to notice stop()
-        int client = ::accept(fd_, nullptr, nullptr);
-        if (client < 0) continue;
-        handle(client);
-        ::close(client);
-    }
+void LinkServer::noteError(const char* what, int err) {
+    std::lock_guard lock(mutex_);
+    error_ = std::string(what) + ": " + std::strerror(err);
 }
 
-void LinkServer::handle(int client) {
-    // Read headers (and a small body) with a deadline, so a stuck connection can't block us.
-    std::string req;
-    char buf[1024];
-    size_t contentLength = 0;
-    size_t headerEnd = std::string::npos;
-    while (req.size() < kMaxRequest && waitReadable(client, 3000)) {
-        auto n = ::recv(client, buf, sizeof buf, 0);
-        if (n <= 0) break;
-        req.append(buf, static_cast<size_t>(n));
-        if (headerEnd == std::string::npos && (headerEnd = req.find("\r\n\r\n")) != std::string::npos) {
-            auto lower = mm::toLower(req.substr(0, headerEnd));
-            auto cl = lower.find("content-length:");
-            if (cl != std::string::npos) contentLength = std::strtoul(lower.c_str() + cl + 15, nullptr, 10);
-        }
-        if (headerEnd != std::string::npos && req.size() >= headerEnd + 4 + contentLength) break;
-    }
-    if (headerEnd == std::string::npos) return;
+std::string LinkServer::status() const {
+    std::lock_guard lock(mutex_);
+    return error_;
+}
 
+void LinkServer::loop() {
+    // Serve several connections at once: phone browsers often open an idle "preconnect"
+    // socket next to the real one, which must not hold up the page.
+    struct Client {
+        int fd;
+        std::string req;
+        std::chrono::steady_clock::time_point since;
+    };
+    std::vector<Client> clients;
+    auto drop = [&](size_t i) {
+        ::close(clients[i].fd);
+        clients.erase(clients.begin() + static_cast<long>(i));
+    };
+    while (!stop_) {
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(fd_, &set);
+        int maxFd = fd_;
+        for (const auto& c : clients) {
+            FD_SET(c.fd, &set);
+            maxFd = std::max(maxFd, c.fd);
+        }
+        timeval tv{0, 250 * 1000};  // wake up regularly to notice stop()
+        int ready = ::select(maxFd + 1, &set, nullptr, nullptr, &tv);
+        if (ready < 0) {
+            noteError("Network error (select)", errno);
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            continue;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (ready > 0 && FD_ISSET(fd_, &set)) {
+            int c = ::accept(fd_, nullptr, nullptr);
+            if (c < 0) {
+                noteError("Network error (accept)", errno);
+            } else {
+                if (clients.size() >= 6) drop(0);  // oldest first
+                clients.push_back({c, {}, now});
+            }
+        }
+        for (size_t i = clients.size(); i-- > 0;) {
+            auto& c = clients[i];
+            if (ready > 0 && FD_ISSET(c.fd, &set)) {
+                char buf[1024];
+                auto n = ::recv(c.fd, buf, sizeof buf, 0);
+                if (n <= 0) {
+                    drop(i);
+                    continue;
+                }
+                c.req.append(buf, static_cast<size_t>(n));
+                size_t headerEnd = 0;
+                if (requestComplete(c.req, &headerEnd)) {
+                    handle(c.fd, c.req, headerEnd);
+                    drop(i);
+                    continue;
+                }
+                if (c.req.size() > kMaxRequest) {
+                    drop(i);
+                    continue;
+                }
+            }
+            if (now - c.since > std::chrono::seconds(15)) drop(i);  // idle or stuck
+        }
+    }
+    for (size_t i = clients.size(); i-- > 0;) drop(i);
+}
+
+void LinkServer::handle(int client, const std::string& req, size_t headerEnd) {
     if (req.rfind("POST /send", 0) == 0) {
         auto body = req.substr(headerEnd + 4);
         std::string url;
@@ -206,6 +267,8 @@ void LinkServer::handle(int client) {
         return;
     }
     if (req.rfind("GET / ", 0) == 0 || req.rfind("GET /?", 0) == 0) {
+        ++visits_;
+        if (onVisit_) onVisit_();
         respond(client, "200 OK", page(""));
         return;
     }

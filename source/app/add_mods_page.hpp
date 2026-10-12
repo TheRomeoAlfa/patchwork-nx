@@ -33,6 +33,8 @@ private:
     void openLinkScreen();
     void showLinkScreen();
     void closeLinkScreen();
+    void refreshLinkStatus();
+    void scheduleLinkStatus(int gen);
     void openLink(const std::string& url);
 
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
@@ -44,6 +46,7 @@ private:
     LinkServer server_;
     std::string receivedLink_;
     brls::Label* linkStatus_ = nullptr;
+    int linkGen_ = 0;
     std::string focusedPath_;
 };
 

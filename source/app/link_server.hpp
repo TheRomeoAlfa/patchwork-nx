@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -16,18 +17,25 @@ class LinkServer {
 public:
     ~LinkServer();
 
-    // onLink runs on the server thread; hop to the UI thread with brls::sync.
-    bool start(std::function<void(const std::string& url)> onLink);
+    // onLink and onVisit run on the server thread; hop to the UI thread with brls::sync.
+    // onVisit fires each time a phone opens the page.
+    bool start(std::function<void(const std::string& url)> onLink, std::function<void()> onVisit = {});
     void stop();
     bool running() const { return running_; }
     const std::string& address() const { return address_; }  // "192.168.1.20:8080"
-    const std::string& error() const { return error_; }
+    const std::string& error() const { return error_; }  // why start() failed
+    int visits() const { return visits_; }
+    std::string status() const;  // last network error while running, or ""
 
 private:
     void loop();
-    void handle(int client);
+    void handle(int client, const std::string& request, size_t headerEnd);
+    void noteError(const char* what, int err);
 
     std::function<void(const std::string&)> onLink_;
+    std::function<void()> onVisit_;
+    std::atomic<int> visits_{0};
+    mutable std::mutex mutex_;
     std::thread thread_;
     std::atomic<bool> stop_{false};
     std::atomic<bool> running_{false};
