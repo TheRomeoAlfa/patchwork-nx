@@ -45,7 +45,6 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
     size_t best = 0;
     int bestScore = -1;
     bool versionWordIsMod = modUsesVersionWord(d, game);
-    auto stem = [](const std::string& name) { return mm::toLower(name.substr(0, name.rfind('.'))); };
     for (size_t i = 0; i < d.files.size(); ++i) {
         const auto& f = d.files[i];
         int score = 0;
@@ -53,10 +52,8 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
         if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
         // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
         bool isVariantOfAnother = false;
-        for (size_t j = 0; j < d.files.size(); ++j) {
-            auto own = stem(f.filename), other = stem(d.files[j].filename);
-            if (j != i && other.size() >= 6 && own.size() > other.size() && own.find(other) != std::string::npos) isVariantOfAnother = true;
-        }
+        for (size_t j = 0; j < d.files.size(); ++j)
+            if (j != i && mm::isAddOnFileOf(f.filename, d.files[j].filename)) isVariantOfAnother = true;
         if (!isVariantOfAnother) score += 1;
         if (score > bestScore || (score == bestScore && f.dateAdded > d.files[best].dateAdded)) {
             best = i;
@@ -385,11 +382,30 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
             (*selected)[i] = true;
             picked = true;
         }
+    std::string closestNote;
+    if (!picked) {
+        // Per-version options but none for this version: the closest older one.
+        std::vector<std::string> names;
+        for (const auto& v : variants) names.push_back(v.name);
+        auto closest = mm::closestVersionOption(names, game, installed);
+        if (closest < variants.size()) {
+            (*selected)[closest] = true;
+            picked = true;
+            auto named = mm::mentionedGameVersions(variants[closest].name, game);
+            closestNote = "There's no option for " + installed + ", your version. The one for " +
+                          (named.empty() ? std::string("the closest version") : named.back()) + " is selected; it may or may not work.";
+        }
+    }
     if (!picked) {
         size_t biggest = 0;
         for (size_t i = 1; i < variants.size(); ++i)
             if (variants[i].files.size() > variants[biggest].files.size()) biggest = i;
         (*selected)[biggest] = true;
+    }
+    if (!closestNote.empty()) {
+        auto* note = ui::label(std::string(ui::icon::warning) + "  " + closestNote, 15, ui::warn(), false);
+        note->setMargins(0, 0, 12, 0);
+        pane_->addView(note);
     }
     auto* list = ui::vbox();
     auto* scroll = new brls::ScrollingFrame();
@@ -427,9 +443,22 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
             while (n < common && n < v.name.size() && v.name[n] == variants[0].name[n]) ++n;
             common = n;
         }
-        while (common > 0 && variants[0].name[common - 1] != '_' && variants[0].name[common - 1] != '/' && variants[0].name[common - 1] != ' ')
-            --common;  // cut at a word boundary
+        auto boundary = [&](size_t n) {
+            while (n > 0 && variants[0].name[n - 1] != '_' && variants[0].name[n - 1] != '/' && variants[0].name[n - 1] != ' ') --n;
+            return n;
+        };
+        common = boundary(common);  // cut at a word boundary
+        // "…(Game Version 1.2.0)" would leave just "1.2.0)": keep the word before a bare number.
+        if (common > 0 && std::isdigit(static_cast<unsigned char>(variants[0].name[common])))
+            common = boundary(common - 1);
     }
+    // Drop a ")" whose "(" was cut off with the shared prefix.
+    auto shown = [&](const std::string& name) {
+        auto text = name.substr(common);
+        if (!text.empty() && text.back() == ')' && std::count(text.begin(), text.end(), '(') < std::count(text.begin(), text.end(), ')'))
+            text.pop_back();
+        return text;
+    };
     brls::View* first = nullptr;
     for (size_t i = 0; i < variants.size(); ++i) {
         const auto& v = variants[i];
@@ -437,7 +466,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         ui::tappable(row, ui::Tap::Act);
         auto* box = ui::label((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff, 26, ui::accent());
         row->addView(box);
-        auto* name = ui::label(v.name.substr(common), 18, ui::text());
+        auto* name = ui::label(shown(v.name), 18, ui::text());
         name->setMarginLeft(12);
         name->setGrow(1);
         name->setShrink(1);

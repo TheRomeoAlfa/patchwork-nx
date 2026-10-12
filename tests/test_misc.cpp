@@ -188,3 +188,26 @@ TEST("compat: TOTK size tables missing for the installed version") {
     CHECK(!checkSizeTables({"atmosphere/contents/0100F2C0115B6000/romfs/Pack/a.pack.zs"}, Game::Totk, "1.2.1").missing);
     CHECK(checkSizeTables({res + "ResourceSizeTable.Product.120.rsizetable.zs"}, Game::Botw, "1.6.0").versions.empty());
 }
+
+TEST("compat: closest per-version option when none matches exactly") {
+    std::vector<std::string> opts = {
+        "Serfrosts Interior Defogger (Game Version 1.0.0)", "Serfrosts Interior Defogger (Game Version 1.1.0)",
+        "Serfrosts Interior Defogger (Game Version 1.1.1)", "Serfrosts Interior Defogger (Game Version 1.1.2)",
+        "Serfrosts Interior Defogger (Game Version 1.2.0)"};
+    CHECK_EQ(closestVersionOption(opts, Game::Totk, "1.2.1"), size_t(4));
+    CHECK_EQ(closestVersionOption(opts, Game::Totk, "1.1.1"), size_t(2));
+    CHECK_EQ(closestVersionOption(opts, Game::Totk, ""), opts.size());
+    CHECK_EQ(closestVersionOption({"Main", "Add-on for 1.2.0"}, Game::Totk, "1.2.1"), size_t(2));  // only one names a version
+    CHECK_EQ(closestVersionOption({"For 1.3.0", "For 1.4.0"}, Game::Totk, "1.2.1"), size_t(2));      // all newer
+}
+
+TEST("compat: add-on files vs newer versions of the same file") {
+    CHECK(isAddOnFileOf("dark_title_screen_serfrosts_base_defogger_v2-4.zip", "serfrosts_base_defogger_v2-4.zip"));
+    CHECK(isAddOnFileOf("puffy_jacket_no_backpack_v1.zip", "puffy_jacket.zip"));
+    CHECK(!isAddOnFileOf("fierce_deity_s_rebirth_v102.7z", "fierce_deity_s_rebirth.7z"));
+    CHECK(!isAddOnFileOf("fierce_deity_s_rebirth_v1.7z", "fierce_deity_s_rebirth.7z"));
+    CHECK(!isAddOnFileOf("mymod-1.2.3.zip", "mymod.zip"));
+    CHECK(!isAddOnFileOf("mymod v2.0b.zip", "mymod.zip"));
+    CHECK(!isAddOnFileOf("short_v2.zip", "abc.zip"));  // too short to compare
+    CHECK(!isAddOnFileOf("defogger.zip", "dark_defogger.zip"));
+}

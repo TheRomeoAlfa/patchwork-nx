@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <regex>
+#include <sstream>
 
 #include "util.hpp"
 
@@ -88,6 +89,54 @@ SizeTableCheck checkSizeTables(const std::vector<std::string>& targets, Game gam
     out.missing = !out.versions.empty() && !installedVersion.empty() &&
                   std::find(out.versions.begin(), out.versions.end(), installedVersion) == out.versions.end();
     return out;
+}
+
+namespace {
+std::vector<int> versionParts(const std::string& v) {
+    std::vector<int> out;
+    std::stringstream ss(v);
+    std::string part;
+    while (std::getline(ss, part, '.')) out.push_back(std::atoi(part.c_str()));
+    while (out.size() < 3) out.push_back(0);
+    return out;
+}
+}  // namespace
+
+size_t closestVersionOption(const std::vector<std::string>& options, Game game, const std::string& installedVersion) {
+    if (installedVersion.empty()) return options.size();
+    auto installed = versionParts(installedVersion);
+    size_t best = options.size(), naming = 0;
+    std::vector<int> bestVersion;
+    for (size_t i = 0; i < options.size(); ++i) {
+        auto named = mentionedGameVersions(options[i], game);
+        if (named.empty()) continue;
+        ++naming;
+        for (const auto& v : named) {
+            auto parts = versionParts(v);
+            if (parts > installed) continue;
+            if (best == options.size() || parts > bestVersion) {
+                best = i;
+                bestVersion = parts;
+            }
+        }
+    }
+    return naming >= 2 ? best : options.size();
+}
+
+bool isAddOnFileOf(const std::string& own, const std::string& other) {
+    auto stem = [](const std::string& name) {
+        auto lower = toLower(name);
+        auto dot = lower.rfind('.');
+        return dot == std::string::npos ? lower : lower.substr(0, dot);
+    };
+    auto a = stem(own), b = stem(other);
+    if (b.size() < 6 || a.size() <= b.size()) return false;
+    auto pos = a.find(b);
+    if (pos == std::string::npos) return false;
+    // What the longer name adds; a bare version ("_v102", "-1.2", " v2.0b") isn't an add-on.
+    auto extra = a.substr(0, pos) + a.substr(pos + b.size());
+    static const std::regex versionOnly(R"(^[\s_.\-]*(v|ver|version)?[\s_.\-]*\d[\d._\-]*[a-z]?[\s_.\-]*$)");
+    return !std::regex_match(extra, versionOnly);
 }
 
 }  // namespace mm

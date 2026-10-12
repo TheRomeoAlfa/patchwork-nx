@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 
 namespace mm {
 
@@ -33,13 +34,34 @@ bool isIpsPatchName(const std::string& filename) {
     return stem.size() >= 16 && isHex(stem);
 }
 
-enum class RootType { Atmosphere, ContentsDir, TitleDir, ModDir, LooseIps };
+enum class RootType { Atmosphere, ContentsDir, TitleDir, ModDir, LooseIps, BareRomfs };
 
 struct Root {
     RootType type;
     fs::path path;
     std::string titleId;  // TitleDir, or a ModDir found inside a title folder
 };
+
+// Top-level folders of the games' romfs. Some archives contain these with no romfs/ around them.
+bool isRomfsTopFolder(const std::string& lowerName) {
+    static const std::set<std::string> names = {
+        "actor", "pack", "model", "ui", "system", "map", "sound", "event", "eventflow", "font", "effect", "terrain",
+        "physics", "movie", "layout", "camera", "cooking", "demo", "voice", "shader", "quest",          // both games / BOTW
+        "banc", "mals", "rsdb", "gamedata", "ai", "logic", "textogo", "phive", "sequence", "worldmgr", // TOTK
+        "as", "animationevent", "ecosystem", "xlink2", "vfxresource"};
+    return names.count(lowerName) > 0;
+}
+
+// A folder that looks like the inside of a romfs: mostly (and at least one) romfs folder names.
+bool looksLikeBareRomfs(const fs::path& dir) {
+    int known = 0, other = 0;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
+        if (!it->is_directory(ec)) continue;
+        (isRomfsTopFolder(toLower(it->path().filename().string())) ? known : other)++;
+    }
+    return known > 0 && known > other;
+}
 
 bool hasModFolders(const fs::path& dir) {
     std::error_code ec;
@@ -230,6 +252,14 @@ struct Mapper {
                 });
                 break;
             }
+            case RootType::BareRomfs:
+                walk(root.path, [&](const fs::path& src, const std::vector<std::string>& parts) {
+                    if (parts.size() > 1 && isRomfsTopFolder(toLower(parts[0])))
+                        add(src, "atmosphere/contents/" + std::string(gameInfo(game).titleId) + "/romfs/" + join(parts, 0));
+                    else
+                        ++skippedOutside;
+                });
+                break;
             case RootType::LooseIps:
                 for (const auto& e : fs::directory_iterator(root.path)) {
                     auto fname = e.path().filename().string();
@@ -266,6 +296,26 @@ LayoutResult detectLayout(const fs::path& extractedRoot, Game game, const std::s
     LayoutResult result;
     Scanner scanner{game, {}, result.warnings};
     scanner.scan(extractedRoot, 0);
+    // Last resort: game folders (Actor/, Model/, UI/...) with no romfs/ folder around them.
+    bool bare = false;
+    if (scanner.roots.empty() && !scanner.sawBnp && !scanner.sawTkcl && !scanner.sawWiiU && !scanner.sawBcmlLogs) {
+        std::vector<fs::path> level{extractedRoot};
+        for (int depth = 0; depth < 4 && scanner.roots.empty() && !level.empty(); ++depth) {
+            std::vector<fs::path> next;
+            for (const auto& dir : level) {
+                if (looksLikeBareRomfs(dir)) {
+                    scanner.roots.push_back({RootType::BareRomfs, dir, {}});
+                    continue;
+                }
+                std::error_code ec;
+                for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+                    if (it->is_directory(ec)) next.push_back(it->path());
+            }
+            std::sort(next.begin(), next.end());
+            level = std::move(next);
+        }
+        bare = !scanner.roots.empty();
+    }
 
     // Group roots that share an anchor folder (e.g. a TitleDir and loose IPS side by side).
     std::map<std::string, std::vector<Root>> groups;
@@ -292,6 +342,8 @@ LayoutResult detectLayout(const fs::path& extractedRoot, Game game, const std::s
     if (otherTitle) result.warnings.push_back("Skipped files for a different game (" + std::to_string(otherTitle) + ")");
     if (outside) result.warnings.push_back("Skipped files outside the game's mod folders (" + std::to_string(outside) + ")");
     if (pchtxt) result.warnings.push_back("Skipped emulator-only .pchtxt patches (" + std::to_string(pchtxt) + ")");
+    if (bare && !result.variants.empty())
+        result.warnings.push_back("This archive has game folders but no romfs folder; they were placed in the game's romfs");
 
     if (!result.variants.empty())
         result.kind = PackageKind::Installable;
