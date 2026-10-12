@@ -110,8 +110,7 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
         workingLabel_ = ui::label(status, 20, ui::text());
         workingLabel_->setMarginTop(16);
         box->addView(workingLabel_);
-        bar_ = new ui::ProgressBar();
-        bar_->setWidth(420);
+        bar_ = new ui::ProgressBar(360);
         bar_->setMarginTop(14);
         box->addView(bar_);
         auto* hint = ui::label("Press B to cancel", 15, ui::muted());
