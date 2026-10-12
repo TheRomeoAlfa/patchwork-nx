@@ -73,4 +73,21 @@ Compat checkCompat(const std::string& installedVersion, const std::vector<std::s
     return Compat::Mismatch;
 }
 
+SizeTableCheck checkSizeTables(const std::vector<std::string>& targets, Game game, const std::string& installedVersion) {
+    SizeTableCheck out;
+    if (game != Game::Totk) return out;  // BOTW has one table for every version
+    static const std::regex re(R"((^|/)romfs/system/resource/resourcesizetable\.product\.(\d)(\d)(\d)\.rsizetable(\.zs)?$)");
+    std::smatch m;
+    for (const auto& t : targets) {
+        auto lower = toLower(t);
+        if (!std::regex_search(lower, m, re)) continue;
+        auto v = m[2].str() + "." + m[3].str() + "." + m[4].str();
+        if (std::find(out.versions.begin(), out.versions.end(), v) == out.versions.end()) out.versions.push_back(v);
+    }
+    std::sort(out.versions.begin(), out.versions.end());
+    out.missing = !out.versions.empty() && !installedVersion.empty() &&
+                  std::find(out.versions.begin(), out.versions.end(), installedVersion) == out.versions.end();
+    return out;
+}
+
 }  // namespace mm

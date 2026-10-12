@@ -31,4 +31,14 @@ enum class Compat { Unknown, Likely, Mismatch };
 // A mod naming "1.2" matches any 1.2.x.
 Compat checkCompat(const std::string& installedVersion, const std::vector<std::string>& named);
 
+// TOTK mods that change file sizes ship a resource size table per game version
+// (romfs/System/Resource/ResourceSizeTable.Product.121.rsizetable.zs for 1.2.1). If a mod has
+// tables but none for the installed version, the game falls back to its own table and the
+// mod's bigger files can crash the game or fail to load.
+struct SizeTableCheck {
+    bool missing = false;               // tables present, but not for the installed version
+    std::vector<std::string> versions;  // versions the mod has tables for, e.g. "1.2.0"
+};
+SizeTableCheck checkSizeTables(const std::vector<std::string>& targets, Game game, const std::string& installedVersion);
+
 }  // namespace mm
