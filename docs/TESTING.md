@@ -62,3 +62,8 @@ Run these after any release build; they cover what the desktop build can't.
 13. **Crash notice:** after Atmosphère shows the 010041544D530000 error on a game launch,
    reopen Patchwork: it explains the cause and opens Settings. It doesn't appear again for
    the same crash.
+14. **Mod number:** Add mods → Enter a mod number → type a number from a GameBanana link for
+   your game: the install screen opens. Also type the number into Search. A number for the
+   other game says to switch game; a made-up number says there's no such mod.
+15. **Hidden NSFW setting:** Settings shows no Browsing section. Hold L + R + − for 3 seconds:
+   "Hide NSFW mods" appears. Turn it off, restart Patchwork: it's hidden and on again.

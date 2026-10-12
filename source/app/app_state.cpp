@@ -77,7 +77,6 @@ void AppState::init() {
 
     try {
         auto j = json::parse(mm::readFile(dataDir_ / "settings.json"));
-        settings_.hideNsfw = j.value("hideNsfw", true);
         if (j.contains("seenCrashReports")) settings_.seenCrashReports = j["seenCrashReports"].get<std::vector<std::string>>();
         if (auto g = mm::gameFromKey(j.value("game", "totk"))) game_ = *g;
     } catch (...) {
@@ -109,7 +108,7 @@ void AppState::setGame(mm::Game g) {
 
 void AppState::saveSettings() {
     try {
-        json j{{"hideNsfw", settings_.hideNsfw}, {"game", std::string(mm::gameInfo(game_).key)}};
+        json j{{"game", std::string(mm::gameInfo(game_).key)}};
         if (settings_.seenCrashReports) j["seenCrashReports"] = *settings_.seenCrashReports;
         mm::writeFileAtomic(dataDir_ / "settings.json", j.dump(1));
     } catch (const std::exception& e) {
@@ -189,17 +188,25 @@ mm::gb::ModDetails AppState::fetchDetails(const mm::gb::ModSummary& s) {
 mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) {
     auto otherGame = [&](mm::Game g) {
         return std::runtime_error(std::string("That's a mod for ") + std::string(mm::gameInfo(g).displayName) +
-                                  ". Switch game with ZL/ZR, then send the link again.");
+                                  ". Switch game with ZL/ZR and try again.");
     };
     // GameBanana mod page: https://gamebanana.com/mods/123456
     static const std::regex gbRe(R"(^https?://(www\.)?gamebanana\.com/mods/(\d+))", std::regex::icase);
     std::smatch m;
     if (std::regex_search(url, m, gbRe)) {
-        auto d = gb_->details(std::stoll(m[2].str()));
+        mm::gb::ModDetails d;
+        try {
+            d = gb_->details(std::stoll(m[2].str()));
+        } catch (const mm::HttpStatusError& e) {
+            if (e.status() == 404) throw std::runtime_error("There's no GameBanana mod with that number.");
+            throw;
+        }
         for (const auto& g : mm::kGames)
             if (d.summary.gameId == g.gamebananaId && g.game != game) throw otherGame(g.game);
         if (d.summary.gameId && d.summary.gameId != mm::gameInfo(game).gamebananaId)
             throw std::runtime_error("That GameBanana mod isn't for Breath of the Wild or Tears of the Kingdom.");
+        if (d.summary.nsfw && settings_.hideNsfw)
+            throw std::runtime_error("GameBanana marks this mod as NSFW, so it's hidden.");
         return d;
     }
     // Waikuteru mod page

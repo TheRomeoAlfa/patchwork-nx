@@ -224,7 +224,7 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
 
     if (searchMode_) {
         updateHeader();
-        showEmptyState("Find mods by name, author or keyword.", "Search GameBanana");
+        showEmptyState("Find mods by name, author or keyword, or type a mod number (the end of its GameBanana link).", "Search GameBanana");
     } else {
         reload();
     }
@@ -329,6 +329,12 @@ void BrowsePage::reload() {
     loadMore();
 }
 
+namespace {
+bool isModNumber(const std::string& q) {
+    return !q.empty() && q.size() <= 9 && std::all_of(q.begin(), q.end(), [](unsigned char c) { return std::isdigit(c); });
+}
+}  // namespace
+
 void BrowsePage::loadMore() {
     if (loading_ || reachedEnd_ || std::chrono::steady_clock::now() < retryAfter_) return;
     if (searchMode_ && query_.empty()) return;
@@ -355,6 +361,12 @@ void BrowsePage::loadMore() {
                 for (const auto& e : AppState::get().waikuteruMods())
                     if (e.game == game && e.onSwitch) result.mods.push_back(e.summary);
                 result.totalCount = static_cast<int64_t>(result.mods.size());
+                result.isLast = true;
+            } else if (search && isModNumber(query)) {
+                // A GameBanana mod number (the end of its link) goes straight to that mod.
+                auto d = AppState::get().resolveLink("https://gamebanana.com/mods/" + query, game);
+                result.mods.push_back(d.summary);
+                result.totalCount = 1;
                 result.isLast = true;
             } else {
                 result = search ? AppState::get().gamebanana().search(game, query, page)
@@ -414,7 +426,7 @@ void BrowsePage::openSearchKeyboard() {
             listEmpty_->setVisibility(brls::Visibility::GONE);
             reload();
         },
-        "Search mods", "Name, author or keyword", 48, query_);
+        "Search mods", "Name, author, keyword or mod number", 48, query_);
 }
 
 void BrowsePage::appendRows(size_t from) {

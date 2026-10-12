@@ -156,3 +156,16 @@ TEST("md5: known vectors") {
     CHECK_EQ(md5String("abc"), std::string("900150983cd24fb0d6963f7d28e17f72"));
     CHECK_EQ(md5String(std::string(1000, 'a')), std::string("cabe45dcc9ae5b66ba86600cca6b8ba8"));
 }
+
+TEST("gamebanana: mod details from ProfilePage carry the NSFW rating") {
+    // Trimmed ProfilePage responses: a rated mod hidden by default, and an ordinary one.
+    auto rated = gb::parseModDetails(R"({"_sName":"Rated","_sInitialVisibility":"hide",
+        "_aContentRatings":{"pn":"Partial Nudity"},"_aGame":{"_idRow":7617},"_aFiles":[]})", 1);
+    CHECK(rated.summary.nsfw);
+    CHECK_EQ(rated.summary.gameId, int64_t(7617));
+    auto plain = gb::parseModDetails(R"({"_sName":"Plain","_sInitialVisibility":"show","_aFiles":[]})", 2);
+    CHECK(!plain.summary.nsfw);
+    auto ratedButShown = gb::parseModDetails(R"({"_sName":"Gore","_sInitialVisibility":"show",
+        "_aContentRatings":{"bg":"Blood and Gore"},"_aFiles":[]})", 3);
+    CHECK(!ratedButShown.summary.nsfw);
+}

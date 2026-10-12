@@ -13,13 +13,13 @@ Mods belong to their authors.
 
 - **Browse and search** GameBanana with a live preview of each mod
 - **Waikuteru's mods** ([waikuteru-zelda-mods.com](https://www.waikuteru-zelda-mods.com)) as a second source in Browse (L/R); only Switch versions are offered
-- **Add mods from anywhere**: copy archives into `switch/patchwork/inbox` on the SD card, or send a link from your phone (open the address/QR code the Switch shows, paste a link)
+- **Add mods from anywhere**: copy archives into `switch/patchwork/inbox` on the SD card, send a link from your phone (open the address/QR code the Switch shows, paste a link), or type a GameBanana mod number (the end of its link, e.g. `724536`) in Add mods or Search
 - **Picks the right file** for your installed game version and warns about mismatches
 - **One-press install** from zip, 7z and rar, including archives with several options or nested archives
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
 - **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
-- **Hides NSFW mods** by default (uses GameBanana's own content ratings)
+- **Hides NSFW mods** (uses GameBanana's own content ratings), including mods opened by link or number. The setting is kept out of sight for kids: hold **L + R + −** for 3 seconds on the Settings page to show it. It turns back on every time Patchwork starts.
 
 Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods: packages made for
 BCML (`.bnp`) or TKMM (`.tkcl`) are detected and flagged as needing those PC tools.

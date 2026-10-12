@@ -1,6 +1,7 @@
 #include "settings_page.hpp"
 
 #include "app_state.hpp"
+#include "debug_script.hpp"
 #include "platform.hpp"
 #include "sysmodules.hpp"
 #include "ui.hpp"
@@ -32,18 +33,32 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         auto* l = ui::label(title, 16, ui::muted());
         l->setMargins(18, 0, 8, 4);
         content->addView(l);
+        return l;
     };
 
-    section("Browsing");
+    // NSFW: kept out of sight so children don't stumble on it. Holding L + R + minus for
+    // 3 seconds on this page shows it until Patchwork closes; every launch starts hidden.
+    nsfwViews_.push_back(section("Browsing"));
     auto* nsfw = new brls::BooleanCell();
-    nsfw->init("Hide NSFW mods", AppState::get().settings().hideNsfw, [](bool on) {
-        AppState::get().settings().hideNsfw = on;
-        AppState::get().saveSettings();
-    });
+    nsfw->init("Hide NSFW mods", AppState::get().settings().hideNsfw, [](bool on) { AppState::get().settings().hideNsfw = on; });
     content->addView(nsfw);
-    auto* nsfwNote = ui::label("Uses GameBanana's own content ratings: mods with nudity or sexual themes are hidden from Browse and Search.", 14, ui::muted(), false);
+    nsfwViews_.push_back(nsfw);
+    auto* nsfwNote = ui::label("Uses GameBanana's own content ratings: mods with nudity or sexual themes are hidden from Browse, "
+                               "Search and links. Turns back on every time Patchwork starts.",
+                               14, ui::muted(), false);
     nsfwNote->setMargins(6, 4, 0, 4);
     content->addView(nsfwNote);
+    nsfwViews_.push_back(nsfwNote);
+    if (!AppState::get().settings().nsfwSettingRevealed) {
+        for (auto* v : nsfwViews_) v->setVisibility(brls::Visibility::GONE);
+        holdTimer_.setCallback([this] {
+            auto held = [](brls::ControllerButton b) { return brls::Application::getControllerState().buttons[b] || debug::isHeld(b); };
+            bool all = held(brls::BUTTON_LB) && held(brls::BUTTON_RB) && held(brls::BUTTON_BACK);
+            heldMs_ = all ? heldMs_ + 100 : 0;
+            if (heldMs_ >= 3000) revealNsfwSetting();
+        });
+        holdTimer_.start(100);
+    }
 
     section("Background add-ons");
     auto modules = mm::listSysmodules(platform::sdRoot());
@@ -129,6 +144,13 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
+}
+
+void SettingsPage::revealNsfwSetting() {
+    holdTimer_.stop();
+    AppState::get().settings().nsfwSettingRevealed = true;
+    for (auto* v : nsfwViews_) v->setVisibility(brls::Visibility::VISIBLE);
+    brls::Application::giveFocus(nsfwViews_[1]);
 }
 
 }  // namespace app

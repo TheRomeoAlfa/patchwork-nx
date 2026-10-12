@@ -30,6 +30,8 @@ private:
     void installInboxFile(const mm::fs::path& path);
     void deleteInboxFile(const mm::fs::path& path);
     void showLinkIntro();
+    void showNumberIntro();
+    void askModNumber();
     void openLinkScreen();
     void showLinkScreen();
     void closeLinkScreen();

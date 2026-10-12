@@ -183,6 +183,31 @@ void AddModsPage::rebuild() {
         list_->addView(none);
     }
 
+    section("From GameBanana");
+    auto* numberRow = ui::focusRow();
+    ui::tappable(numberRow, ui::Tap::Act);
+    auto* hash = ui::label("#", 24, ui::accent());
+    hash->setWidth(24);
+    hash->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+    numberRow->addView(hash);
+    auto* numberText = ui::vbox();
+    numberText->setWidth(330);
+    numberText->setMarginLeft(12);
+    numberText->addView(ui::label("Enter a mod number", 17, ui::text()));
+    auto* numberSub = ui::label("The number at the end of its link", 14, ui::muted());
+    numberSub->setMarginTop(3);
+    numberText->addView(numberSub);
+    numberRow->addView(numberText);
+    numberRow->getFocusEvent()->subscribe([this](brls::View*) {
+        if (paneFree()) showNumberIntro();
+    });
+    numberRow->registerClickAction([this](brls::View*) {
+        askModNumber();
+        return true;
+    });
+    numberRow->updateActionHint(brls::BUTTON_A, "Enter number");
+    list_->addView(numberRow);
+
     section("From your phone");
     auto* row = ui::focusRow();
     ui::tappable(row, ui::Tap::Act);
@@ -281,6 +306,28 @@ void AddModsPage::showLinkIntro() {
         16, nvgRGB(0xc8, 0xc8, 0xc8), false);
     body->setMarginTop(12);
     pane_->addView(body);
+}
+
+void AddModsPage::showNumberIntro() {
+    clearPane();
+    pane_->addView(ui::label("Enter a mod number", 24, ui::text()));
+    auto* body = ui::label(
+        "Every GameBanana mod page ends in a number, for example gamebanana.com/mods/724536.\n\n"
+        "Type that number to open the mod here and pick a file to install.",
+        16, nvgRGB(0xc8, 0xc8, 0xc8), false);
+    body->setMarginTop(12);
+    pane_->addView(body);
+}
+
+void AddModsPage::askModNumber() {
+    if (!paneFree()) return;
+    auto alive = alive_;
+    brls::Application::getImeManager()->openForNumber(
+        [this, alive](long number) {
+            if (!*alive || number <= 0) return;
+            openLink("https://gamebanana.com/mods/" + std::to_string(number));
+        },
+        "GameBanana mod number", "The number at the end of the mod's link", 9);
 }
 
 void AddModsPage::openLinkScreen() {

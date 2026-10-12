@@ -6,6 +6,7 @@
 //   MM_SHOT_DIR=/tmp/shots
 //
 // Steps: w<ms> wait · t<x>,<y> tap · k<button> press (up down left right a b x y l r zl zr plus minus)
+//        h<button>+<button>…,<ms> hold buttons (as seen by code polling the controller state)
 //        s<name> screenshot to $MM_SHOT_DIR/<name>.png · q quit
 
 namespace app::debug {
@@ -13,5 +14,7 @@ namespace app::debug {
 void startScriptFromEnv();
 // Call after each Application::mainLoop() iteration.
 void afterFrame();
+// True while the script holds this button (always false outside desktop scripts).
+bool isHeld(int button);
 
 }  // namespace app::debug

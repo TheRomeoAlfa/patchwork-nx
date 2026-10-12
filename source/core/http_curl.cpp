@@ -72,7 +72,7 @@ void perform(CURL* h, const std::string& url) {
     if (rc != CURLE_OK) throw std::runtime_error(std::string("network error: ") + curl_easy_strerror(rc));
     long status = 0;
     curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &status);
-    if (status < 200 || status >= 300) throw std::runtime_error("the server answered with error " + std::to_string(status));
+    if (status < 200 || status >= 300) throw HttpStatusError(status);
     (void)url;
 }
 
