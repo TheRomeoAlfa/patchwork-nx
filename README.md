@@ -1,4 +1,4 @@
-<p align="center"><img src="resources/branding/icon-512.png" width="160" alt="Patchwork icon"></p>
+<p align="center"><img src="branding/icon-512.png" width="160" alt="Patchwork icon"></p>
 
 # Patchwork
 
@@ -61,7 +61,7 @@ cmake --build build-desktop
 cd build-desktop && MM_SD_ROOT=/tmp/fake-sd MM_TOTK_VERSION=1.2.1 ./patchwork
 ```
 
-Core logic tests (no UI):
+Core logic tests (no UI); see [docs/TESTING.md](docs/TESTING.md) for the full test plan:
 
 ```bash
 cmake -S . -B build && cmake --build build && ./build/mmtests

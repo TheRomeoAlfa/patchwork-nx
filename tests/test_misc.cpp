@@ -7,6 +7,7 @@
 #include "compat.hpp"
 #include "gamebanana.hpp"
 #include "installer.hpp"
+#include "md5.hpp"
 #include "test.hpp"
 
 using namespace mm;
@@ -71,6 +72,23 @@ TEST("installer: zip of zips gives one variant per inner zip") {
     for (const auto& m : merged) CHECK_EQ(readFile(m.source), std::string("red"));
 }
 
+TEST("compat: mod versions vs game versions") {
+    // UltraCam labels its files with its own version numbers.
+    std::vector<std::string> ultracam = {"Version 2.6.1", "Version 2.6", "Version 2.1.4", "VERSION 1.1.1"};
+    CHECK(versionWordIsModVersion(ultracam, Game::Totk));
+    CHECK(mentionedGameVersions("VERSION 1.1.1", Game::Totk, false, true).empty());
+    // Unbreakable Equipment labels files by game version.
+    std::vector<std::string> unbreakable = {"v1.0.0", "v1.2.1", "v1.4.1"};
+    CHECK(!versionWordIsModVersion(unbreakable, Game::Totk));
+    CHECK_EQ(mentionedGameVersions("v1.2.1", Game::Totk).size(), 1u);
+    // Descriptions: changelog numbers don't count, game words do; "server" isn't "ver".
+    CHECK(mentionedGameVersions("Changelog: v1.0 initial, v1.1 fixes", Game::Totk, true).empty());
+    CHECK(mentionedGameVersions("server 1.2 is down", Game::Totk).empty());
+    CHECK_EQ(mentionedGameVersions("Requires TotK 1.2.1", Game::Totk, true).size(), 1u);
+    CHECK(saysAllVersions("Base Defogger, All Game Update Versions"));
+    CHECK(!saysAllVersions("Only affects Interiors"));
+}
+
 TEST("compat: picks out game versions, ignores bare numbers") {
     auto v = mentionedGameVersions("<i>TKMM required and only tested on TotK v1.2.1</i>. Mod version 3.0, 1.5x durability", Game::Totk);
     CHECK_EQ(v.size(), 1u);
@@ -121,4 +139,20 @@ TEST("gamebanana: NSFW uses GameBanana's visibility, not every content rating") 
     CHECK(!page.mods[0].nsfw);
     CHECK(!page.mods[1].nsfw);
     CHECK(page.mods[2].nsfw);
+}
+
+TEST("archive: names a FAT SD card can't store are made safe") {
+    t::TempDir d;
+    auto zip = d.path / "m.zip";
+    makeZip(zip, {{"Mod/Option: 60fps?/romfs/a.txt", "x"}, {"C:/evil.txt", "bad"}});
+    auto out = d.path / "out";
+    extractArchive(zip, out);
+    CHECK(fs::exists(out / "Mod/Option_ 60fps_/romfs/a.txt"));
+    CHECK(!fs::exists(out / "C_"));
+}
+
+TEST("md5: known vectors") {
+    CHECK_EQ(md5String(""), std::string("d41d8cd98f00b204e9800998ecf8427e"));
+    CHECK_EQ(md5String("abc"), std::string("900150983cd24fb0d6963f7d28e17f72"));
+    CHECK_EQ(md5String(std::string(1000, 'a')), std::string("cabe45dcc9ae5b66ba86600cca6b8ba8"));
 }

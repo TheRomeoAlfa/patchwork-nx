@@ -21,16 +21,22 @@ brls::View* MainActivity::createContentView() {
 
     sidebar_ = new Sidebar();
     sidebar_->onNavigate = [this](Page p) { showPage(p); };
-    sidebar_->onSwitchGame = [] {
-        auto& st = AppState::get();
-        st.setGame(st.game() == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk);
-    };
+    sidebar_->onSwitchGame = [this] { switchGame(); };
     root->addView(sidebar_);
 
     content_ = ui::hbox();
     content_->setGrow(1);
     content_->setAlignItems(brls::AlignItems::STRETCH);
     root->addView(content_);
+    sink_ = new ui::FocusSink();
+    root->addView(sink_);
+
+    // B inside a page goes back to the sidebar (screens with their own B handle it first);
+    // B on the sidebar keeps Borealis' "exit the app?" prompt.
+    content_->registerAction("Back", brls::BUTTON_B, [this](brls::View*) {
+        brls::Application::giveFocus(sidebar_->itemFor(page_));
+        return true;
+    });
 
     auto* frame = new brls::AppletFrame(root);
     frame->setHeaderVisibility(brls::Visibility::GONE);
@@ -46,20 +52,26 @@ brls::View* MainActivity::createContentView() {
     });
     libSub_ = AppState::get().libraryChanged()->subscribe([this] { sidebar_->refresh(); });
 
-    // ZL / ZR flip between the games from anywhere.
-    registerAction("Switch game", brls::BUTTON_LT, [](brls::View*) {
-        auto& st = AppState::get();
-        st.setGame(st.game() == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk);
-        return true;
-    }, true);
-    registerAction("Switch game", brls::BUTTON_RT, [](brls::View*) {
-        auto& st = AppState::get();
-        st.setGame(st.game() == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk);
-        return true;
-    }, true);
-
     showPage(Page::Browse);
     return frame;
+}
+
+void MainActivity::onContentAvailable() {
+    // Actions can only be registered once the content view is set.
+    for (auto button : {brls::BUTTON_LT, brls::BUTTON_RT})
+        registerAction("Switch game", button, [this](brls::View*) {
+            switchGame();
+            return true;
+        }, true);
+}
+
+void MainActivity::switchGame() {
+    if (AppState::get().installBusy()) {
+        brls::Application::notify("Finish or cancel the install first");
+        return;
+    }
+    auto& st = AppState::get();
+    st.setGame(st.game() == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk);
 }
 
 bool MainActivity::focusInside(brls::View* container) const {
@@ -71,13 +83,19 @@ bool MainActivity::focusInside(brls::View* container) const {
 void MainActivity::showPage(Page page) {
     page_ = page;
     sidebar_->setActive(page);
+    bool focusWasInPage = ui::focusInside(content_);
+    ui::parkFocusIfInside(content_, sink_);
     content_->clearViews();
+    brls::View* view = nullptr;
     switch (page) {
-        case Page::Browse: content_->addView(new BrowsePage(false)); break;
-        case Page::Search: content_->addView(new BrowsePage(true)); break;
-        case Page::MyMods: content_->addView(new MyModsPage()); break;
-        case Page::Settings: content_->addView(new SettingsPage()); break;
+        case Page::Browse: view = new BrowsePage(false); break;
+        case Page::Search: view = new BrowsePage(true); break;
+        case Page::MyMods: view = new MyModsPage(); break;
+        case Page::Settings: view = new SettingsPage(); break;
     }
+    content_->addView(view);
+    // Pages that are still loading pick focus up from the sink themselves.
+    if (focusWasInPage) ui::tryFocus(view);
 }
 
 }  // namespace app

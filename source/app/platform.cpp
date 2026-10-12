@@ -53,6 +53,16 @@ uint64_t freeSpaceBytes() {
     return static_cast<uint64_t>(st.f_bavail) * st.f_frsize;
 }
 
+std::string caBundle() {
+#ifdef __SWITCH__
+    return "romfs:/cacert.pem";
+#else
+    // Use the bundled file on desktop too, so the same path is exercised during development.
+    std::error_code ec;
+    return mm::fs::exists("./resources/cacert.pem", ec) ? "./resources/cacert.pem" : "";
+#endif
+}
+
 std::string userAgent() {
 #ifdef __SWITCH__
     return "Mozilla/5.0 (Nintendo Switch; patchwork/" APP_VERSION ")";

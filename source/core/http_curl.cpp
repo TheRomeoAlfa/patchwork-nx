@@ -33,7 +33,7 @@ int progressCb(void* userdata, curl_off_t dltotal, curl_off_t dlnow, curl_off_t,
 
 using CurlPtr = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 
-CurlPtr makeHandle(const std::string& url, const std::string& userAgent) {
+CurlPtr makeHandle(const std::string& url, const std::string& userAgent, const std::string& caBundle) {
     CurlPtr h(curl_easy_init(), curl_easy_cleanup);
     if (!h) throw std::runtime_error("curl_easy_init failed");
     curl_easy_setopt(h.get(), CURLOPT_URL, url.c_str());
@@ -44,31 +44,49 @@ CurlPtr makeHandle(const std::string& url, const std::string& userAgent) {
     curl_easy_setopt(h.get(), CURLOPT_LOW_SPEED_LIMIT, 1L);  // abort if stalled for 60s
     curl_easy_setopt(h.get(), CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(h.get(), CURLOPT_ACCEPT_ENCODING, "");
-#ifdef __SWITCH__
-    // The Switch has no system CA bundle reachable from homebrew.
-    curl_easy_setopt(h.get(), CURLOPT_SSL_VERIFYPEER, 0L);
+    // Only web protocols, also after redirects.
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(h.get(), CURLOPT_PROTOCOLS_STR, "https,http");
+    curl_easy_setopt(h.get(), CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+    curl_easy_setopt(h.get(), CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | CURLPROTO_HTTP));
+    curl_easy_setopt(h.get(), CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS));
 #endif
+    if (!caBundle.empty()) {
+        curl_easy_setopt(h.get(), CURLOPT_CAINFO, caBundle.c_str());
+        curl_easy_setopt(h.get(), CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(h.get(), CURLOPT_SSL_VERIFYHOST, 2L);
+    } else {
+#ifdef __SWITCH__
+        curl_easy_setopt(h.get(), CURLOPT_SSL_VERIFYPEER, 0L);
+#endif
+    }
     return h;
 }
 
 void perform(CURL* h, const std::string& url) {
     auto rc = curl_easy_perform(h);
-    if (rc != CURLE_OK) throw std::runtime_error(std::string("network error: ") + curl_easy_strerror(rc) + " (" + url + ")");
+    if (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CACERT_BADFILE)
+        throw std::runtime_error(std::string("secure connection failed: ") + curl_easy_strerror(rc) +
+                                 ". Check the console's date and time.");
+    if (rc != CURLE_OK) throw std::runtime_error(std::string("network error: ") + curl_easy_strerror(rc));
     long status = 0;
     curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &status);
-    if (status < 200 || status >= 300) throw std::runtime_error("HTTP " + std::to_string(status) + " from " + url);
+    if (status < 200 || status >= 300) throw std::runtime_error("the server answered with error " + std::to_string(status));
+    (void)url;
 }
 
 }  // namespace
 
-CurlHttpClient::CurlHttpClient(std::string userAgent) : userAgent_(std::move(userAgent)) {
+CurlHttpClient::CurlHttpClient(std::string userAgent, std::string caBundle)
+    : userAgent_(std::move(userAgent)), caBundle_(std::move(caBundle)) {
     static CurlGlobal global;
 }
 
 CurlHttpClient::~CurlHttpClient() = default;
 
 std::string CurlHttpClient::get(const std::string& url) {
-    auto h = makeHandle(url, userAgent_);
+    auto h = makeHandle(url, userAgent_, caBundle_);
     std::string body;
     curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, appendToString);
     curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, &body);
@@ -84,7 +102,18 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
     FILE* f = std::fopen(part.string().c_str(), "wb");
     if (!f) throw std::runtime_error("cannot write " + part.string());
     std::setvbuf(f, nullptr, _IOFBF, 1 << 18);  // big buffer: SD card writes are slow in small chunks
-    auto h = makeHandle(url, userAgent_);
+    auto cleanup = [&] {
+        std::fclose(f);
+        std::error_code ec;
+        fs::remove(part, ec);
+    };
+    CurlPtr h(nullptr, curl_easy_cleanup);
+    try {
+        h = makeHandle(url, userAgent_, caBundle_);
+    } catch (...) {
+        cleanup();
+        throw;
+    }
     curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, writeToFile);
     curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, f);
     curl_easy_setopt(h.get(), CURLOPT_NOPROGRESS, 0L);
@@ -93,12 +122,14 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
     try {
         perform(h.get(), url);
     } catch (...) {
-        std::fclose(f);
-        std::error_code ec;
-        fs::remove(part, ec);
+        cleanup();
         throw;
     }
-    if (std::fclose(f) != 0) throw std::runtime_error("write failed (SD card full?)");
+    if (std::fclose(f) != 0) {
+        std::error_code ec;
+        fs::remove(part, ec);
+        throw std::runtime_error("write failed (SD card full?)");
+    }
     std::error_code ec;
     fs::remove(dest, ec);
     fs::rename(part, dest);

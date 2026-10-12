@@ -2,11 +2,13 @@
 
 #include <borealis.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "gamebanana.hpp"
+#include "ui.hpp"
 
 namespace app {
 
@@ -37,6 +39,9 @@ private:
     void refreshCells();
     void showPreview(int row);
     void backToPreview();
+    void clearPane();
+    void showEmptyState(const std::string& message, const std::string& action);
+    std::unique_ptr<InstallFlow> makeFlow();
 
     bool searchMode_;
     std::string query_;
@@ -60,6 +65,10 @@ private:
     brls::Box* pane_ = nullptr;  // right side: preview or the install flow
     brls::Box* listEmpty_ = nullptr;
     std::unique_ptr<InstallFlow> flow_;
+    ui::FocusSink* sink_ = nullptr;
+    std::shared_ptr<bool> previewToken_ = std::make_shared<bool>(false);  // the preview on screen
+    int clickToken_ = 0;                                                 // latest A press
+    std::chrono::steady_clock::time_point retryAfter_{};                 // after a failed page load
 
     brls::VoidEvent::Subscription libSub_;
 };

@@ -129,11 +129,12 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     auto* header = ui::hbox();
     header->setMargins(0, 18, 10, 12);
     // The title takes the free space itself; a separate spacer left it measured too narrow.
+    // Fixed widths: a label whose text changes after layout keeps its first measurement.
     title_ = ui::label("", 22, ui::text());
-    title_->setGrow(1);
-    title_->setShrink(1);
+    title_->setWidth(300);
     count_ = ui::label("", 15, ui::muted());
-    count_->setMarginLeft(10);
+    count_->setWidth(130);
+    count_->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
     header->addView(title_);
     header->addView(count_);
     left->addView(header);
@@ -161,21 +162,18 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     pane_->setBackgroundColor(ui::panelBg());
     addView(pane_);
 
-    flow_ = std::make_unique<InstallFlow>(pane_);
-    flow_->onExit = [this] {
-        if (items_.empty() && !searchMode_)
-            reload();  // the message was "couldn't reach GameBanana"
-        else
-            backToPreview();
-    };
+    sink_ = new ui::FocusSink();
+    addView(sink_);
+    flow_ = makeFlow();
 
     // Page-wide actions (they show in the footer while anything inside has focus).
-    registerAction("Sort", brls::BUTTON_Y, [this](brls::View*) {
-        if (searchMode_ || flow_->active()) return false;
-        sort_ = nextSort(sort_);
-        reload();
-        return true;
-    });
+    if (!searchMode_)
+        registerAction("Sort", brls::BUTTON_Y, [this](brls::View*) {
+            if (searchMode_ || flow_->active()) return false;
+            sort_ = nextSort(sort_);
+            reload();
+            return true;
+        });
     registerAction("Search", brls::BUTTON_X, [this](brls::View*) {
         if (flow_->active()) return false;
         openSearchKeyboard();
@@ -185,23 +183,48 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     libSub_ = AppState::get().libraryChanged()->subscribe([this] { refreshCells(); });
 
     if (searchMode_) {
-        auto* row = ui::focusRow();
-        row->addView(ui::label(ui::icon::search, 24, ui::accent()));
-        auto* l = ui::label("Search GameBanana", 18, ui::text());
-        l->setMarginLeft(12);
-        row->addView(l);
-        row->registerClickAction([this](brls::View*) {
-            openSearchKeyboard();
-            return true;
-        });
-        listEmpty_->addView(row);
-        listEmpty_->setVisibility(brls::Visibility::VISIBLE);
-        scroll_->setVisibility(brls::Visibility::GONE);
         updateHeader();
-        pane_->addView(ui::label("Find mods by name, author or keyword.", 18, ui::muted(), false));
+        showEmptyState("Find mods by name, author or keyword.", "Search GameBanana");
     } else {
         reload();
     }
+}
+
+std::unique_ptr<InstallFlow> BrowsePage::makeFlow() {
+    auto flow = std::make_unique<InstallFlow>(pane_, sink_);
+    flow->onExit = [this] { backToPreview(); };
+    return flow;
+}
+
+void BrowsePage::clearPane() {
+    ui::parkFocusIfInside(pane_, sink_);
+    *previewToken_ = false;  // late image/details callbacks for the old preview must not touch it
+    pane_->clearViews();
+}
+
+// Shown when the list is empty (nothing found, nothing left after the NSFW filter, or an
+// error): a message on the right and a focusable action on the left.
+void BrowsePage::showEmptyState(const std::string& message, const std::string& action) {
+    ui::parkFocusIfInside(listEmpty_, sink_);
+    listEmpty_->clearViews();
+    auto* row = ui::focusRow();
+    row->addView(ui::label(searchMode_ ? ui::icon::search : ui::icon::browse, 24, ui::accent()));
+    auto* l = ui::label(action, 18, ui::text());
+    l->setMarginLeft(12);
+    row->addView(l);
+    row->registerClickAction([this](brls::View*) {
+        if (searchMode_)
+            openSearchKeyboard();
+        else
+            reload();
+        return true;
+    });
+    listEmpty_->addView(row);
+    listEmpty_->setVisibility(brls::Visibility::VISIBLE);
+    scroll_->setVisibility(brls::Visibility::GONE);
+    clearPane();
+    pane_->addView(ui::label(message, 18, ui::muted(), false));
+    if (ui::focusInside(this) || ui::focusParked()) brls::Application::giveFocus(row);
 }
 
 BrowsePage::~BrowsePage() {
@@ -231,6 +254,8 @@ void BrowsePage::updateHeader() {
 }
 
 void BrowsePage::reload() {
+    ui::parkFocusIfInside(this, sink_);  // the rows and the preview are about to go
+    loading_ = false;                    // a reply for the old list is ignored (generation check)
     items_.clear();
     page_ = 0;
     total_ = 0;
@@ -245,7 +270,7 @@ void BrowsePage::reload() {
 }
 
 void BrowsePage::loadMore() {
-    if (loading_ || reachedEnd_) return;
+    if (loading_ || reachedEnd_ || std::chrono::steady_clock::now() < retryAfter_) return;
     if (searchMode_ && query_.empty()) return;
     loading_ = true;
     int page = page_ + 1;
@@ -255,8 +280,9 @@ void BrowsePage::loadMore() {
     bool search = searchMode_;
     bool hideNsfw = AppState::get().settings().hideNsfw;
     auto alive = alive_;
+    int gen = generation_;
     if (items_.empty() && !flow_->active()) {
-        pane_->clearViews();
+        clearPane();
         pane_->addView(new brls::ProgressSpinner());
     }
     AppState::get().runNetwork([=, this] {
@@ -269,11 +295,13 @@ void BrowsePage::loadMore() {
             error = e.what();
         }
         brls::sync([=, this] {
-            if (!*alive) return;
+            if (!*alive || gen != generation_) return;  // the list was reloaded meanwhile
             loading_ = false;
             if (!error.empty()) {
-                if (items_.empty()) flow_->showMessage("Couldn't reach GameBanana", "Check your internet connection, then press A to try again.\n\n" + error, true);
-                reachedEnd_ = true;
+                if (items_.empty())
+                    showEmptyState("Couldn't reach GameBanana. Check your internet connection.\n\n" + error, "Try again");
+                else
+                    retryAfter_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);  // retried on scroll
                 return;
             }
             page_ = page;
@@ -285,24 +313,19 @@ void BrowsePage::loadMore() {
                 if (!(hideNsfw && m.nsfw)) items_.push_back(m);
             updateHeader();
             bool empty = items_.empty();
-            scroll_->setVisibility(empty ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
-            if (empty && search) {
-                listEmpty_->setVisibility(brls::Visibility::VISIBLE);
-                pane_->clearViews();
-                pane_->addView(ui::label("No mods found for \"" + query + "\". Press X to try another search.", 18, ui::muted(), false));
+            if (empty && reachedEnd_) {
+                showEmptyState(search ? "No mods found for \"" + query + "\"." : "No mods to show here.",
+                               search ? "Search again" : "Reload");
                 return;
             }
-            listEmpty_->setVisibility(empty ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+            scroll_->setVisibility(empty ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
+            listEmpty_->setVisibility(brls::Visibility::GONE);
             appendRows(firstNew);
             if (wasEmpty && !empty) {
                 focusedRow_ = 0;
                 showPreview(0);
-                // Only grab focus if it was already inside this page.
-                for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
-                    if (v == this) {
-                        brls::Application::giveFocus(rows_[0]);
-                        break;
-                    }
+                // Take focus only if it was in this page (or parked while it reloaded).
+                if (ui::focusInside(this) || ui::focusParked()) brls::Application::giveFocus(rows_[0]);
             }
             // Short pages after filtering: keep going so the list fills up.
             if (!reachedEnd_ && items_.size() < 12) loadMore();
@@ -378,13 +401,7 @@ void BrowsePage::onRowFocused(int row) {
     // Moving back into the list abandons an install that hasn't started working yet.
     if (flow_->active() && !flow_->busy()) {
         flow_->onExit = nullptr;
-        flow_ = std::make_unique<InstallFlow>(pane_);
-        flow_->onExit = [this] {
-            if (items_.empty() && !searchMode_)
-                reload();
-            else
-                backToPreview();
-        };
+        flow_ = makeFlow();
         focusedRow_ = -1;
     }
     if (flow_->active() || row == focusedRow_) return;
@@ -398,24 +415,29 @@ void BrowsePage::onRowFocused(int row) {
 void BrowsePage::onRowClicked(int row) {
     if (flow_->active() || row < 0 || row >= rowCount()) return;
     auto id = items_[row].id;
+    *previewToken_ = false;
     if (auto d = AppState::get().cachedDetails(id)) {
         flow_->showFilePicker(*d);
         return;
     }
     flow_->showLoading("Loading files…");
     auto alive = alive_;
+    // Ignore the reply if the user moved on (another A press, or left this flow).
+    int token = ++clickToken_;
+    InstallFlow* flow = flow_.get();
+    auto current = [this, alive, token, flow] { return *alive && token == clickToken_ && flow_.get() == flow && flow_->active(); };
     AppState::get().runNetwork([=, this] {
         try {
             auto d = AppState::get().gamebanana().details(id);
             brls::sync([=, this] {
-                if (!*alive || !flow_->active()) return;
+                if (!current()) return;
                 AppState::get().cacheDetails(d);
                 flow_->showFilePicker(d);
             });
         } catch (const std::exception& e) {
             std::string err = e.what();
             brls::sync([=, this] {
-                if (*alive && flow_->active()) flow_->showMessage("Couldn't load this mod", err, true);
+                if (current()) flow_->showMessage("Couldn't load this mod", err, true);
             });
         }
     });
@@ -429,15 +451,17 @@ void BrowsePage::backToPreview() {
         focusedRow_ = row;  // set before showPreview: the preview only fills in for the focused row
         showPreview(row);
     } else {
-        pane_->clearViews();
+        clearPane();
     }
-    brls::Application::giveFocus(rowFocus());
+    ui::tryFocus(rowFocus());
 }
 
 void BrowsePage::showPreview(int row) {
     if (row < 0 || row >= rowCount()) return;
     const auto summary = items_[row];
-    pane_->clearViews();
+    clearPane();
+    auto token = std::make_shared<bool>(true);
+    previewToken_ = token;
 
     // Everything scrolls together: move right into the pane to read the whole description.
     auto* content = ui::vbox();
@@ -448,7 +472,7 @@ void BrowsePage::showPreview(int row) {
     scroll->setContentView(content);
     pane_->addView(scroll);
     content->registerAction("Back to list", brls::BUTTON_B, [this](brls::View*) {
-        brls::Application::giveFocus(rowFocus());
+        ui::tryFocus(rowFocus());
         return true;
     });
     content->registerAction("Install", brls::BUTTON_A, [this](brls::View*) {
@@ -465,9 +489,8 @@ void BrowsePage::showPreview(int row) {
     content->addView(hero);
     auto alive = alive_;
     int64_t id = summary.id;
-    auto wanted = [this, alive, id] {
-        return *alive && !flow_->active() && focusedRow_ >= 0 && focusedRow_ < rowCount() && items_[focusedRow_].id == id;
-    };
+    // Only for this preview, while it's on screen (it may be rebuilt for the same mod).
+    auto wanted = [alive, token] { return *alive && *token; };
     AppState::get().loadImage(hero, summary.thumbnailUrl, wanted);
 
     auto* titleRow = ui::hbox();
@@ -477,7 +500,10 @@ void BrowsePage::showPreview(int row) {
     name->setShrink(1);
     titleRow->addView(name);
     titleRow->addView(ui::grow());
-    titleRow->addView(ui::label(std::string(ui::icon::heart) + " " + formatCount(summary.likes), 16, ui::muted()));
+    auto* likes = ui::label(std::string(ui::icon::heart) + " " + formatCount(summary.likes), 16, ui::muted());
+    likes->setShrink(0);
+    likes->setMarginLeft(12);
+    titleRow->addView(likes);
     content->addView(titleRow);
     auto* meta = ui::label("by " + summary.author + " · " + summary.category, 16, ui::muted());
     meta->setMarginTop(6);
@@ -505,8 +531,9 @@ void BrowsePage::showPreview(int row) {
         if (st.pendingFor(id)) line(std::string(ui::icon::file) + "  Downloaded, not installed yet: press A to finish", ui::accent());
 
         bool anyMatch = false, allUnsupported = !d.files.empty();
+        bool versionWordIsMod = modUsesVersionWord(d, game);
         for (const auto& f : d.files) {
-            anyMatch |= noteFor(f, game, installed).matches;
+            anyMatch |= noteFor(f, game, installed, versionWordIsMod).matches;
             allUnsupported &= isUnsupportedPackage(f);
         }
         if (d.files.empty()) {
@@ -514,9 +541,9 @@ void BrowsePage::showPreview(int row) {
         } else if (allUnsupported) {
             line(std::string(ui::icon::pc) + "  Only available as a PC merge package (BCML/TKMM)", ui::warn());
         } else if (anyMatch) {
-            line(std::string(ui::icon::check) + "  Has a file for your game (v" + installed + ")", ui::ok());
+            line(std::string(ui::icon::check) + "  Has a file for your game" + (installed.empty() ? std::string() : " (v" + installed + ")"), ui::ok());
         } else {
-            auto named = mm::mentionedGameVersions(d.descriptionHtml, game);
+            auto named = mm::mentionedGameVersions(d.descriptionHtml, game, true);
             if (!installed.empty() && mm::checkCompat(installed, named) == mm::Compat::Mismatch)
                 line(std::string(ui::icon::warning) + "  Mentions game v" + named.front() + ", you have v" + installed, ui::warn());
         }
@@ -544,6 +571,7 @@ void BrowsePage::showPreview(int row) {
     }
     // Debounce: only fetch if the user stays on this row for a moment.
     previewDelay_ = brls::delay(250, [this, alive, id, fill, wanted] {
+        // (the debounce: only fetch if the preview is still showing this mod)
         if (!*alive) return;
         previewDelay_ = 0;
         if (!wanted()) return;

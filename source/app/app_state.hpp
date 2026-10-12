@@ -86,6 +86,9 @@ public:
     // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
     void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
     bool fileJobRunning() const { return fileJobs_ > 0; }
+    // An install flow is downloading/unpacking/copying: page and game switches wait for it.
+    void setInstallBusy(bool busy) { installBusy_ += busy ? 1 : -1; }
+    bool installBusy() const { return installBusy_ > 0; }
     const LibrarySnapshot& snapshot() const { return snapshot_; }
     brls::VoidEvent* libraryChanged() { return &libraryChanged_; }
     std::vector<const mm::ModRecord*> mods(mm::Game g) const;
@@ -133,6 +136,7 @@ private:
     WorkQueue net_{3};
     WorkQueue files_{1};
     std::atomic<int> fileJobs_{0};
+    int installBusy_ = 0;
 
     brls::VoidEvent gameChanged_;
     brls::VoidEvent libraryChanged_;

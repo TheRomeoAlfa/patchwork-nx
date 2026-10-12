@@ -204,3 +204,77 @@ TEST("util: removeTree deletes nested folders and tolerates missing paths") {
     CHECK(!fs::exists(d.path / "x"));
     CHECK(removeTree(d.path / "missing"));
 }
+
+TEST("library: a failed import leaves the user's originals in place") {
+    Fixture f;
+    const std::string botw = "atmosphere/contents/01007EF00011E000/romfs/";
+    write(f.sd / (botw + "a.bin"), "orig-a");
+    write(f.sd / (botw + "b.bin"), "orig-b");
+    f.addMod("m", {botw + "a.bin", botw + "b.bin"}, true, Game::Botw);  // originals now in backup/
+    // Make one backup unreadable so the import fails half-way.
+    auto bk = f.sd / "switch/mm/backup" / (botw + "b.bin");
+    fs::permissions(bk, fs::perms::none);
+    bool threw = false;
+    try {
+        f.lib.importUnmanaged(Game::Botw, "Existing");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    fs::permissions(bk, fs::perms::owner_all);
+    CHECK(threw);
+    f.lib.setEnabled("m", false);
+    CHECK_EQ(read(f.sd / (botw + "a.bin")), std::string("orig-a"));
+    CHECK_EQ(read(f.sd / (botw + "b.bin")), std::string("orig-b"));
+}
+
+TEST("library: originals are restored even when mods use different letter case") {
+    Fixture f;
+    write(f.sd / (kRomfs + "Foo.bin"), "orig");
+    f.addMod("a", {kRomfs + "Foo.bin"});
+    f.addMod("b", {kRomfs + "foo.bin"});
+    f.lib.setEnabled("a", false);
+    f.lib.setEnabled("b", false);
+    CHECK_EQ(read(f.sd / (kRomfs + "Foo.bin")), std::string("orig"));
+    CHECK(f.lib.unmanagedFiles(Game::Totk).targets.size() == 1);  // the original, back on the card
+}
+
+TEST("library: a missing backup doesn't block every later change") {
+    Fixture f;
+    write(f.sd / (kRomfs + "x"), "orig");
+    f.addMod("a", {kRomfs + "x"});
+    removeTree(f.sd / "switch/mm/backup");  // e.g. deleted by the user, or restored before a power cut
+    f.lib.setEnabled("a", false);           // must not throw
+    f.addMod("b", {kRomfs + "y"});          // and the library keeps working
+    CHECK(fs::exists(f.sd / (kRomfs + "y")));
+}
+
+TEST("library: state survives an interrupted save and a corrupt file") {
+    Fixture f;
+    f.addMod("a", {kRomfs + "1"});
+    auto state = f.sd / "switch/mm/state.json";
+    auto tmp = state;
+    tmp += ".tmp";
+    fs::rename(state, tmp);  // power cut between removing the old file and renaming the new one
+    Library again(f.sd, f.sd / "switch/mm");
+    CHECK(again.load());
+    CHECK(again.find("a") != nullptr);
+
+    write(state, "{ not json");
+    fs::remove(tmp);
+    Library broken(f.sd, f.sd / "switch/mm");
+    CHECK(!broken.load());
+    CHECK(fs::exists(f.sd / "switch/mm/state.json.corrupt"));
+}
+
+TEST("library: stop managing hands the current file over without bringing back an old original") {
+    Fixture f;
+    const std::string botw = "atmosphere/contents/01007EF00011E000/romfs/";
+    write(f.sd / (botw + "x"), "orig");
+    f.addMod("m", {botw + "x"}, true, Game::Botw);
+    f.lib.forget("m");
+    CHECK_EQ(read(f.sd / (botw + "x")), "m:" + botw + "x");
+    auto un = f.lib.unmanagedFiles(Game::Botw);
+    CHECK_EQ(un.targets.size(), 1u);
+    f.lib.importUnmanaged(Game::Botw, "Existing");
+    CHECK_EQ(read(f.sd / (botw + "x")), "m:" + botw + "x");
+}

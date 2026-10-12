@@ -20,7 +20,9 @@ struct FileNote {
     NVGcolor color;
     bool matches = false;
 };
-FileNote noteFor(const mm::gb::ModFile& f, mm::Game game, const std::string& installedVersion);
+// versionWordIsMod: from mm::versionWordIsModVersion over all of the mod's file labels.
+FileNote noteFor(const mm::gb::ModFile& f, mm::Game game, const std::string& installedVersion, bool versionWordIsMod);
+bool modUsesVersionWord(const mm::gb::ModDetails& d, mm::Game game);
 bool isUnsupportedPackage(const mm::gb::ModFile& f);
 size_t recommendedFile(const mm::gb::ModDetails& d, mm::Game game, const std::string& installedVersion);
 
@@ -31,7 +33,8 @@ size_t recommendedFile(const mm::gb::ModDetails& d, mm::Game game, const std::st
 // retried without downloading again; each attempt unpacks into its own folder.
 class InstallFlow {
 public:
-    explicit InstallFlow(brls::Box* pane);
+    // `sink` must outlive the pane's contents (it parks focus while the pane is redrawn).
+    InstallFlow(brls::Box* pane, ui::FocusSink* sink);
     ~InstallFlow();
 
     std::function<void()> onExit;  // the user left the flow (B, or OK on a message)
@@ -52,8 +55,10 @@ private:
                 std::vector<size_t> variants);
     void clear();
     void leave();
+    void setBusy(bool busy);
 
     brls::Box* pane_;
+    ui::FocusSink* sink_;
     std::shared_ptr<bool> flowAlive_ = std::make_shared<bool>(true);
     bool active_ = false;
     bool busy_ = false;

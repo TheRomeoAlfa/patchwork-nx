@@ -66,6 +66,16 @@ std::vector<std::string> pathParts(const fs::path& p) {
     return parts;
 }
 
+std::string fatSafeName(std::string_view name) {
+    std::string out(name);
+    for (auto& c : out)
+        if (c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || static_cast<unsigned char>(c) < 0x20)
+            c = '_';
+    // FAT drops trailing dots and spaces, which would make two names collide.
+    while (!out.empty() && (out.back() == '.' || out.back() == ' ')) out.back() = '_';
+    return out.empty() ? "_" : out;
+}
+
 bool isSafeRelativePath(std::string_view p) {
     if (p.empty() || p[0] == '/' || p[0] == '\\') return false;
     if (p.find(':') != std::string_view::npos) return false;  // "C:" or "sdmc:"
@@ -82,7 +92,11 @@ bool isSafeRelativePath(std::string_view p) {
 bool removeTree(const fs::path& p, std::string* error) {
     std::error_code ec;
     auto st = fs::symlink_status(p, ec);
-    if (ec || st.type() == fs::file_type::not_found) return true;
+    if (st.type() == fs::file_type::not_found) return true;
+    if (ec) {
+        if (error) *error = "can't access " + p.string() + ": " + ec.message();
+        return false;
+    }
     std::vector<fs::path> files, dirs;
     if (st.type() == fs::file_type::directory) {
         for (fs::recursive_directory_iterator it(p, ec), end; !ec && it != end; it.increment(ec)) {
@@ -148,10 +162,15 @@ void writeFileAtomic(const fs::path& p, std::string_view data) {
         out.write(data.data(), static_cast<std::streamsize>(data.size()));
         if (!out) throw std::runtime_error("write failed " + tmp.string());
     }
-    // FAT32 rename does not replace an existing file on every platform; remove first.
+    // Rename over the old file in one step where the filesystem allows it, so there is never
+    // a moment without a state file. FAT on the Switch refuses; then remove + rename, and
+    // load() falls back to the .tmp file if power is lost in between.
     std::error_code ec;
-    fs::remove(p, ec);
-    fs::rename(tmp, p);
+    fs::rename(tmp, p, ec);
+    if (ec) {
+        fs::remove(p, ec);
+        fs::rename(tmp, p);
+    }
 }
 
 }  // namespace mm

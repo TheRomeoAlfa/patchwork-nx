@@ -39,10 +39,12 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     pane_->setBackgroundColor(ui::panelBg());
     addView(pane_);
 
-    flow_ = std::make_unique<InstallFlow>(pane_);
+    sink_ = new ui::FocusSink();
+    addView(sink_);
+    flow_ = std::make_unique<InstallFlow>(pane_, sink_);
     flow_->onExit = [this] { rebuild(); };
     libSub_ = AppState::get().libraryChanged()->subscribe([this] {
-        if (!busy_ && !flow_->active()) rebuild();
+        if (!busy_ && !flow_->active()) rebuildWhenSafe();
     });
     rebuild();
 }
@@ -57,12 +59,11 @@ brls::View* MyModsPage::getDefaultFocus() { return list_->getDefaultFocus(); }
 void MyModsPage::rebuild() {
     auto& st = AppState::get();
     auto mods = st.mods(st.game());
-    bool hadFocus = false;
-    for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
-        if (v == this) hadFocus = true;
-
+    dirty_ = false;
+    bool hadFocus = ui::focusInside(this) || ui::focusParked();
+    ui::parkFocusIfInside(this, sink_);
     list_->clearViews();
-    pane_->clearViews();
+    clearPane();
 
     // Mod files on the card that Patchwork didn't install (a randomizer, manual copies…).
     brls::View* unmanagedRow = nullptr;
@@ -81,7 +82,9 @@ void MyModsPage::rebuild() {
         sub->setMarginTop(3);
         text->addView(sub);
         row->addView(text);
-        row->getFocusEvent()->subscribe([this, unmanaged](brls::View*) { showUnmanaged(unmanaged.files, unmanaged.bytes); });
+        row->getFocusEvent()->subscribe([this, unmanaged](brls::View*) {
+            if (paneFree()) showUnmanaged(unmanaged.files, unmanaged.bytes);
+        });
         row->registerClickAction([this, unmanaged](brls::View*) {
             importUnmanaged(unmanaged.files, unmanaged.bytes);
             return true;
@@ -111,7 +114,9 @@ void MyModsPage::rebuild() {
             sub->setMarginTop(3);
             text->addView(sub);
             row->addView(text);
-            row->getFocusEvent()->subscribe([this, p](brls::View*) { showPending(p); });
+            row->getFocusEvent()->subscribe([this, p](brls::View*) {
+                if (paneFree()) showPending(p);
+            });
             row->registerClickAction([this, p](brls::View*) {
                 flow_->install(p.details, p.file);
                 return true;
@@ -182,7 +187,7 @@ void MyModsPage::rebuild() {
 
         row->getFocusEvent()->subscribe([this, id](brls::View*) {
             focusedId_ = id;
-            showDetails(id);
+            if (paneFree()) showDetails(id);
         });
         row->registerClickAction([this, id](brls::View*) {
             toggle(id);
@@ -211,7 +216,7 @@ void MyModsPage::rebuild() {
 }
 
 void MyModsPage::showUnmanaged(size_t files, uint64_t bytes) {
-    pane_->clearViews();
+    clearPane();
     pane_->addView(ui::label("Files already on SD card", 26, ui::text()));
     auto* meta = ui::label(std::to_string(files) + " files · " + formatSize(bytes), 16, ui::muted());
     meta->setMargins(4, 0, 16, 0);
@@ -226,8 +231,45 @@ void MyModsPage::showUnmanaged(size_t files, uint64_t bytes) {
         16, nvgRGB(0xc8, 0xc8, 0xc8), false));
 }
 
-void MyModsPage::showPending(const PendingInstall& p) {
+void MyModsPage::rebuildWhenSafe() {
+    // While a dialog is open it will hand focus back to one of our rows when it closes, so
+    // those rows must survive: catch up once focus is back (onChildFocusGained).
+    auto* focus = brls::Application::getCurrentFocus();
+    if (focus && focus->getParentActivity() != getParentActivity())
+        dirty_ = true;
+    else
+        rebuild();
+}
+
+void MyModsPage::clearPane() {
+    ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
+}
+
+bool MyModsPage::paneFree() {
+    if (!flow_->active()) return true;
+    if (flow_->busy()) return false;
+    // Moving back into the list abandons an install that's waiting for a choice.
+    flow_->onExit = nullptr;
+    flow_ = std::make_unique<InstallFlow>(pane_, sink_);
+    flow_->onExit = [this] { rebuild(); };
+    return true;
+}
+
+void MyModsPage::onChildFocusGained(brls::View* directChild, brls::View* focusedView) {
+    brls::Box::onChildFocusGained(directChild, focusedView);
+    // Catch up on changes made while a dialog had focus, once it's safe (next frame).
+    if (dirty_ && !busy_ && !flow_->active()) {
+        dirty_ = false;
+        auto alive = alive_;
+        brls::sync([this, alive] {
+            if (*alive) rebuild();
+        });
+    }
+}
+
+void MyModsPage::showPending(const PendingInstall& p) {
+    clearPane();
     pane_->addView(ui::label(p.details.summary.name, 26, ui::text()));
     auto* meta = ui::label(p.file.filename + " · " + formatSize(static_cast<uint64_t>(p.file.size)), 16, ui::muted());
     meta->setMargins(4, 0, 16, 0);
@@ -272,7 +314,7 @@ void MyModsPage::importUnmanaged(size_t files, uint64_t bytes) {
 void MyModsPage::showDetails(const std::string& id) {
     auto& st = AppState::get();
     const auto* m = st.findMod(id);
-    pane_->clearViews();
+    clearPane();
     if (!m) return;
 
     pane_->addView(ui::label(m->name, 26, ui::text()));
@@ -335,7 +377,7 @@ void MyModsPage::showDetails(const std::string& id) {
     std::string info = "Installed " + std::string(date);
     if (!m->sourceFile.empty()) info += "\nFile: " + m->sourceFile;
     if (!m->version.empty()) info += "\nMod version: " + m->version;
-    if (m->variants.size() > 1 || (m->variants.size() == 1 && m->variants[0] != "Main")) {
+    if (m->variants.size() > 1) {
         info += "\nOptions:";
         for (const auto& v : m->variants) info += " " + v + ";";
         info.pop_back();
@@ -347,9 +389,10 @@ void MyModsPage::showDetails(const std::string& id) {
 
 void MyModsPage::runJob(const std::string& status, std::function<void(mm::Library&)> job) {
     if (busy_) return;
+    if (AppState::get().fileJobRunning())
+        brls::Application::notify("Waiting for the current install to finish…");
     busy_ = true;
-    brls::Application::blockInputs();
-    pane_->clearViews();
+    clearPane();
     auto* box = ui::vbox();
     box->setGrow(1);
     box->setJustifyContent(brls::JustifyContent::CENTER);
@@ -362,11 +405,10 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
 
     auto alive = alive_;
     AppState::get().runFileJob(std::move(job), [this, alive](const std::string& error) {
-        brls::Application::unblockInputs();
         if (!*alive) return;
         busy_ = false;
         if (!error.empty()) brls::Application::notify("Something went wrong: " + error);
-        rebuild();
+        rebuildWhenSafe();
     });
 }
 

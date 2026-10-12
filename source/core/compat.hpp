@@ -7,11 +7,23 @@
 
 namespace mm {
 
-// Pull game versions a mod page or file description names, e.g. "only tested on TotK
-// v1.2.1" -> {"1.2.1"}. Only numbers next to words like "version", "update", "totk",
-// "botw" or a leading "v" count, and only versions the game could plausibly have, so a
-// mod's own version number is mostly ignored. "1.2.x" is returned as "1.2".
-std::vector<std::string> mentionedGameVersions(const std::string& text, Game game);
+// Pull game versions out of a mod page or file description, e.g. "only tested on TotK
+// v1.2.1" -> {"1.2.1"}. "1.2.x" is returned as "1.2". Only versions the game could
+// plausibly have are returned.
+//
+// strict: only numbers next to a game word (TotK, BotW, game, update, patch) count. Use it
+//         for free-form mod descriptions, which are full of changelog numbers.
+// Otherwise a leading "v" or the word "version" also counts (file labels like "v1.2.1"),
+// unless versionWordIsModVersion says this mod uses "Version x" for its own releases.
+std::vector<std::string> mentionedGameVersions(const std::string& text, Game game, bool strict = false,
+                                               bool versionWordIsModVersion = false);
+
+// True if a mod's file labels use "Version x.y" for the mod's own releases (some number
+// that can't be a game version, like "Version 2.6.1").
+bool versionWordIsModVersion(const std::vector<std::string>& labels, Game game);
+
+// "All Game Update Versions", "works on any version", ...
+bool saysAllVersions(const std::string& text);
 
 enum class Compat { Unknown, Likely, Mismatch };
 

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "library.hpp"
+#include "ui.hpp"
 
 namespace app {
 class InstallFlow;
@@ -34,6 +35,11 @@ private:
     void importUnmanaged(size_t files, uint64_t bytes);
     void showPending(const PendingInstall& p);
     void discardPending(const PendingInstall& p);
+    void clearPane();
+    void rebuildWhenSafe();
+    // Called when a row gains focus; false if the pane belongs to an install in progress.
+    bool paneFree();
+    void onChildFocusGained(brls::View* directChild, brls::View* focusedView) override;
 
     std::string focusedId_;
     bool busy_ = false;
@@ -44,6 +50,8 @@ private:
     brls::Label* count_ = nullptr;
     brls::VoidEvent::Subscription libSub_;
     std::unique_ptr<InstallFlow> flow_;  // finishes downloads that weren't installed
+    ui::FocusSink* sink_ = nullptr;
+    bool dirty_ = false;  // the library changed while focus was elsewhere (e.g. a dialog)
 };
 
 }  // namespace app

@@ -69,16 +69,46 @@ std::string targetKey(const std::string& target) { return toLower(target); }
 
 Library::Library(fs::path sdRoot, fs::path dataDir) : sdRoot_(std::move(sdRoot)), dataDir_(std::move(dataDir)) {}
 
-void Library::load() {
+bool Library::load() {
     mods_.clear();
     deployed_.clear();
     backedUp_.clear();
     auto path = dataDir_ / "state.json";
-    if (!fs::exists(path)) return;
-    auto j = json::parse(readFile(path));
+    auto tmp = path;
+    tmp += ".tmp";
+    std::error_code ec;
+    json j;
+    bool parsed = false;
+    for (const auto& candidate : {path, tmp}) {
+        if (!fs::exists(candidate, ec)) continue;
+        try {
+            j = json::parse(readFile(candidate));
+            parsed = j.is_object();
+        } catch (...) {
+            parsed = false;
+        }
+        if (parsed) break;
+    }
+    if (!parsed) {
+        if (fs::exists(path, ec)) {
+            // Keep it for inspection rather than overwriting it with an empty library.
+            auto corrupt = path;
+            corrupt += ".corrupt";
+            fs::remove(corrupt, ec);
+            fs::rename(path, corrupt, ec);
+            return false;
+        }
+        return true;  // first run
+    }
     for (const auto& m : j.value("mods", json::array())) mods_.push_back(fromJson(m));
     deployed_ = j.value("deployed", std::map<std::string, std::string>{});
-    backedUp_ = j.value("backedUp", std::map<std::string, bool>{});
+    auto backups = j.value("backedUp", json::object());
+    for (const auto& [k, v] : backups.items()) {
+        // Old format was {target: true}.
+        auto stored = v.is_string() ? v.get<std::string>() : k;
+        backedUp_[targetKey(stored)] = stored;
+    }
+    return true;
 }
 
 void Library::save() const {
@@ -125,8 +155,10 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     auto dir = modDir(record);
     auto staging = dir;
     staging += ".incoming";
+    auto old = dir;
+    old += ".old";
     std::string err;
-    if (!removeTree(staging, &err)) throw std::runtime_error(err);
+    if (!removeTree(staging, &err) || !removeTree(old, &err)) throw std::runtime_error(err);
     record.files.clear();
     try {
         size_t done = 0;
@@ -137,33 +169,37 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             record.files.push_back(f.target);
             ++done;
         }
+
+        // 2. Swap it in. Replacing an existing copy (update/reinstall): take that off the SD
+        //    first, then move its library folder aside so it can be restored if the swap fails.
+        std::optional<int> keepPriority;
+        if (auto* existing = findMut(record.id)) {
+            keepPriority = existing->priority;
+            existing->enabled = false;
+            apply(progress);
+        }
+        if (fs::exists(dir)) fs::rename(dir, old);
+        try {
+            fs::rename(staging, dir);
+        } catch (...) {
+            std::error_code ec;
+            if (fs::exists(old, ec)) fs::rename(old, dir, ec);
+            throw;
+        }
+        if (auto* existing = findMut(record.id)) mods_.erase(mods_.begin() + (existing - mods_.data()));
+        removeTree(old);
+
+        if (keepPriority) {
+            record.priority = *keepPriority;
+        } else {
+            int maxPriority = -1;
+            for (const auto& m : mods_)
+                if (m.game == record.game) maxPriority = std::max(maxPriority, m.priority);
+            record.priority = maxPriority + 1;  // newest install wins by default
+        }
     } catch (...) {
         removeTree(staging);
         throw;
-    }
-
-    // 2. Swap it in. Replacing an existing copy (update/reinstall): take that off the SD first.
-    std::optional<int> keepPriority;
-    if (auto* existing = findMut(record.id)) {
-        keepPriority = existing->priority;
-        existing->enabled = false;
-        apply(progress);
-        mods_.erase(mods_.begin() + (existing - mods_.data()));
-        save();
-    }
-    if (!removeTree(dir, &err)) {
-        removeTree(staging);
-        throw std::runtime_error(err);
-    }
-    fs::rename(staging, dir);
-
-    if (keepPriority) {
-        record.priority = *keepPriority;
-    } else {
-        int maxPriority = -1;
-        for (const auto& m : mods_)
-            if (m.game == record.game) maxPriority = std::max(maxPriority, m.priority);
-        record.priority = maxPriority + 1;  // newest install wins by default
     }
     if (!record.installedAt) record.installedAt = static_cast<int64_t>(std::time(nullptr));
     record.enabled = enable;
@@ -204,9 +240,20 @@ void Library::remove(const std::string& id, const ProgressFn& progress) {
     if (!m) return;
     m->enabled = false;
     apply(progress);
+    m = findMut(id);
     removeTree(modDir(*m));
     mods_.erase(mods_.begin() + (m - mods_.data()));
     save();
+}
+
+void Library::dropBackup(const std::string& key) {
+    auto it = backedUp_.find(key);
+    if (it == backedUp_.end()) return;
+    auto path = backupPath(it->second);
+    std::error_code ec;
+    fs::remove(path, ec);
+    pruneEmptyDirs(path.parent_path(), dataDir_ / "backup");
+    backedUp_.erase(it);
 }
 
 void Library::forget(const std::string& id) {
@@ -215,18 +262,22 @@ void Library::forget(const std::string& id) {
     if (!m->enabled) throw std::runtime_error("turn it on first so its files are back on the SD card");
     auto dir = modDir(*m);
     for (const auto& t : m->files) {
+        auto key = targetKey(t);
         auto it = deployed_.find(t);
         if (it != deployed_.end() && it->second == id) {
-            deployed_.erase(it);  // stays on the SD card, now unmanaged
+            // Stays on the SD card, now unmanaged; any older original it covered is superseded.
+            deployed_.erase(it);
+            dropBackup(key);
             continue;
         }
-        // Another mod's file is on top: keep ours as that mod's backup so it comes back later.
+        // Another mod's file is on top: ours becomes the original that comes back later.
         bool covered = false;
         for (const auto& [target, owner] : deployed_)
-            if (targetKey(target) == targetKey(t)) covered = true;
+            if (targetKey(target) == key) covered = true;
         if (covered) {
-            copyFileCreatingDirs(dir / fs::path(t), dataDir_ / "backup" / fs::path(t));
-            backedUp_[t] = true;
+            dropBackup(key);
+            copyFileCreatingDirs(dir / fs::path(t), backupPath(t));
+            backedUp_[key] = t;
         }
     }
     removeTree(dir);
@@ -260,13 +311,12 @@ void Library::move(const std::string& id, int delta, const ProgressFn& progress)
 }
 
 std::map<std::string, std::string> Library::desiredDeployment() const {
-    // key -> (priority, mod id, target with original casing)
     struct Owner {
         int priority;
         std::string id;
         std::string target;
     };
-    std::map<std::string, Owner> owners;
+    std::map<std::string, Owner> owners;  // key -> winner
     for (const auto& m : mods_) {
         if (!m.enabled) continue;
         for (const auto& t : m.files) {
@@ -280,6 +330,40 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     return out;
 }
 
+namespace {
+
+// Replace `to` with a copy of `from` without ever leaving a half-written `to`: copy to a
+// temp name first, then swap. A failed copy leaves `to` untouched.
+void replaceFile(const fs::path& from, const fs::path& to) {
+    auto tmp = to;
+    tmp += ".pwtmp";
+    try {
+        copyFileCreatingDirs(from, tmp);
+    } catch (...) {
+        std::error_code ec;
+        fs::remove(tmp, ec);
+        throw;
+    }
+    std::error_code ec;
+    fs::rename(tmp, to, ec);  // replaces on most systems
+    if (ec) {
+        // FAT on the Switch won't rename over an existing file.
+        fs::remove(to, ec);
+        fs::rename(tmp, to);
+    }
+}
+
+}  // namespace
+
+// Make the SD card match the enabled mods. Written so an interruption at any point (power
+// loss, crash, full card) leaves something a later apply() can finish:
+// - a target is recorded as deployed *before* its file is written, so a failed write is
+//   cleaned up by the next apply;
+// - an original is backed up before being overwritten, and an existing backup is never
+//   overwritten (it's the real original from an earlier, interrupted run);
+// - a backup is only deleted after it has been copied back, and a missing backup means it
+//   was already restored.
+// State is saved every 50 files and at the end.
 void Library::apply(const ProgressFn& progress) {
     auto desired = desiredDeployment();
 
@@ -296,44 +380,51 @@ void Library::apply(const ProgressFn& progress) {
         if (it == deployedByKey.end() || deployed_.at(it->second) != id) toWrite.push_back(t);
     }
 
-    size_t total = toRemove.size() + toWrite.size(), done = 0;
-    auto backupRoot = dataDir_ / "backup";
+    size_t total = toRemove.size() + toWrite.size(), done = 0, sinceSave = 0;
+    auto checkpoint = [&] {
+        if (++sinceSave >= 50) {
+            save();
+            sinceSave = 0;
+        }
+    };
     try {
         for (const auto& t : toRemove) {
             if (progress) progress(done, total, t);
             auto sdPath = sdRoot_ / fs::path(t);
             std::error_code ec;
-            fs::remove(sdPath, ec);
-            auto bk = backedUp_.find(t);
+            auto bk = backedUp_.find(targetKey(t));
             if (bk != backedUp_.end()) {
-                // Put the user's original file back.
-                auto bkPath = backupRoot / fs::path(t);
-                copyFileCreatingDirs(bkPath, sdPath);
-                fs::remove(bkPath, ec);
-                pruneEmptyDirs(bkPath.parent_path(), backupRoot);
-                backedUp_.erase(bk);
+                // Put the user's original file back (unless an earlier run already did).
+                auto bkPath = backupPath(bk->second);
+                if (fs::exists(bkPath, ec)) replaceFile(bkPath, sdPath);
+                dropBackup(bk->first);
             } else {
+                fs::remove(sdPath, ec);
                 pruneEmptyDirs(sdPath.parent_path(), sdRoot_ / "atmosphere");
             }
             deployed_.erase(t);
             ++done;
+            checkpoint();
         }
         for (const auto& t : toWrite) {
             if (progress) progress(done, total, t);
             const auto& id = desired.at(t);
             const auto* m = find(id);
             auto sdPath = sdRoot_ / fs::path(t);
-            auto existing = deployedByKey.find(targetKey(t));
-            if (existing == deployedByKey.end() && fs::exists(sdPath)) {
+            auto key = targetKey(t);
+            auto existing = deployedByKey.find(key);
+            std::error_code ec;
+            if (existing == deployedByKey.end() && fs::exists(sdPath, ec) && !backedUp_.count(key)) {
                 // A file we didn't put there: keep it so disabling the mod restores it.
-                auto bkPath = backupRoot / fs::path(t);
-                copyFileCreatingDirs(sdPath, bkPath);
-                backedUp_[t] = true;
+                auto bkPath = backupPath(t);
+                if (!fs::exists(bkPath, ec)) copyFileCreatingDirs(sdPath, bkPath);
+                backedUp_[key] = t;
             }
             if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
-            copyFileCreatingDirs(modDir(*m) / fs::path(t), sdPath);
             deployed_[t] = id;
+            replaceFile(modDir(*m) / fs::path(t), sdPath);
             ++done;
+            checkpoint();
         }
     } catch (...) {
         save();  // record what actually got done so a retry continues from here
@@ -348,7 +439,7 @@ namespace {
 // Things that live in a title's folder but aren't mod content.
 bool isIgnoredFile(const std::string& name) {
     return name == "romfs_metadata.bin"  // Atmosphère's LayeredFS cache
-           || name.rfind("._", 0) == 0 || name == ".DS_Store" || name == "Thumbs.db";
+           || name.rfind("._", 0) == 0 || name == ".DS_Store" || name == "Thumbs.db" || endsWithI(name, ".pwtmp");
 }
 
 }  // namespace
@@ -357,7 +448,7 @@ UnmanagedFiles Library::unmanagedFiles(Game game) const {
     UnmanagedFiles out;
     std::set<std::string> managed;
     for (const auto& [t, id] : deployed_) managed.insert(targetKey(t));
-    for (const auto& [t, b] : backedUp_) managed.insert(targetKey(t));  // counted from the backup below
+    for (const auto& [key, stored] : backedUp_) managed.insert(key);  // counted from the backup below
 
     std::error_code ec;
     auto contents = sdRoot_ / "atmosphere" / "contents";
@@ -375,14 +466,14 @@ UnmanagedFiles Library::unmanagedFiles(Game game) const {
         }
     }
     // Originals we moved aside for a mod still belong to whoever installed them.
-    for (const auto& [t, b] : backedUp_) {
-        auto parts = pathParts(t);
+    for (const auto& [key, stored] : backedUp_) {
+        auto parts = pathParts(stored);
         if (parts.size() < 3) continue;
         bool forGame = false;
         for (const auto& tid : titleIdsFor(game)) forGame |= iequals(parts[2], tid);
         if (!forGame) continue;
-        out.targets.push_back(t);
-        out.bytes += fs::file_size(dataDir_ / "backup" / fs::path(t), ec);
+        out.targets.push_back(stored);
+        out.bytes += fs::file_size(backupPath(stored), ec);
     }
     return out;
 }
@@ -403,33 +494,29 @@ const ModRecord& Library::importUnmanaged(Game game, const std::string& name, co
         if (m.game == game) minPriority = std::min(minPriority, m.priority);
     r.priority = mods(game).empty() ? 0 : minPriority - 1;  // below everything Patchwork installed
 
+    // Pass 1: copy everything into the library. Nothing else changes, so a failure here
+    // (SD full) just removes the partial copy; the originals are untouched.
     auto dir = modDir(r);
-    size_t done = 0;
     try {
+        size_t done = 0;
         for (const auto& t : found.targets) {
             if (progress) progress(done++, found.targets.size(), t);
-            auto bk = backedUp_.find(t);
-            if (bk != backedUp_.end()) {
-                // A mod sits on top of this file; the original now lives in the library instead.
-                auto bkPath = dataDir_ / "backup" / fs::path(t);
-                copyFileCreatingDirs(bkPath, dir / fs::path(t));
-                std::error_code ec;
-                fs::remove(bkPath, ec);
-                pruneEmptyDirs(bkPath.parent_path(), dataDir_ / "backup");
-                backedUp_.erase(bk);
-            } else {
-                copyFileCreatingDirs(sdRoot_ / fs::path(t), dir / fs::path(t));
-                deployed_[t] = r.id;  // already on the SD card, identical
-            }
+            auto bk = backedUp_.find(targetKey(t));
+            auto from = bk != backedUp_.end() ? backupPath(bk->second) : sdRoot_ / fs::path(t);
+            copyFileCreatingDirs(from, dir / fs::path(t));
             r.files.push_back(t);
         }
     } catch (...) {
-        // Roll back so nothing points at a half-copied library entry.
-        for (auto it = deployed_.begin(); it != deployed_.end();)
-            it = it->second == r.id ? deployed_.erase(it) : std::next(it);
         removeTree(dir);
-        save();
         throw;
+    }
+    // Pass 2: switch ownership over, then save.
+    for (const auto& t : r.files) {
+        auto key = targetKey(t);
+        if (backedUp_.count(key))
+            dropBackup(key);  // a mod sits on top; the original now lives in the library instead
+        else
+            deployed_[t] = r.id;  // already on the SD card, identical
     }
     mods_.push_back(r);
     save();
