@@ -120,27 +120,42 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     if (record.id.empty()) throw std::invalid_argument("mod id is empty");
     if (files.empty()) throw std::invalid_argument("mod has no files");
 
-    // Replacing an existing copy (update/reinstall): take it off the SD card first.
+    // 1. Copy into a staging folder. Until this succeeds neither the library nor the SD
+    //    card changes, so a failed copy (SD full, bad archive) leaves no trace.
+    auto dir = modDir(record);
+    auto staging = dir;
+    staging += ".incoming";
+    std::string err;
+    if (!removeTree(staging, &err)) throw std::runtime_error(err);
+    record.files.clear();
+    try {
+        size_t done = 0;
+        for (const auto& f : files) {
+            if (!isSafeRelativePath(f.target)) throw std::runtime_error("unsafe target path: " + f.target);
+            if (progress) progress(done, files.size(), f.target);
+            copyFileCreatingDirs(f.source, staging / fs::path(f.target));
+            record.files.push_back(f.target);
+            ++done;
+        }
+    } catch (...) {
+        removeTree(staging);
+        throw;
+    }
+
+    // 2. Swap it in. Replacing an existing copy (update/reinstall): take that off the SD first.
     std::optional<int> keepPriority;
     if (auto* existing = findMut(record.id)) {
         keepPriority = existing->priority;
         existing->enabled = false;
         apply(progress);
-        fs::remove_all(modDir(*existing));
         mods_.erase(mods_.begin() + (existing - mods_.data()));
+        save();
     }
-
-    auto dir = modDir(record);
-    fs::remove_all(dir);
-    record.files.clear();
-    size_t done = 0;
-    for (const auto& f : files) {
-        if (!isSafeRelativePath(f.target)) throw std::runtime_error("unsafe target path: " + f.target);
-        if (progress) progress(done, files.size(), f.target);
-        copyFileCreatingDirs(f.source, dir / fs::path(f.target));
-        record.files.push_back(f.target);
-        ++done;
+    if (!removeTree(dir, &err)) {
+        removeTree(staging);
+        throw std::runtime_error(err);
     }
+    fs::rename(staging, dir);
 
     if (keepPriority) {
         record.priority = *keepPriority;
@@ -155,7 +170,23 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     mods_.push_back(std::move(record));
     auto id = mods_.back().id;
     save();
-    if (enable) apply(progress);
+
+    // 3. Copy to the SD card. If that fails part-way, take back what was copied so the game
+    //    never sees half a mod; the mod stays in the library, turned off, ready to retry.
+    if (enable) {
+        try {
+            apply(progress);
+        } catch (const std::exception& e) {
+            findMut(id)->enabled = false;
+            try {
+                apply();
+            } catch (...) {
+            }
+            save();
+            throw std::runtime_error(std::string("couldn't copy the files to the SD card (") + e.what() +
+                                     "). The mod is saved but turned off; free up space, then turn it on in My mods.");
+        }
+    }
     return *find(id);
 }
 
@@ -173,9 +204,7 @@ void Library::remove(const std::string& id, const ProgressFn& progress) {
     if (!m) return;
     m->enabled = false;
     apply(progress);
-    auto dir = modDir(*m);
-    std::error_code ec;
-    fs::remove_all(dir, ec);
+    removeTree(modDir(*m));
     mods_.erase(mods_.begin() + (m - mods_.data()));
     save();
 }
@@ -200,8 +229,7 @@ void Library::forget(const std::string& id) {
             backedUp_[t] = true;
         }
     }
-    std::error_code ec;
-    fs::remove_all(dir, ec);
+    removeTree(dir);
     mods_.erase(mods_.begin() + (m - mods_.data()));
     save();
     apply();  // nothing to copy, but keeps the deployed map consistent
@@ -399,8 +427,7 @@ const ModRecord& Library::importUnmanaged(Game game, const std::string& name, co
         // Roll back so nothing points at a half-copied library entry.
         for (auto it = deployed_.begin(); it != deployed_.end();)
             it = it->second == r.id ? deployed_.erase(it) : std::next(it);
-        std::error_code ec;
-        fs::remove_all(dir, ec);
+        removeTree(dir);
         save();
         throw;
     }

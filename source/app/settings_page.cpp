@@ -49,16 +49,15 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         auto& st = AppState::get();
         return dirSize(st.downloadsDir()) + dirSize(st.workDir());
     };
-    cache->setText("Delete leftover downloads");
+    cache->setText("Delete unfinished downloads");
     cache->setDetailText(formatSize(cacheDirs()));
     cache->registerClickAction([cache, cacheDirs](brls::View*) {
         if (AppState::get().fileJobRunning()) {
             brls::Application::notify("Wait for the current install to finish");
             return true;
         }
-        std::error_code ec;
-        mm::fs::remove_all(AppState::get().downloadsDir(), ec);
-        mm::fs::remove_all(AppState::get().workDir(), ec);
+        mm::removeTree(AppState::get().downloadsDir());
+        mm::removeTree(AppState::get().workDir());
         cache->setDetailText(formatSize(cacheDirs()));
         brls::Application::notify("Leftover downloads deleted");
         return true;

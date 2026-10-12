@@ -40,6 +40,16 @@ inline constexpr const char* image = "\uE3F4";     // image
 inline constexpr const char* folder = "\uE2C7";    // folder
 }  // namespace icon
 
+// Thin horizontal bar showing 0..1 progress.
+class ProgressBar : public brls::Box {
+public:
+    ProgressBar();
+    void setProgress(float fraction);
+
+private:
+    brls::Box* fill_;
+};
+
 brls::Label* label(const std::string& text, float size, NVGcolor color, bool singleLine = true);
 brls::Box* hbox();
 brls::Box* vbox();

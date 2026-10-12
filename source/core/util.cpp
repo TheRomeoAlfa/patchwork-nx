@@ -1,5 +1,6 @@
 #include "util.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <sstream>
@@ -76,6 +77,40 @@ bool isSafeRelativePath(std::string_view p) {
     while (std::getline(ss, part, '/'))
         if (part == "..") return false;
     return true;
+}
+
+bool removeTree(const fs::path& p, std::string* error) {
+    std::error_code ec;
+    auto st = fs::symlink_status(p, ec);
+    if (ec || st.type() == fs::file_type::not_found) return true;
+    std::vector<fs::path> files, dirs;
+    if (st.type() == fs::file_type::directory) {
+        for (fs::recursive_directory_iterator it(p, ec), end; !ec && it != end; it.increment(ec)) {
+            if (it->is_directory(ec))
+                dirs.push_back(it->path());
+            else
+                files.push_back(it->path());
+        }
+        if (ec) {
+            if (error) *error = "can't read " + p.string() + ": " + ec.message();
+            return false;
+        }
+        dirs.push_back(p);
+    } else {
+        files.push_back(p);
+    }
+    bool ok = true;
+    auto fail = [&](const fs::path& what, const std::error_code& e) {
+        if (ok && error) *error = "can't delete " + what.string() + ": " + e.message();
+        ok = false;
+    };
+    for (const auto& f : files)
+        if (!fs::remove(f, ec) && ec) fail(f, ec);
+    // Deepest directories first.
+    std::sort(dirs.begin(), dirs.end(), [](const fs::path& a, const fs::path& b) { return a.native().size() > b.native().size(); });
+    for (const auto& d : dirs)
+        if (!fs::remove(d, ec) && ec) fail(d, ec);
+    return ok;
 }
 
 void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt) {

@@ -4,6 +4,7 @@
 
 #include "app_state.hpp"
 #include "compat.hpp"
+#include "install_flow.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -38,8 +39,10 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     pane_->setBackgroundColor(ui::panelBg());
     addView(pane_);
 
+    flow_ = std::make_unique<InstallFlow>(pane_);
+    flow_->onExit = [this] { rebuild(); };
     libSub_ = AppState::get().libraryChanged()->subscribe([this] {
-        if (!busy_) rebuild();
+        if (!busy_ && !flow_->active()) rebuild();
     });
     rebuild();
 }
@@ -88,8 +91,50 @@ void MyModsPage::rebuild() {
         unmanagedRow = row;
     };
 
-    if (mods.empty() && unmanaged.files) {
+    // Downloads whose install failed or was abandoned.
+    brls::View* firstPending = nullptr;
+    auto addPendingRows = [&] {
+        auto pending = st.pendingInstalls(st.game());
+        if (pending.empty()) return;
+        auto* head = ui::label("Downloaded, not installed", 16, ui::muted());
+        head->setMargins(16, 0, 8, 6);
+        list_->addView(head);
+        for (const auto& p : pending) {
+            auto* row = ui::focusRow();
+            row->addView(ui::label(ui::icon::file, 24, ui::accent()));
+            auto* text = ui::vbox();
+            text->setMarginLeft(12);
+            text->setGrow(1);
+            text->setShrink(1);
+            text->addView(ui::label(p.details.summary.name, 18, ui::text()));
+            auto* sub = ui::label(p.file.filename + " · " + formatSize(static_cast<uint64_t>(p.file.size)), 14, ui::muted());
+            sub->setMarginTop(3);
+            text->addView(sub);
+            row->addView(text);
+            row->getFocusEvent()->subscribe([this, p](brls::View*) { showPending(p); });
+            row->registerClickAction([this, p](brls::View*) {
+                flow_->install(p.details, p.file);
+                return true;
+            });
+            row->updateActionHint(brls::BUTTON_A, "Finish installing");
+            row->registerAction("Delete download", brls::BUTTON_X, [this, p](brls::View*) {
+                discardPending(p);
+                return true;
+            });
+            list_->addView(row);
+            if (!firstPending) firstPending = row;
+        }
+    };
+
+    if (mods.empty() && (unmanaged.files || !st.pendingInstalls(st.game()).empty())) {
+        addPendingRows();
         addUnmanagedRow();
+        auto* target = firstPending ? firstPending : unmanagedRow;
+        if (hadFocus && target) brls::Application::giveFocus(target);
+        if (firstPending) {
+            showPending(st.pendingInstalls(st.game()).front());
+            return;
+        }
         if (hadFocus) brls::Application::giveFocus(unmanagedRow);
         showUnmanaged(unmanaged.files, unmanaged.bytes);
         return;
@@ -159,6 +204,7 @@ void MyModsPage::rebuild() {
         list_->addView(row);
         if (id == focusedId_ || !focusTarget) focusTarget = row;
     }
+    addPendingRows();
     addUnmanagedRow();
     if (hadFocus && focusTarget) brls::Application::giveFocus(focusTarget);
     showDetails(focusedId_.empty() ? mods.front()->id : focusedId_);
@@ -178,6 +224,29 @@ void MyModsPage::showUnmanaged(size_t files, uint64_t bytes) {
         "If you leave them alone, Patchwork still protects them: mods you install that replace one of these files "
         "put it back when you turn the mod off.",
         16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+}
+
+void MyModsPage::showPending(const PendingInstall& p) {
+    pane_->clearViews();
+    pane_->addView(ui::label(p.details.summary.name, 26, ui::text()));
+    auto* meta = ui::label(p.file.filename + " · " + formatSize(static_cast<uint64_t>(p.file.size)), 16, ui::muted());
+    meta->setMargins(4, 0, 16, 0);
+    pane_->addView(meta);
+    pane_->addView(ui::label(
+        "This file was downloaded but isn't installed yet. The install may have failed, been cancelled, "
+        "or the app closed part-way.\n\nPress A to finish installing it (no need to download again), "
+        "or X to delete the download and free the space.",
+        16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+}
+
+void MyModsPage::discardPending(const PendingInstall& p) {
+    auto* dialog = new brls::Dialog("Delete the download of " + p.details.summary.name + " (" +
+                                    formatSize(static_cast<uint64_t>(p.file.size)) + ")?");
+    dialog->addButton("Cancel", [] {});
+    dialog->addButton("Delete", [this, fileId = p.file.id] {
+        runJob("Deleting…", [fileId](mm::Library&) { AppState::get().discardPending(fileId); });
+    });
+    dialog->open();
 }
 
 void MyModsPage::importUnmanaged(size_t files, uint64_t bytes) {

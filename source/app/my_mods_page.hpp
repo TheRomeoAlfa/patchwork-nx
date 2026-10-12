@@ -9,6 +9,11 @@
 #include "library.hpp"
 
 namespace app {
+class InstallFlow;
+struct PendingInstall;
+}
+
+namespace app {
 
 // Installed mods for the current game in load order (top wins), with on/off,
 // reordering and removal. The right pane explains the highlighted mod.
@@ -27,6 +32,8 @@ private:
     void remove(const std::string& id);
     void showUnmanaged(size_t files, uint64_t bytes);
     void importUnmanaged(size_t files, uint64_t bytes);
+    void showPending(const PendingInstall& p);
+    void discardPending(const PendingInstall& p);
 
     std::string focusedId_;
     bool busy_ = false;
@@ -36,6 +43,7 @@ private:
     brls::Box* pane_ = nullptr;
     brls::Label* count_ = nullptr;
     brls::VoidEvent::Subscription libSub_;
+    std::unique_ptr<InstallFlow> flow_;  // finishes downloads that weren't installed
 };
 
 }  // namespace app

@@ -176,3 +176,31 @@ TEST("library: files already on the SD card can be found and imported") {
     f.lib.remove("m");  // the randomizer's Actor/x comes back from backup
     CHECK_EQ(read(f.sd / (botw + "Actor/x")), std::string("randomizer-x"));
 }
+
+TEST("library: a failed copy to the SD card is rolled back and the mod kept off") {
+    Fixture f;
+    // Something the copy can't overwrite: a directory where a file should go.
+    fs::create_directories(f.sd / (kRomfs + "z_blocked"));
+    bool threw = false;
+    try {
+        f.addMod("a", {kRomfs + "a_ok", kRomfs + "z_blocked"});
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(!fs::exists(f.sd / (kRomfs + "a_ok")));  // nothing half-installed
+    const auto* m = f.lib.find("a");
+    CHECK(m != nullptr);
+    if (m) CHECK(!m->enabled);
+    CHECK(!fs::exists(f.sd / "switch/mm/library/totk/a.incoming"));
+}
+
+TEST("util: removeTree deletes nested folders and tolerates missing paths") {
+    t::TempDir d;
+    write(d.path / "x/a/b/c.txt", "1");
+    write(d.path / "x/a/d.txt", "2");
+    write(d.path / "x/e.txt", "3");
+    CHECK(removeTree(d.path / "x"));
+    CHECK(!fs::exists(d.path / "x"));
+    CHECK(removeTree(d.path / "missing"));
+}
