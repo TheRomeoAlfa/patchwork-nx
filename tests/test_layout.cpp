@@ -115,3 +115,24 @@ TEST("layout: unsupported packages") {
     CHECK(r.kind == PackageKind::Empty);
     CHECK_EQ(r.warnings.size(), 1u);
 }
+
+TEST("layout: emulator mod folders inside a title id folder") {
+    t::TempDir d;
+    touch(d.path / "0100F2C0115B6000/Faster Horses/romfs/a");
+    touch(d.path / "0100F2C0115B6000/Slower Horses/romfs/b");
+    auto r = detectLayout(d.path, Game::Totk, "x");
+    CHECK(r.kind == PackageKind::Installable);
+    CHECK_EQ(r.variants.size(), 2u);
+    if (r.variants.size() == 2) {
+        CHECK_EQ(r.variants[0].name, std::string("Faster Horses"));
+        CHECK(has(targets(r.variants[0]), "atmosphere/contents/0100F2C0115B6000/romfs/a"));
+    }
+}
+
+TEST("layout: a patch directly in exefs_patches gets its own folder") {
+    t::TempDir d;
+    touch(d.path / "atmosphere/exefs_patches/0011223344556677.ips");
+    auto r = detectLayout(d.path, Game::Totk, "my-mod");
+    CHECK_EQ(r.variants.size(), 1u);
+    if (!r.variants.empty()) CHECK(has(targets(r.variants[0]), "atmosphere/exefs_patches/my-mod/0011223344556677.ips"));
+}

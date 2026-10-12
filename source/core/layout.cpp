@@ -38,8 +38,17 @@ enum class RootType { Atmosphere, ContentsDir, TitleDir, ModDir, LooseIps };
 struct Root {
     RootType type;
     fs::path path;
-    std::string titleId;  // for TitleDir
+    std::string titleId;  // TitleDir, or a ModDir found inside a title folder
 };
+
+bool hasModFolders(const fs::path& dir) {
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
+        auto n = toLower(it->path().filename().string());
+        if (it->is_directory(ec) && (n == "romfs" || n == "exefs" || n == "cheats")) return true;
+    }
+    return false;
+}
 
 struct Scanner {
     Game game;
@@ -68,7 +77,15 @@ struct Scanner {
                     return;
                 }
                 if (isTitleIdLike(name)) {
-                    roots.push_back({RootType::TitleDir, e.path(), name});
+                    if (hasModFolders(e.path())) {
+                        roots.push_back({RootType::TitleDir, e.path(), name});
+                    } else {
+                        // Emulator mod folders: <titleid>/<Mod name>/romfs, often several mods.
+                        std::error_code ec;
+                        for (fs::directory_iterator sub(e.path(), ec), end; sub != end; sub.increment(ec))
+                            if (sub->is_directory(ec) && hasModFolders(sub->path()))
+                                roots.push_back({RootType::ModDir, sub->path(), name});
+                    }
                     continue;
                 }
                 if (name == "romfs" || name == "exefs" || name == "cheats" || name == "exefs_patches")
@@ -127,6 +144,16 @@ struct Mapper {
         return out;
     }
 
+    // Atmosphère only loads patches from exefs_patches/<name>/, so a file sitting directly
+    // in exefs_patches/ gets a folder named after the mod.
+    void addExefsPatch(const fs::path& src, const std::vector<std::string>& parts, size_t from) {
+        if (from >= parts.size()) return;
+        if (parts.size() - from == 1)
+            add(src, "atmosphere/exefs_patches/" + modSlug + "/" + parts.back());
+        else
+            add(src, "atmosphere/exefs_patches/" + join(parts, from));
+    }
+
     // Map files under a "<titleid>/" folder: romfs/, exefs/, cheats/.
     void mapTitleContents(const fs::path& src, const std::vector<std::string>& parts, size_t from,
                           const std::string& titleId) {
@@ -145,7 +172,7 @@ struct Mapper {
             else
                 add(src, base + "exefs/" + join(parts, from + 1));
         } else if (top == "exefs_patches") {
-            add(src, "atmosphere/exefs_patches/" + join(parts, from + 1));
+            addExefsPatch(src, parts, from + 1);
         } else if (endsWithI(parts.back(), ".pchtxt")) {
             ++skippedPchtxt;
         } else {
@@ -171,7 +198,7 @@ struct Mapper {
                     if (top == "contents" || top == "titles")
                         mapContentsDir(src, parts, 1);
                     else if (top == "exefs_patches" && parts.size() > 1)
-                        add(src, "atmosphere/exefs_patches/" + join(parts, 1));
+                        addExefsPatch(src, parts, 1);
                     else
                         ++skippedOutside;
                 });
@@ -193,7 +220,11 @@ struct Mapper {
                 break;
             }
             case RootType::ModDir: {
-                auto id = std::string(gameInfo(game).titleId);
+                auto id = root.titleId.empty() ? std::string(gameInfo(game).titleId) : matchTitleId(root.titleId, game);
+                if (id.empty()) {
+                    ++skippedOtherTitle;
+                    break;
+                }
                 walk(root.path, [&](const fs::path& src, const std::vector<std::string>& parts) {
                     mapTitleContents(src, parts, 0, id);
                 });
@@ -221,6 +252,11 @@ std::string variantName(const fs::path& rootPath, const fs::path& extractedRoot,
         size_t pos;
         while ((pos = toLower(rel).find(ext)) != std::string::npos) rel.erase(pos, std::string(ext).size());
     }
+    // Title-id folders ("0100F2C0115B6000/Mod name") say nothing to the user.
+    std::string cleaned;
+    for (const auto& part : pathParts(fs::path(rel)))
+        if (!isTitleIdLike(part) && part != ".") cleaned += (cleaned.empty() ? "" : "/") + part;
+    rel = cleaned;
     return (rel.empty() || rel == ".") ? "Main" : rel;
 }
 

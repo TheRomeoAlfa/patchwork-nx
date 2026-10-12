@@ -99,12 +99,16 @@ endif()
 
 file(GLOB_RECURSE APP_SOURCES source/app/*.cpp)
 set(APP_PLATFORM_LIB ${CMAKE_THREAD_LIBS_INIT})
+if(PLATFORM_DESKTOP)
+    pkg_check_modules(LIBWEBP REQUIRED IMPORTED_TARGET libwebp)  # GameBanana serves some previews as WebP
+    list(APPEND APP_PLATFORM_LIB PkgConfig::LIBWEBP)
+endif()
 if(APPLE AND PLATFORM_DESKTOP)
     list(APPEND APP_PLATFORM_LIB "-framework CoreWLAN" z)  # Borealis' Wi-Fi status on macOS; zlib for debug screenshots
 endif()
 if(PLATFORM_SWITCH)
     list(APPEND APP_SOURCES ${BOREALIS_LIBRARY}/lib/platforms/switch/switch_wrapper.c)
-    list(APPEND APP_PLATFORM_LIB glfw3 EGL glapi drm_nouveau nx m)
+    list(APPEND APP_PLATFORM_LIB webp glfw3 EGL glapi drm_nouveau nx m)
 endif()
 
 program_target(patchwork "${APP_SOURCES}")

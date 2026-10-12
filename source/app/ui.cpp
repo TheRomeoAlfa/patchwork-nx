@@ -4,6 +4,41 @@
 
 namespace app::ui {
 
+FocusSink::FocusSink() {
+    setFocusable(true);
+    setHideHighlight(true);
+    setHideClickAnimation(true);
+    setDimensions(0, 0);
+}
+
+void FocusSink::onFocusLost() {
+    brls::Box::onFocusLost();
+    parked_ = false;
+}
+
+void FocusSink::park() {
+    parked_ = true;
+    brls::Application::giveFocus(this);
+}
+
+bool focusInside(brls::View* container) {
+    for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
+        if (v == container) return true;
+    return false;
+}
+
+bool focusParked() { return dynamic_cast<FocusSink*>(brls::Application::getCurrentFocus()) != nullptr; }
+
+void parkFocusIfInside(brls::View* container, FocusSink* sink) {
+    if (sink && focusInside(container)) sink->park();
+}
+
+bool tryFocus(brls::View* target) {
+    if (!target || !target->getDefaultFocus()) return false;
+    brls::Application::giveFocus(target);
+    return true;
+}
+
 ProgressBar::ProgressBar() : brls::Box(brls::Axis::ROW) {
     setHeight(10);
     setCornerRadius(5);

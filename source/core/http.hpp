@@ -23,13 +23,16 @@ public:
 // libcurl implementation (works on macOS and on Switch via devkitPro's switch-curl).
 class CurlHttpClient : public HttpClient {
 public:
-    explicit CurlHttpClient(std::string userAgent);
+    // caBundle: PEM file of trusted certificates (the Switch has no system store we can use).
+    // Empty uses the system store; on Switch that means no verification.
+    CurlHttpClient(std::string userAgent, std::string caBundle = {});
     ~CurlHttpClient() override;
     std::string get(const std::string& url) override;
     void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) override;
 
 private:
     std::string userAgent_;
+    std::string caBundle_;
 };
 
 std::string urlEncode(const std::string& s);

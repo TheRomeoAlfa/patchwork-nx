@@ -40,6 +40,28 @@ inline constexpr const char* image = "\uE3F4";     // image
 inline constexpr const char* folder = "\uE2C7";    // folder
 }  // namespace icon
 
+// Borealis keeps pointing at the focused view after it's deleted, and crashes drawing its
+// highlight on the next frame. Before clearing anything that may contain focus, park focus
+// on a FocusSink that outlives the cleared views; move it back once the new views exist.
+// A sink only accepts focus while parked, so navigation never lands on it.
+class FocusSink : public brls::Box {
+public:
+    FocusSink();
+    brls::View* getDefaultFocus() override { return parked_ ? this : nullptr; }
+    void onFocusLost() override;
+    void park();
+
+private:
+    bool parked_ = false;
+};
+
+bool focusInside(brls::View* container);
+bool focusParked();  // focus is on some FocusSink, waiting for content
+// Park focus on `sink` if it is currently inside `container`.
+void parkFocusIfInside(brls::View* container, FocusSink* sink);
+// Give focus to `target` if it can take it; returns false otherwise.
+bool tryFocus(brls::View* target);
+
 // Thin horizontal bar showing 0..1 progress.
 class ProgressBar : public brls::Box {
 public:

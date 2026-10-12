@@ -61,7 +61,9 @@ class Library {
 public:
     Library(fs::path sdRoot, fs::path dataDir);
 
-    void load();
+    // Reads state.json, falling back to the temp file of an interrupted save. An unreadable
+    // file is kept as state.json.corrupt and the library starts empty (returns false).
+    bool load();
     void save() const;
 
     std::vector<const ModRecord*> mods(Game game) const;  // sorted by priority, highest first
@@ -101,11 +103,14 @@ private:
     ModRecord* findMut(const std::string& id);
     std::map<std::string, std::string> desiredDeployment() const;
     void renumber(std::vector<ModRecord*> ordered);
+    fs::path backupPath(const std::string& storedTarget) const { return dataDir_ / "backup" / fs::path(storedTarget); }
+    void dropBackup(const std::string& key);
 
     fs::path sdRoot_, dataDir_;
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
-    std::map<std::string, bool> backedUp_;         // target -> original file saved in backup/
+    // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.
+    std::map<std::string, std::string> backedUp_;
 };
 
 }  // namespace mm

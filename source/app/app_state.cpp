@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <regex>
 
+#include <webp/decode.h>
+
 #include "nlohmann/json.hpp"
 #include "platform.hpp"
 
@@ -67,7 +69,7 @@ void AppState::init() {
     mm::fs::create_directories(dataDir_);
     for (const auto& g : mm::kGames) gameVersions_[g.game] = platform::gameVersion(g.game);
 
-    http_ = std::make_unique<mm::CurlHttpClient>(platform::userAgent());
+    http_ = std::make_unique<mm::CurlHttpClient>(platform::userAgent(), platform::caBundle());
     gb_ = std::make_unique<mm::gb::Client>(*http_);
     library_ = std::make_unique<mm::Library>(platform::sdRoot(), dataDir_);
 
@@ -170,13 +172,34 @@ void AppState::cacheDetails(const mm::gb::ModDetails& d) {
     details_[d.summary.id] = d;
 }
 
+namespace {
+
+bool isWebp(const std::string& data) {
+    return data.size() > 12 && data.compare(0, 4, "RIFF") == 0 && data.compare(8, 4, "WEBP") == 0;
+}
+
+// Borealis decodes JPEG/PNG itself; many GameBanana previews are WebP, which we decode.
+void setImageData(brls::Image* image, const std::string& data) {
+    if (!isWebp(data)) {
+        image->setImageFromMem(reinterpret_cast<const unsigned char*>(data.data()), static_cast<int>(data.size()));
+        return;
+    }
+    int w = 0, h = 0;
+    uint8_t* rgba = WebPDecodeRGBA(reinterpret_cast<const uint8_t*>(data.data()), data.size(), &w, &h);
+    if (!rgba) return;
+    int tex = nvgCreateImageRGBA(brls::Application::getNVGContext(), w, h, 0, rgba);
+    WebPFree(rgba);
+    if (tex) image->innerSetImage(tex);
+}
+
+}  // namespace
+
 void AppState::loadImage(brls::Image* image, const std::string& url, std::function<bool()> stillWanted) {
     if (url.empty()) return;
     for (auto it = images_.begin(); it != images_.end(); ++it) {
         if (it->first == url) {
             images_.splice(images_.begin(), images_, it);  // mark as recently used
-            auto data = it->second;
-            image->setImageFromMem(reinterpret_cast<const unsigned char*>(data->data()), static_cast<int>(data->size()));
+            setImageData(image, *it->second);
             return;
         }
     }
@@ -191,8 +214,7 @@ void AppState::loadImage(brls::Image* image, const std::string& url, std::functi
         brls::sync([this, image, url, stillWanted, data] {
             images_.emplace_front(url, data);
             while (images_.size() > 80) images_.pop_back();
-            if (stillWanted && stillWanted())
-                image->setImageFromMem(reinterpret_cast<const unsigned char*>(data->data()), static_cast<int>(data->size()));
+            if (stillWanted && stillWanted()) setImageData(image, *data);
         });
     });
 }
@@ -319,7 +341,7 @@ std::string formatCount(int64_t n) {
 }
 
 std::string stripHtml(const std::string& html, size_t maxLen) {
-    static const std::regex br("<br\\s*/?>", std::regex::icase);
+    static const std::regex br("<br\\s*/?>|</?(p|div|li|ul|ol|h[1-6]|blockquote|tr)\\b[^>]*>", std::regex::icase);
     static const std::regex tags("<[^>]*>");
     static const std::regex spaces("[ \\t]+");
     static const std::regex blankLines("\\n{3,}");

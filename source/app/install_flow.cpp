@@ -2,6 +2,7 @@
 
 #include "app_state.hpp"
 #include "compat.hpp"
+#include "md5.hpp"
 
 namespace app {
 
@@ -12,10 +13,17 @@ bool isUnsupportedPackage(const ModFile& f) {
     return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl");
 }
 
-FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed) {
+bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
+    std::vector<std::string> labels;
+    for (const auto& f : d.files) labels.push_back(f.description + " " + f.version);
+    return mm::versionWordIsModVersion(labels, game);
+}
+
+FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, bool versionWordIsMod) {
     if (mm::endsWithI(f.filename, ".bnp")) return {"Needs BCML on a PC", ui::warn()};
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
-    auto named = mm::mentionedGameVersions(f.description + " " + f.version, game);
+    if (mm::saysAllVersions(f.description)) return {"Works on all game versions", ui::ok(), true};
+    auto named = mm::mentionedGameVersions(f.description + " " + f.version, game, false, versionWordIsMod);
     switch (mm::checkCompat(installed, named)) {
         case mm::Compat::Likely: return {"Matches your game", ui::ok(), true};
         case mm::Compat::Mismatch: return {"For game " + named.front(), ui::warn()};
@@ -29,11 +37,20 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed) 
 size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& installed) {
     size_t best = 0;
     int bestScore = -1;
+    bool versionWordIsMod = modUsesVersionWord(d, game);
+    auto stem = [](const std::string& name) { return mm::toLower(name.substr(0, name.rfind('.'))); };
     for (size_t i = 0; i < d.files.size(); ++i) {
         const auto& f = d.files[i];
         int score = 0;
-        if (!isUnsupportedPackage(f)) score += 2;
-        if (noteFor(f, game, installed).matches) score += 4;
+        if (!isUnsupportedPackage(f)) score += 4;
+        if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
+        // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
+        bool isVariantOfAnother = false;
+        for (size_t j = 0; j < d.files.size(); ++j) {
+            auto own = stem(f.filename), other = stem(d.files[j].filename);
+            if (j != i && other.size() >= 6 && own.size() > other.size() && own.find(other) != std::string::npos) isVariantOfAnother = true;
+        }
+        if (!isVariantOfAnother) score += 1;
         if (score > bestScore || (score == bestScore && f.dateAdded > d.files[best].dateAdded)) {
             best = i;
             bestScore = score;
@@ -42,14 +59,22 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
     return best;
 }
 
-InstallFlow::InstallFlow(brls::Box* pane) : pane_(pane) {}
+InstallFlow::InstallFlow(brls::Box* pane, ui::FocusSink* sink) : pane_(pane), sink_(sink) {}
 
 InstallFlow::~InstallFlow() {
     *flowAlive_ = false;
     if (cancel_) *cancel_ = true;
+    setBusy(false);
+}
+
+void InstallFlow::setBusy(bool busy) {
+    if (busy == busy_) return;
+    busy_ = busy;
+    AppState::get().setInstallBusy(busy);
 }
 
 void InstallFlow::clear() {
+    ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
     workingLabel_ = nullptr;
     bar_ = nullptr;
@@ -89,11 +114,24 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
         box->setFocusable(true);
         box->setHideHighlight(true);
         box->registerAction("Cancel", brls::BUTTON_B, [this](brls::View*) {
-            if (cancel_) *cancel_ = true;
-            if (workingLabel_) workingLabel_->setText("Cancelling…");
-            if (!busy_) leave();
+            if (!busy_) {
+                leave();
+            } else if (cancel_) {
+                *cancel_ = true;
+                if (workingLabel_) workingLabel_->setText("Cancelling…");
+            } else {
+                brls::Application::notify("Copying to the SD card can't be stopped part-way. It's almost done.");
+            }
             return true;
         });
+        // Stay here until the work finishes or is cancelled: leaving would drop the install.
+        for (auto button : {brls::BUTTON_NAV_LEFT, brls::BUTTON_NAV_RIGHT, brls::BUTTON_NAV_UP, brls::BUTTON_NAV_DOWN})
+            box->registerAction("", button, [](brls::View*) { return true; }, true);
+        // + would quit the app mid-install.
+        box->registerAction("", brls::BUTTON_START, [](brls::View*) {
+            brls::Application::notify("Finish or cancel the install first");
+            return true;
+        }, true);
         pane_->addView(box);
         brls::Application::giveFocus(box);
     } else {
@@ -105,7 +143,7 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
 
 void InstallFlow::showMessage(const std::string& title, const std::string& body, bool isError) {
     active_ = true;
-    busy_ = false;
+    setBusy(false);
     clear();
     auto* box = ui::vbox();
     box->setGrow(1);
@@ -156,10 +194,11 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
     pane_->addView(scroll);
 
     size_t rec = recommendedFile(d, game, installed);
+    bool versionWordIsMod = modUsesVersionWord(d, game);
     brls::View* recRow = nullptr;
     for (size_t i = 0; i < d.files.size(); ++i) {
         const auto file = d.files[i];
-        auto note = noteFor(file, game, installed);
+        auto note = noteFor(file, game, installed, versionWordIsMod);
         bool downloaded = st.isDownloaded(file);
         auto* row = ui::focusRow();
         row->addView(ui::label(ui::icon::file, 24, ui::muted()));
@@ -207,7 +246,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
 
     auto& st = AppState::get();
     bool cached = st.isDownloaded(file);
-    busy_ = true;
+    setBusy(true);
     cancel_ = std::make_shared<std::atomic<bool>>(false);
     setWorking(cached ? "Unpacking…" : "Downloading…", 0);
 
@@ -217,9 +256,9 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
     auto cancel = cancel_;
     auto alive = flowAlive_;
     auto slug = mm::slugify(d.summary.name);
-    auto update = [this, alive](std::string msg, float pct) {
-        brls::sync([this, alive, msg, pct] {
-            if (*alive && workingLabel_) setWorking(msg, pct);
+    auto update = [this, alive, cancel](std::string msg, float pct) {
+        brls::sync([this, alive, cancel, msg, pct] {
+            if (*alive && !*cancel && workingLabel_) setWorking(msg, pct);
         });
     };
 
@@ -244,6 +283,13 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                     state.discardPending(file.id);  // nothing usable was kept
                     throw;
                 }
+                if (!file.md5.empty()) {
+                    update("Checking download…", -1);
+                    if (!mm::iequals(mm::md5File(pending.archive), file.md5)) {
+                        state.discardPending(file.id);
+                        throw std::runtime_error("The download was damaged (its checksum doesn't match GameBanana's). Try again.");
+                    }
+                }
             }
             update("Unpacking… 0%", 0);
             int lastPct = -1;
@@ -263,7 +309,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
         },
         [=, this](const std::string& error) {
             if (!*alive) return;
-            busy_ = false;
+            setBusy(false);
             if (*cancel) {
                 mm::removeTree(work);
                 leave();
@@ -294,8 +340,24 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     sub->setMargins(6, 0, 16, 0);
     pane_->addView(sub);
 
-    auto selected = std::make_shared<std::vector<bool>>(prep->layout.variants.size(), false);
-    (*selected)[0] = true;
+    // Pre-select the option made for the user's game version if the options are per-version,
+    // otherwise the biggest one (usually the main mod rather than an add-on).
+    const auto& variants = prep->layout.variants;
+    auto selected = std::make_shared<std::vector<bool>>(variants.size(), false);
+    auto game = AppState::get().game();
+    const auto& installed = AppState::get().gameVersion(game);
+    bool picked = false;
+    for (size_t i = 0; i < variants.size(); ++i)
+        if (mm::checkCompat(installed, mm::mentionedGameVersions(variants[i].name, game)) == mm::Compat::Likely) {
+            (*selected)[i] = true;
+            picked = true;
+        }
+    if (!picked) {
+        size_t biggest = 0;
+        for (size_t i = 1; i < variants.size(); ++i)
+            if (variants[i].files.size() > variants[biggest].files.size()) biggest = i;
+        (*selected)[biggest] = true;
+    }
     auto* list = ui::vbox();
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
@@ -320,9 +382,10 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         leave();
         return true;
     });
+    list->registerAction("Install", brls::BUTTON_START, install);
 
     brls::View* first = nullptr;
-    for (size_t i = 0; i < prep->layout.variants.size(); ++i) {
+    for (size_t i = 0; i < variants.size(); ++i) {
         const auto& v = prep->layout.variants[i];
         auto* row = ui::focusRow();
         auto* box = ui::label((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff, 26, ui::accent());
@@ -339,9 +402,8 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
             return true;
         });
         row->updateActionHint(brls::BUTTON_A, "Select");
-        row->registerAction("Install", brls::BUTTON_START, install);
         list->addView(row);
-        if (!first) first = row;
+        if ((*selected)[i] && !first) first = row;  // start on the pre-selected option
     }
     auto* button = new brls::Button();
     button->setText("Install selected");
@@ -381,16 +443,18 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         r.profileUrl = d.summary.profileUrl;
         r.gamebananaModId = d.summary.id;
         r.gamebananaFileId = file.id;
-        r.gameVersionsNamed = mm::mentionedGameVersions(file.description + " " + d.descriptionHtml, r.game);
+        // File labels are specific; the free-form description only counts next to a game word.
+        r.gameVersionsNamed = mm::mentionedGameVersions(file.description, r.game, false, modUsesVersionWord(d, r.game));
+        if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
+            r.gameVersionsNamed = mm::mentionedGameVersions(d.descriptionHtml, r.game, true);
         for (auto i : variants) r.variants.push_back(prep->layout.variants.at(i).name);
         auto files = mm::mergeVariants(prep->layout, variants);
-        busy_ = true;
+        setBusy(true);
         cancel_.reset();  // copying can't be cancelled half-way; the library rolls back on failure
         setWorking("Installing… 0 / " + std::to_string(files.size()) + " files", 0);
         auto alive = flowAlive_;
         st.runFileJob(
             [this, alive, r, files, replace, prep, fileId = file.id](mm::Library& lib) {
-                for (const auto& id : replace) lib.remove(id);
                 size_t lastStep = 0;
                 try {
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
@@ -407,12 +471,18 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
                     throw;
                 }
+                // Only now that the new version is in place, take the old one(s) away.
+                for (const auto& id : replace) lib.remove(id);
                 // Installed: the download and the unpacked copy aren't needed any more.
                 AppState::get().discardPending(fileId);
             },
             [this, alive, d](const std::string& error) {
-                if (!*alive) return;
-                busy_ = false;
+                if (!*alive) {
+                    // The page was closed meanwhile; still tell the user how it went.
+                    brls::Application::notify(error.empty() ? d.summary.name + " installed" : "Install of " + d.summary.name + " failed");
+                    return;
+                }
+                setBusy(false);
                 if (!error.empty()) {
                     showMessage("Install failed", error + "\n\nThe download was kept. Try again from here or from My mods; it won't download again.", true);
                     return;
@@ -426,8 +496,8 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         return;
     }
     auto* dialog = new brls::Dialog("You already have " + otherNames + " from this mod. Replace it with " + file.filename + "?");
+    dialog->addButton("Replace", [run, others] { run(others); });  // the usual case: an update
     dialog->addButton("Keep both", [run] { run({}); });
-    dialog->addButton("Replace", [run, others] { run(others); });
     dialog->setCancelable(false);
     dialog->open();
 }

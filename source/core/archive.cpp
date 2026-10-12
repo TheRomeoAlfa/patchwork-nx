@@ -45,10 +45,16 @@ void extractArchive(const fs::path& archivePath, const fs::path& destDir, const 
         for (auto& c : rel)
             if (c == '\\') c = '/';
         auto type = archive_entry_filetype(entry);
-        if (!isSafeRelativePath(rel) || (type != AE_IFREG && type != AE_IFDIR)) {
+        // Make each component storable on the SD card (Windows-made archives can contain
+        // names like "Option: 60fps"). A ':' in the first component is a drive path: unsafe.
+        bool driveLike = rel.size() > 1 && rel[1] == ':';
+        std::string clean;
+        for (const auto& part : pathParts(fs::path(rel))) clean += (clean.empty() ? "" : "/") + fatSafeName(part);
+        if (driveLike || clean.empty() || !isSafeRelativePath(clean) || (type != AE_IFREG && type != AE_IFDIR)) {
             archive_read_data_skip(a.get());
             continue;
         }
+        rel = clean;
         auto out = destDir / fs::path(rel);
         if (type == AE_IFDIR) {
             fs::create_directories(out);

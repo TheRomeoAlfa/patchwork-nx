@@ -25,5 +25,8 @@ uint64_t freeSpaceBytes();
 
 std::string userAgent();
 
+// Certificate bundle shipped with the app ("" = system store).
+std::string caBundle();
+
 }  // namespace platform
 }  // namespace app

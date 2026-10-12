@@ -21,6 +21,10 @@ std::string slugify(std::string_view s, size_t maxLen = 48);
 // Split a relative generic path into components ("a/b/c" -> {a,b,c}).
 std::vector<std::string> pathParts(const fs::path& p);
 
+// Replace characters a FAT32/exFAT SD card can't store (: * ? " < > | and control
+// characters, trailing dots/spaces) in one path component.
+std::string fatSafeName(std::string_view name);
+
 // True if a relative path from an archive is safe to extract (no "..", not absolute).
 bool isSafeRelativePath(std::string_view p);
 
