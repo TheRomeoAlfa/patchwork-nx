@@ -10,6 +10,7 @@
 
 #include "gamebanana.hpp"
 #include "installer.hpp"
+#include "saves.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -54,6 +55,12 @@ private:
     // sizeTablesOk: the user already accepted a missing TOTK size table for their version.
     void finish(const mm::gb::ModDetails& d, const mm::gb::ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
                 std::vector<size_t> variants, bool sizeTablesOk = false);
+    // Save files (a different kind of install: into the game's save data, not the SD card).
+    struct SaveChoice;
+    void showSaveList(const mm::gb::ModDetails& d, const mm::gb::ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
+                      std::vector<mm::SaveCandidate> saves);
+    void showSaveOptions(const mm::gb::ModDetails& d, const mm::gb::ModFile& file, std::shared_ptr<SaveChoice> choice);
+    void installSave(const mm::gb::ModDetails& d, const mm::gb::ModFile& file, std::shared_ptr<SaveChoice> choice);
     void clear();
     void leave();
     void setBusy(bool busy);

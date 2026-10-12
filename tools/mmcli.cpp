@@ -6,6 +6,7 @@
 //   mmcli <sd-dir> mods   <botw|totk>
 //   mmcli <sd-dir> enable|disable|remove <id>
 //   mmcli <sd-dir> up|down <id>
+//   mmcli <sd-dir> saves  <botw|totk> <archive>     (save files an archive holds)
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -14,6 +15,7 @@
 #include "gamebanana.hpp"
 #include "installer.hpp"
 #include "library.hpp"
+#include "saves.hpp"
 
 using namespace mm;
 
@@ -98,6 +100,16 @@ int main(int argc, char** argv) {
             std::cout << "installed " << rec.id << " with " << rec.files.size() << " files\n";
             removeTree(prep.extractDir);
             fs::remove(dl);
+        } else if (cmd == "saves") {
+            auto game = parseGame(args.at(0));
+            auto prep = prepareArchive(args.at(1), lib.dataDir() / "work", game, "x");
+            std::cout << packageKindMessage(prep.layout.kind) << "\n";
+            for (const auto& c : findSaves(prep.extractDir, game, &prep.fileTimes)) {
+                std::cout << " save \"" << c.name << "\" slot=" << (c.slot.empty() ? "-" : c.slot) << (c.masterMode() ? " (master mode)" : "") << " t=" << c.savedTime;
+                for (const auto& p : c.photoDirs) std::cout << " +" << p;
+                std::cout << "\n";
+            }
+            removeTree(prep.extractDir);
         } else if (cmd == "mods") {
             auto game = parseGame(args.at(0));
             for (auto* m : lib.mods(game))

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "games.hpp"
 #include "util.hpp"
@@ -37,6 +39,35 @@ mm::fs::path resourcePath(const std::string& name);
 // included. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why);
+
+// User profiles on the console. On desktop: $MM_USERS ("Ryan,Kid"), default "Player".
+struct UserProfile {
+    std::string id;    // stable, for backups
+    std::string name;
+};
+std::vector<UserProfile> userProfiles(std::string& why);
+
+// Why game saves can't be changed right now, or "" when they can: a game open in the
+// background holds its save and would write over the change. On desktop: $MM_GAME_OPEN.
+std::string saveBlocker();
+
+// One user's save data for a game, open for writing while this object lives. Changes are
+// only kept once commit() has been called. On desktop: $MM_SAVE_ROOT/<title id>/<user id>.
+class SaveData {
+public:
+    // nullptr with a reason when it can't be opened (e.g. the user has never played the game).
+    static std::unique_ptr<SaveData> open(mm::Game game, const std::string& userId, std::string& why);
+    ~SaveData();
+    SaveData(const SaveData&) = delete;
+    SaveData& operator=(const SaveData&) = delete;
+
+    const mm::fs::path& root() const { return root_; }
+    void commit();  // throws
+
+private:
+    SaveData() = default;
+    mm::fs::path root_;
+};
 
 }  // namespace platform
 }  // namespace app

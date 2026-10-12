@@ -1,5 +1,7 @@
 #include "settings_page.hpp"
 
+#include <ctime>
+
 #include "app_state.hpp"
 #include "debug_script.hpp"
 #include "platform.hpp"
@@ -28,6 +30,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     scroll->setGrow(1);
     scroll->setContentView(content);
     addView(scroll);
+    scroll_ = scroll;
 
     auto section = [content](const std::string& title) {
         auto* l = ui::label(title, 16, ui::muted());
@@ -97,6 +100,16 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     addonsNote->setMargins(8, 4, 0, 4);
     content->addView(addonsNote);
 
+    section("Save backups · " + std::string(mm::gameInfo(AppState::get().game()).displayName));
+    auto* backupsAbout = new brls::DetailCell();
+    backupsAbout->setText("Backups folder");
+    backupsAbout->setDetailText("SD:/switch/patchwork/save-backups");
+    content->addView(backupsAbout);
+    backupsAnchor_ = backupsAbout;
+    backups_ = ui::vbox();
+    content->addView(backups_);
+    fillBackups();
+
     section("Storage");
     auto* cache = new brls::DetailCell();
     auto cacheDirs = [] {
@@ -154,6 +167,116 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
+}
+
+SettingsPage::~SettingsPage() { *alive_ = false; }
+
+void SettingsPage::fillBackups() {
+    if (ui::focusInside(backups_)) brls::Application::giveFocus(backupsAnchor_);
+    backups_->clearViews();
+    auto list = mm::listSaveBackups(AppState::get().saveBackupsDir(), AppState::get().game());
+    if (list.empty()) {
+        auto* none = ui::label("No backups yet.", 14, ui::muted(), false);
+        none->setMargins(6, 4, 0, 4);
+        backups_->addView(none);
+        return;
+    }
+    for (const auto& b : list) {
+        auto* cell = new brls::DetailCell();
+        cell->setText(formatDateTime(b.time) + " · " + b.userName);
+        cell->setDetailText("Restore");
+        cell->registerClickAction([this, b](brls::View*) {
+            auto game = std::string(mm::gameInfo(b.game).displayName);
+            auto* dialog = new brls::Dialog("Put back " + b.userName + "'s " + game + " saves from " + formatDateTime(b.time) +
+                                            "?\n\nThis replaces all of their " + game + " saves with the backup. Their current saves are "
+                                            "backed up first.");
+            dialog->addButton("Cancel", [] {});
+            dialog->addButton("Restore", [this, b] { restoreBackup(b); });
+            dialog->open();
+            return true;
+        });
+        cell->registerAction("Delete", brls::BUTTON_X, [this, b](brls::View*) {
+            auto* dialog = new brls::Dialog("Delete the backup from " + formatDateTime(b.time) + "? It can't be undone.");
+            dialog->addButton("Cancel", [] {});
+            dialog->addButton("Delete", [this, b, alive = alive_] {
+                mm::removeTree(b.dir);
+                brls::sync([this, alive] {
+                    if (*alive) fillBackups();
+                });
+            });
+            dialog->open();
+            return true;
+        });
+        backups_->addView(cell);
+        if (!b.reason.empty()) {
+            auto* l = ui::label(b.reason, 14, ui::muted(), false);
+            l->setMargins(2, 4, 4, 4);
+            backups_->addView(l);
+        }
+    }
+}
+
+void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
+    auto& st = AppState::get();
+    if (st.installBusy()) {
+        brls::Application::notify("Wait for the current change to finish");
+        return;
+    }
+    if (auto blocker = platform::saveBlocker(); !blocker.empty()) {
+        auto* dialog = new brls::Dialog(blocker);
+        dialog->addButton("OK", [] {});
+        dialog->open();
+        return;
+    }
+    st.setInstallBusy(true);
+    auto busy = ui::busyBox("Putting back your saves…", "Writing the game's save data. Please wait.",
+                            "Please wait until your saves are put back");
+    scroll_->setVisibility(brls::Visibility::GONE);
+    addView(busy.box);
+    auto alive = alive_;
+    // The dialog hands focus back when it closes, so take it on the next frame too.
+    brls::Application::giveFocus(busy.box);
+    brls::sync([alive, box = busy.box] {
+        if (*alive) brls::Application::giveFocus(box);
+    });
+    auto backupsRoot = st.saveBackupsDir();
+    st.runFileJob(
+        [b, busy, alive, backupsRoot](mm::Library&) {
+            std::string why;
+            auto data = platform::SaveData::open(b.game, b.userId, why);
+            if (!data) throw std::runtime_error(why);
+            // Keep what's there now too, in case this was the wrong backup.
+            auto now = static_cast<int64_t>(std::time(nullptr));
+            mm::SaveBackup current{mm::newBackupDir(backupsRoot, b.game, b.userId, now), b.game, b.userId, b.userName,
+                                   "Before restoring the backup from " + formatDateTime(b.time), now};
+            try {
+                mm::backupSave(data->root(), current.dir / "save");
+                mm::writeBackupInfo(current);
+            } catch (const std::exception& e) {
+                mm::removeTree(current.dir);
+                throw std::runtime_error(std::string("Couldn't back up the current saves, so nothing was changed: ") + e.what());
+            }
+            mm::restoreSave(b.dir / "save", data->root(), [&] { data->commit(); }, [busy, alive](size_t done, size_t total) mutable {
+                brls::sync([busy, alive, done, total]() mutable {
+                    if (*alive) busy.update(done, total);
+                });
+            });
+        },
+        [this, alive, box = busy.box, name = b.userName](const std::string& error) {
+            AppState::get().setInstallBusy(false);
+            if (!*alive) return;
+            scroll_->setVisibility(brls::Visibility::VISIBLE);
+            brls::Application::giveFocus(backupsAnchor_);
+            removeView(box);
+            fillBackups();
+            if (error.empty()) {
+                brls::Application::notify(name + "'s saves are back");
+            } else {
+                auto* dialog = new brls::Dialog("Restoring failed: " + error);
+                dialog->addButton("OK", [] {});
+                dialog->open();
+            }
+        });
 }
 
 void SettingsPage::revealNsfwSetting() {

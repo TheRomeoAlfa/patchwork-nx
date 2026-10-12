@@ -10,6 +10,7 @@ namespace mm {
 struct PreparedArchive {
     fs::path extractDir;
     LayoutResult layout;
+    FileTimes fileTimes;  // of the outer archive's files, relative to extractDir
 };
 
 // Extract an archive into `workDir` (wiped first) and work out where its files go.

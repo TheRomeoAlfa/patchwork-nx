@@ -132,6 +132,7 @@ public:
     mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
     mm::fs::path workDir() const { return dataDir_ / "work"; }
     mm::fs::path inboxDir() const { return dataDir_ / "inbox"; }  // archives copied here by the user
+    mm::fs::path saveBackupsDir() const { return dataDir_ / "save-backups"; }
     // Each install unpacks into its own folder so two attempts can never mix files.
     mm::fs::path workDirFor(int64_t fileId) const { return workDir() / std::to_string(fileId); }
     mm::fs::path archivePathFor(const mm::gb::ModFile& f) const;
@@ -188,6 +189,7 @@ private:
 std::string formatSize(uint64_t bytes);
 std::string formatFileSize(int64_t bytes);  // "size unknown" for 0 / -1
 std::string formatCount(int64_t n);
+std::string formatDateTime(int64_t unixSeconds);  // "May 24, 2023 6:50 PM", local time
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
 
 }  // namespace app
