@@ -35,7 +35,11 @@ std::vector<std::string> mentionedGameVersions(const std::string& rawText, Game 
         bool vPrefix = m[2].matched;
         bool versionWord = keyword == "version" || keyword == "ver" || keyword == "ver.";
         bool gameWord = !keyword.empty() && !versionWord;
-        bool accept = gameWord || (!strict && ((versionWord && !versionWordIsModVersion) || (vPrefix && keyword.empty())));
+        // A bare "Version 1.0" / "v1.0" is usually the mod's own version; game versions are
+        // written with three parts (1.2.1, 1.6.0), so only those count without a game word.
+        bool threeParts = m[5].matched;
+        bool accept = gameWord || (!strict && threeParts &&
+                                   ((versionWord && !versionWordIsModVersion) || (vPrefix && keyword.empty())));
         if (!accept) continue;
         if (m[3].str() != "1" || std::stoi(m[4].str()) > maxMinor(game)) continue;
         auto v = "1." + std::to_string(std::stoi(m[4].str())) + (m[5].matched ? m[5].str() : "");
@@ -137,6 +141,27 @@ bool isAddOnFileOf(const std::string& own, const std::string& other) {
     auto extra = a.substr(0, pos) + a.substr(pos + b.size());
     static const std::regex versionOnly(R"(^[\s_.\-]*(v|ver|version)?[\s_.\-]*\d[\d._\-]*[a-z]?[\s_.\-]*$)");
     return !std::regex_match(extra, versionOnly);
+}
+
+bool isRestoreOriginalsFile(const std::string& filename, const std::string& description) {
+    auto check = [](const std::string& text) {
+        std::vector<std::string> words;
+        std::string word;
+        for (char c : toLower(text) + " ") {
+            if (std::isalnum(static_cast<unsigned char>(c))) {
+                word += c;
+            } else if (!word.empty()) {
+                words.push_back(word);
+                word.clear();
+            }
+        }
+        auto has = [&](const char* w) { return std::find(words.begin(), words.end(), w) != words.end(); };
+        if (has("uninstall") || has("uninstaller") || has("restore") || has("restorer")) return true;
+        // "vanilla" alone is also a style ("vanilla-friendly"); only with a word about files.
+        return has("vanilla") && (has("files") || has("file") || has("backup") || has("original") || has("originals"));
+    };
+    auto dot = filename.rfind('.');
+    return check(dot == std::string::npos ? filename : filename.substr(0, dot)) || check(description);
 }
 
 }  // namespace mm

@@ -29,8 +29,11 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, 
     if (mm::endsWithI(f.filename, ".bnp")) return {"Needs BCML on a PC", ui::warn()};
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
     if (mm::wk::isWiiUOnly(f)) return {"Wii U only", ui::warn()};
+    if (mm::isRestoreOriginalsFile(f.filename, f.description))
+        return {"Original files · not needed", ui::muted()};  // Patchwork undoes mods itself
     if (mm::saysAllVersions(f.description)) return {"Works on all game versions", ui::ok(), true};
-    auto named = mm::mentionedGameVersions(f.description + " " + f.version, game, false, versionWordIsMod);
+    // Not f.version: that's the uploader's version of the mod ("1.0"), easily mistaken for a game version.
+    auto named = mm::mentionedGameVersions(f.description, game, false, versionWordIsMod);
     switch (mm::checkCompat(installed, named)) {
         case mm::Compat::Likely: return {"Matches your game", ui::ok(), true};
         case mm::Compat::Mismatch: return {"For game " + named.front(), ui::warn()};
@@ -49,6 +52,7 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
         const auto& f = d.files[i];
         int score = 0;
         if (!isUnsupportedPackage(f)) score += 4;
+        if (mm::isRestoreOriginalsFile(f.filename, f.description)) score -= 20;  // only if it's all there is
         if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
         // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
         bool isVariantOfAnother = false;
