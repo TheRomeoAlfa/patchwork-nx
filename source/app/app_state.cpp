@@ -78,6 +78,7 @@ void AppState::init() {
     try {
         auto j = json::parse(mm::readFile(dataDir_ / "settings.json"));
         settings_.hideNsfw = j.value("hideNsfw", true);
+        if (j.contains("seenCrashReports")) settings_.seenCrashReports = j["seenCrashReports"].get<std::vector<std::string>>();
         if (auto g = mm::gameFromKey(j.value("game", "totk"))) game_ = *g;
     } catch (...) {
         // first run or unreadable: defaults
@@ -109,6 +110,7 @@ void AppState::setGame(mm::Game g) {
 void AppState::saveSettings() {
     try {
         json j{{"hideNsfw", settings_.hideNsfw}, {"game", std::string(mm::gameInfo(game_).key)}};
+        if (settings_.seenCrashReports) j["seenCrashReports"] = *settings_.seenCrashReports;
         mm::writeFileAtomic(dataDir_ / "settings.json", j.dump(1));
     } catch (const std::exception& e) {
         brls::Logger::error("saving settings failed: {}", e.what());

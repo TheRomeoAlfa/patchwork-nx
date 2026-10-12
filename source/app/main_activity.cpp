@@ -1,10 +1,14 @@
 #include "main_activity.hpp"
 
+#include <algorithm>
+
 #include "app_state.hpp"
 #include "add_mods_page.hpp"
 #include "browse_page.hpp"
 #include "my_mods_page.hpp"
+#include "platform.hpp"
 #include "settings_page.hpp"
+#include "sysmodules.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -64,6 +68,35 @@ void MainActivity::onContentAvailable() {
             switchGame();
             return true;
         }, true);
+    brls::delay(1200, [this] { checkModLoaderCrashes(); });
+}
+
+// If Atmosphère's mod loader crashed since the last check (the game wouldn't start with
+// mods on), explain the usual cause: Patchwork itself never sees that crash happen.
+void MainActivity::checkModLoaderCrashes() {
+    auto reports = mm::modLoaderCrashReports(platform::sdRoot());
+    auto& seen = AppState::get().settings().seenCrashReports;
+    bool firstCheck = !seen.has_value();
+    bool fresh = false;
+    if (!firstCheck)
+        for (const auto& r : reports) fresh |= std::find(seen->begin(), seen->end(), r) == seen->end();
+    if (firstCheck || fresh || reports.size() != seen->size()) {
+        seen = reports;
+        AppState::get().saveSettings();
+    }
+    if (!fresh) return;  // the first check only records what's there already
+    auto* dialog = new brls::Dialog(
+        "Atmosphère crashed while loading mods (Program ID 010041544D530000), so a game couldn't start.\n\n"
+        "This is usually not caused by the mod. Background add-ons (sysmodules) can use up the memory "
+        "Atmosphère needs to load mods. Try turning them off in Settings, restart the Switch and launch "
+        "the game again.");
+    dialog->addButton("Later", [] {});
+    dialog->addButton("Open Settings", [this] {
+        showPage(Page::Settings);
+        // The dialog hands focus back to where it was once it has closed; move it after that.
+        brls::sync([this] { ui::tryFocus(content_); });
+    });
+    dialog->open();
 }
 
 void MainActivity::switchGame() {

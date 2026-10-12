@@ -54,3 +54,11 @@ Run these after any release build; they cover what the desktop build can't.
 9. **Waikuteru:** Browse → R. Install No Fall Damage (BOTW) and check it in-game.
 10. **Power/HOME during a copy** (optional, on a test mod): reopen the app; Settings →
    Re-copy enabled mods; nothing half-installed remains.
+11. **Touch:** tap the sidebar, the GameBanana/Waikuteru tabs, and a mod (first tap selects,
+   second tap installs). Turn a mod off by tapping it twice in My mods; taps elsewhere are
+   ignored while files copy.
+12. **Background add-ons:** Settings → Background add-ons lists your sysmodules with their real
+   on/off state. Turn one off, restart: it no longer runs. Turn it back on, restart: it runs.
+13. **Crash notice:** after Atmosphère shows the 010041544D530000 error on a game launch,
+   reopen Patchwork: it explains the cause and opens Settings. It doesn't appear again for
+   the same crash.
