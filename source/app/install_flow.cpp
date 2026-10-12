@@ -750,7 +750,7 @@ void InstallFlow::showSaveList(const ModDetails& d, const ModFile& file, std::sh
         text->addView(ui::label(wholeSave && !s.slot.empty() ? slotLabel(game, s.slot) : saveName(s, d), 17, ui::text()));
         std::string detail;
         if (!wholeSave && !s.slot.empty()) detail = "From " + slotLabel(game, s.slot);
-        if (s.savedTime) detail += (detail.empty() ? "Saved " : " · saved ") + formatDateTime(s.savedTime);
+        if (s.savedTime) detail += (detail.empty() ? "Saved " : " · saved ") + formatDateTime(s.savedTime, false);
         if (s.masterMode()) detail += (detail.empty() ? "" : " · ") + std::string("Master Mode");
         if (!detail.empty()) {
             auto* l = ui::label(detail, 14, ui::muted());

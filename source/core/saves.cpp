@@ -86,7 +86,14 @@ std::vector<SaveCandidate> findSaves(const fs::path& root, Game game, const File
         std::string name;
         for (const auto& p : parts) {
             if (p == "." || (p.size() == 16 && isHex(p))) continue;
-            name += (name.empty() ? "" : " / ") + p;
+            auto part = p;
+            // A zip inside the download is unpacked into "<name>.zip.extracted".
+            if (endsWithI(part, ".extracted")) {
+                part.resize(part.size() - 10);
+                auto dot = part.rfind('.');
+                if (dot != std::string::npos && dot > 0) part.resize(dot);
+            }
+            name += (name.empty() ? "" : " / ") + part;
         }
         c.name = name;
         if (times)

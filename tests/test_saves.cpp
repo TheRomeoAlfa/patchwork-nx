@@ -44,6 +44,10 @@ TEST("saves: finds slots in the layouts people upload") {
     CHECK_EQ(c[0].slot, std::string("slot_02"));
     CHECK_EQ(c[1].name, std::string("TOTK Save Files / After Intro"));
 
+    // A zip inside the download, unpacked next to it.
+    put(d.path / "e" / "Paraglider.zip.extracted" / "slot_00" / "progress.sav", "p");
+    CHECK_EQ(findSaves(d.path / "e", Game::Totk).at(0).name, std::string("Paraglider"));
+
     auto root = findSaves(d.path / "d", Game::Totk);
     CHECK_EQ(root.size(), 1u);
     CHECK_EQ(root[0].name, std::string(""));
