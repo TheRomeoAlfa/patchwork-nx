@@ -136,3 +136,43 @@ TEST("layout: a patch directly in exefs_patches gets its own folder") {
     CHECK_EQ(r.variants.size(), 1u);
     if (!r.variants.empty()) CHECK(has(targets(r.variants[0]), "atmosphere/exefs_patches/my-mod/0011223344556677.ips"));
 }
+
+TEST("layout: game folders with no romfs folder around them") {
+    t::TempDir d;
+    touch(d.path / "UI/StockItem/Armor_172_Head.sbitemico");
+    touch(d.path / "Actor/Pack/Armor_172_Head.sbactorpack");
+    touch(d.path / "Model/Armor_172_Head.sbfres");
+    touch(d.path / "readme.txt");
+    auto r = detectLayout(d.path, Game::Botw, "helm-pack");
+    CHECK(r.kind == PackageKind::Installable);
+    CHECK_EQ(r.variants.size(), 1u);
+    if (!r.variants.empty()) {
+        auto t = targets(r.variants[0]);
+        CHECK_EQ(t.size(), 3u);
+        CHECK(has(t, "atmosphere/contents/01007EF00011E000/romfs/UI/StockItem/Armor_172_Head.sbitemico"));
+        CHECK(has(t, "atmosphere/contents/01007EF00011E000/romfs/Model/Armor_172_Head.sbfres"));
+    }
+    CHECK(!r.warnings.empty());
+
+    // One level down, inside a mod-named folder.
+    t::TempDir d2;
+    touch(d2.path / "Cool Mod/Pack/TitleBG.pack");
+    auto r2 = detectLayout(d2.path, Game::Totk, "cool");
+    CHECK_EQ(r2.variants.size(), 1u);
+    if (!r2.variants.empty()) CHECK(has(targets(r2.variants[0]), "atmosphere/contents/0100F2C0115B6000/romfs/Pack/TitleBG.pack"));
+
+    // Not a romfs: one game-like folder name among unrelated ones.
+    t::TempDir d3;
+    touch(d3.path / "Screenshots/1.png");
+    touch(d3.path / "Docs/guide.pdf");
+    touch(d3.path / "UI/mockup.png");
+    CHECK(detectLayout(d3.path, Game::Totk, "x").kind == PackageKind::Empty);
+
+    // A real romfs folder elsewhere wins: the fallback isn't used.
+    t::TempDir d4;
+    touch(d4.path / "romfs/Pack/A.pack");
+    touch(d4.path / "Extras/Model/B.bfres");
+    auto r4 = detectLayout(d4.path, Game::Totk, "y");
+    CHECK_EQ(r4.variants.size(), 1u);
+    if (!r4.variants.empty()) CHECK_EQ(targets(r4.variants[0]).size(), 1u);
+}

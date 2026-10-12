@@ -67,6 +67,8 @@ if(NOT APP_BUILD)
 
         add_executable(mmcli tools/mmcli.cpp)
         target_link_libraries(mmcli PRIVATE mmcore)
+        add_executable(survey tools/survey.cpp)
+        target_link_libraries(survey PRIVATE mmcore)
     endif()
     return()
 endif()

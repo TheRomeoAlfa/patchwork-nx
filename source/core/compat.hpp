@@ -41,4 +41,15 @@ struct SizeTableCheck {
 };
 SizeTableCheck checkSizeTables(const std::vector<std::string>& targets, Game game, const std::string& installedVersion);
 
+// Options named per game version ("Defogger (Game Version 1.1.2)", "… 1.2.0") with none for
+// the installed version: the option for the newest version not newer than it, if any.
+// Needs at least two options naming versions, so a lone version number isn't over-read.
+// Returns options.size() when there's nothing sensible to pick.
+size_t closestVersionOption(const std::vector<std::string>& options, Game game, const std::string& installedVersion);
+
+// True if file `own` looks like an add-on or variant of file `other` from the same mod
+// ("dark_title_screen_defogger.zip" of "defogger.zip"), as opposed to just another version
+// of it ("fierce_deity_v102.7z" of "fierce_deity.7z"). Compares names without extensions.
+bool isAddOnFileOf(const std::string& own, const std::string& other);
+
 }  // namespace mm
