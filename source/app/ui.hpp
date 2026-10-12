@@ -66,10 +66,11 @@ bool tryFocus(brls::View* target);
 // Thin horizontal bar showing 0..1 progress.
 class ProgressBar : public brls::Box {
 public:
-    ProgressBar();
+    explicit ProgressBar(float width);
     void setProgress(float fraction);
 
 private:
+    float width_;
     brls::Box* fill_;
 };
 

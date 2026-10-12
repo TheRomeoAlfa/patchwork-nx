@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstdio>
+#include <memory>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -91,7 +94,7 @@ bool isSafeRelativePath(std::string_view p) {
 
 bool removeTree(const fs::path& p, std::string* error) {
     std::error_code ec;
-    auto st = fs::symlink_status(p, ec);
+    auto st = fs::status(p, ec);  // not symlink_status: lstat isn't supported on the Switch SD card
     if (st.type() == fs::file_type::not_found) return true;
     if (ec) {
         if (error) *error = "can't access " + p.string() + ": " + ec.message();
@@ -141,7 +144,34 @@ void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt) {
 
 void copyFileCreatingDirs(const fs::path& from, const fs::path& to) {
     fs::create_directories(to.parent_path());
-    fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+    // A plain read/write loop: fs::copy_file fails on the Switch with "Function not
+    // implemented" (it also tries to copy permissions, which the SD card driver lacks).
+    auto fail = [&](int err) {
+        throw fs::filesystem_error("cannot copy file", from, to, std::error_code(err ? err : EIO, std::generic_category()));
+    };
+    std::unique_ptr<FILE, int (*)(FILE*)> in(std::fopen(from.c_str(), "rb"), &std::fclose);
+    if (!in) fail(errno);
+    FILE* out = std::fopen(to.c_str(), "wb");
+    if (!out) fail(errno);
+    std::vector<char> buf(256 * 1024);
+    int err = 0;
+    for (;;) {
+        size_t n = std::fread(buf.data(), 1, buf.size(), in.get());
+        if (n > 0 && std::fwrite(buf.data(), 1, n, out) != n) {
+            err = errno ? errno : EIO;
+            break;
+        }
+        if (n < buf.size()) {
+            if (std::ferror(in.get())) err = errno ? errno : EIO;
+            break;
+        }
+    }
+    if (std::fclose(out) != 0 && !err) err = errno ? errno : EIO;
+    if (err) {
+        std::error_code ec;
+        fs::remove(to, ec);
+        fail(err);
+    }
 }
 
 int64_t stableId(std::string_view s) {

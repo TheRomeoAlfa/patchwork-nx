@@ -39,19 +39,25 @@ bool tryFocus(brls::View* target) {
     return true;
 }
 
-ProgressBar::ProgressBar() : brls::Box(brls::Axis::ROW) {
+ProgressBar::ProgressBar(float width) : brls::Box(brls::Axis::ROW), width_(width) {
+    setWidth(width);
+    setMaxWidthPercentage(100);
     setHeight(10);
     setCornerRadius(5);
     setBackgroundColor(line());
     fill_ = new brls::Box();
     fill_->setCornerRadius(5);
     fill_->setBackgroundColor(accent());
-    fill_->setWidthPercentage(0);
+    fill_->setWidth(0);
+    fill_->setShrink(1);
     addView(fill_);
 }
 
 void ProgressBar::setProgress(float fraction) {
-    fill_->setWidthPercentage(std::clamp(fraction, 0.0f, 1.0f) * 100.0f);
+    // Pixel widths, not percentages: the fill must never be wider than the track.
+    if (!(fraction >= 0.0f)) fraction = 0.0f;  // also catches NaN
+    float track = getWidth() > 0 ? std::min(getWidth(), width_) : width_;
+    fill_->setWidth(std::clamp(fraction, 0.0f, 1.0f) * track);
 }
 
 brls::Label* label(const std::string& text, float size, NVGcolor color, bool singleLine) {
