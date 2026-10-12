@@ -51,8 +51,9 @@ private:
     void setWorking(const std::string& status, float progress = -1);
     void showVariantPicker(const mm::gb::ModDetails& d, const mm::gb::ModFile& file,
                            std::shared_ptr<mm::PreparedArchive> prep);
+    // sizeTablesOk: the user already accepted a missing TOTK size table for their version.
     void finish(const mm::gb::ModDetails& d, const mm::gb::ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
-                std::vector<size_t> variants);
+                std::vector<size_t> variants, bool sizeTablesOk = false);
     void clear();
     void leave();
     void setBusy(bool busy);

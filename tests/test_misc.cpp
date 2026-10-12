@@ -169,3 +169,22 @@ TEST("gamebanana: mod details from ProfilePage carry the NSFW rating") {
         "_aContentRatings":{"bg":"Blood and Gore"},"_aFiles":[]})", 3);
     CHECK(!ratedButShown.summary.nsfw);
 }
+
+TEST("compat: TOTK size tables missing for the installed version") {
+    const std::string res = "atmosphere/contents/0100F2C0115B6000/romfs/System/Resource/";
+    std::vector<std::string> targets = {
+        "atmosphere/contents/0100F2C0115B6000/romfs/Model/Npc.bfres.mc",
+        res + "ResourceSizeTable.Product.120.rsizetable.zs", res + "ResourceSizeTable.Product.110.rsizetable.zs",
+        res + "ResourceSizeTable.Product.112.rsizetable.zs", res + "ResourceSizeTable.Product.111.rsizetable.zs"};
+    auto c = checkSizeTables(targets, Game::Totk, "1.2.1");
+    CHECK(c.missing);
+    CHECK_EQ(c.versions.size(), 4u);
+    CHECK_EQ(c.versions.front(), std::string("1.1.0"));
+    CHECK_EQ(c.versions.back(), std::string("1.2.0"));
+    CHECK(!checkSizeTables(targets, Game::Totk, "1.2.0").missing);
+    CHECK(!checkSizeTables(targets, Game::Totk, "").missing);  // version unknown: don't guess
+    targets.push_back(res + "resourcesizetable.product.121.rsizetable.zs");
+    CHECK(!checkSizeTables(targets, Game::Totk, "1.2.1").missing);
+    CHECK(!checkSizeTables({"atmosphere/contents/0100F2C0115B6000/romfs/Pack/a.pack.zs"}, Game::Totk, "1.2.1").missing);
+    CHECK(checkSizeTables({res + "ResourceSizeTable.Product.120.rsizetable.zs"}, Game::Botw, "1.6.0").versions.empty());
+}

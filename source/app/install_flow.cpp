@@ -466,8 +466,31 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
 }
 
 void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
-                         std::vector<size_t> variants) {
+                         std::vector<size_t> variants, bool sizeTablesOk) {
     auto& st = AppState::get();
+    if (!sizeTablesOk) {
+        std::vector<std::string> targets;
+        for (const auto& f : mm::mergeVariants(prep->layout, variants)) targets.push_back(f.target);
+        const auto& installed = st.gameVersion(st.game());
+        auto tables = mm::checkSizeTables(targets, st.game(), installed);
+        if (tables.missing) {
+            std::string list;
+            for (size_t i = 0; i < tables.versions.size(); ++i)
+                list += (i == 0 ? "" : i + 1 == tables.versions.size() ? " and " : ", ") + tables.versions[i];
+            auto* dialog = new brls::Dialog(
+                "This mod was made for " + std::string(mm::gameInfo(st.game()).displayName) + " " + list +
+                ". It has no size table for " + installed + ", your version, so the game may crash or the mod may not load.\n\n"
+                "Check its page for a version that supports " + installed + ".");
+            dialog->addButton("Cancel", [this, prep] {
+                mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+                leave();
+            });
+            dialog->addButton("Install anyway", [this, d, file, prep, variants] { finish(d, file, prep, variants, true); });
+            dialog->setCancelable(false);
+            dialog->open();
+            return;
+        }
+    }
     bool fromGameBanana = d.summary.sourceKey.rfind("gb:", 0) == 0;
     auto newId = fromGameBanana ? "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id)
                                 : "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);

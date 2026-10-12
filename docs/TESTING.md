@@ -67,3 +67,6 @@ Run these after any release build; they cover what the desktop build can't.
    other game says to switch game; a made-up number says there's no such mod.
 15. **Hidden NSFW setting:** Settings shows no Browsing section. Hold L + R + − for 3 seconds:
    "Hide NSFW mods" appears. Turn it off, restart Patchwork: it's hidden and on again.
+16. **Size table warning (TOTK):** install a mod whose files include
+   `ResourceSizeTable.Product.<version>.rsizetable.zs` but not your version's (e.g. mod
+   455219 on 1.2.1): a warning names the versions it supports; Cancel is the default.
