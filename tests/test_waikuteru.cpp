@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <set>
 #include "test.hpp"
 #include "util.hpp"
 #include "waikuteru.hpp"
@@ -14,13 +15,20 @@ TEST("waikuteru: downloads page lists mods per game with platform") {
         if (e.game == Game::Botw && e.onSwitch) ++botwSwitch;
         CHECK(e.summary.sourceKey.rfind("wk:", 0) == 0);
         CHECK(!e.summary.profileUrl.empty());
+        CHECK(e.summary.thumbnailUrl.rfind("https://static.wixstatic.com/media/", 0) == 0);
     }
+    std::set<std::string> thumbs;
+    for (const auto& e : list) thumbs.insert(e.summary.thumbnailUrl);
+    CHECK(thumbs.size() > 20);  // each card has its own picture
     CHECK_EQ(botw, 22u);
     CHECK_EQ(totk, 5u);
     CHECK_EQ(botwSwitch, 12u);
     auto ft = std::find_if(list.begin(), list.end(), [](const auto& e) { return e.summary.sourceKey == "wk:botw/faster-teleport-by-waikuteru"; });
     CHECK(ft != list.end());
-    if (ft != list.end()) CHECK_EQ(ft->summary.name, std::string("Faster Teleport by Waikuteru"));
+    if (ft != list.end()) {
+        CHECK_EQ(ft->summary.name, std::string("Faster Teleport by Waikuteru"));
+        CHECK(ft->summary.thumbnailUrl.find("696de8_8953e32d") != std::string::npos);
+    }
     auto whomp = std::find_if(list.begin(), list.end(), [](const auto& e) { return e.summary.name == "Whomp's Fortress"; });
     CHECK(whomp != list.end());
 }

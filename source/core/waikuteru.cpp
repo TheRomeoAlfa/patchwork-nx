@@ -84,6 +84,22 @@ std::vector<ListEntry> parseDownloadsPage(const std::string& html) {
         }
     }
 
+    // Each card's picture is the first image after the card's link to its mod page.
+    std::vector<std::pair<std::string, std::string>> thumbs;  // page url -> image id
+    {
+        static const std::regex link(R"#(href="([^"]+)")#");
+        static const std::regex media(R"(static\.wixstatic\.com/media/([0-9a-f]+_[0-9a-f]+)(?:~|%7E)mv2\.(png|jpe?g|webp))");
+        for (std::sregex_iterator it(html.begin(), html.end(), link), end; it != end; ++it) {
+            auto url = unescapeHtml((*it)[1].str());
+            if (!isModPageUrl(url) || std::any_of(thumbs.begin(), thumbs.end(), [&](const auto& t) { return t.first == url; })) continue;
+            auto from = html.begin() + (it->position() + it->length());
+            auto cardEnd = html.find("Download Now", static_cast<size_t>(from - html.begin()));
+            auto to = cardEnd == std::string::npos ? html.end() : html.begin() + static_cast<long>(cardEnd);
+            std::smatch m;
+            if (std::regex_search(from, to, m, media)) thumbs.emplace_back(url, m[1].str() + "~mv2." + m[2].str());
+        }
+    }
+
     // Cards read as: <name> / "Platform: ..." or "Game Version: ..." / "Download Now".
     std::vector<ListEntry> out;
     auto toks = textTokens(html);
@@ -110,6 +126,9 @@ std::vector<ListEntry> parseDownloadsPage(const std::string& html) {
         e.summary.author = "Waikuteru";
         e.summary.category = version ? "Game " + detail : detail;
         e.summary.profileUrl = page->second;
+        auto thumb = std::find_if(thumbs.begin(), thumbs.end(), [&](const auto& t) { return t.first == page->second; });
+        if (thumb != thumbs.end())
+            e.summary.thumbnailUrl = "https://static.wixstatic.com/media/" + thumb->second + "/v1/fill/w_192,h_108,al_c,q_85/thumb.jpg";
         e.summary.sourceKey = sourceKeyForUrl(page->second);
         e.summary.id = stableId(e.summary.sourceKey);
         out.push_back(std::move(e));
