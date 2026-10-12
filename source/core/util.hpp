@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -39,6 +40,10 @@ void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt);
 
 // Copy a file, creating parent directories. Throws on failure.
 void copyFileCreatingDirs(const fs::path& from, const fs::path& to);
+
+// Stable positive 63-bit id for a string (FNV-1a), used for files that have no numeric id.
+int64_t stableId(std::string_view s);
+std::string urlDecode(std::string_view s);
 
 std::string readFile(const fs::path& p);
 // Writes via a temp file + rename so a power loss never leaves a half-written file.

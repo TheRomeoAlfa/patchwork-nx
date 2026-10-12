@@ -22,6 +22,7 @@ json toJson(const ModRecord& m) {
         {"version", m.version},
         {"sourceFile", m.sourceFile},
         {"profileUrl", m.profileUrl},
+        {"sourceKey", m.sourceKey},
         {"gamebananaModId", m.gamebananaModId},
         {"gamebananaFileId", m.gamebananaFileId},
         {"installedAt", m.installedAt},
@@ -42,8 +43,10 @@ ModRecord fromJson(const json& j) {
     m.version = j.value("version", "");
     m.sourceFile = j.value("sourceFile", "");
     m.profileUrl = j.value("profileUrl", "");
+    m.sourceKey = j.value("sourceKey", "");
     m.gamebananaModId = j.value("gamebananaModId", int64_t{0});
     m.gamebananaFileId = j.value("gamebananaFileId", int64_t{0});
+    if (m.sourceKey.empty() && m.gamebananaModId) m.sourceKey = "gb:" + std::to_string(m.gamebananaModId);  // older state files
     m.installedAt = j.value("installedAt", int64_t{0});
     m.variants = j.value("variants", std::vector<std::string>{});
     m.gameVersionsNamed = j.value("gameVersionsNamed", std::vector<std::string>{});

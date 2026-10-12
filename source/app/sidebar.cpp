@@ -65,6 +65,7 @@ Sidebar::Sidebar() : brls::Box(brls::Axis::COLUMN) {
     const std::pair<Page, std::pair<const char*, const char*>> defs[] = {
         {Page::Browse, {ui::icon::browse, "Browse"}},
         {Page::Search, {ui::icon::search, "Search"}},
+        {Page::AddMods, {ui::icon::add, "Add mods"}},
         {Page::MyMods, {ui::icon::myMods, "My mods"}},
         {Page::Settings, {ui::icon::settings, "Settings"}},
     };

@@ -3,6 +3,10 @@
 #include "app_state.hpp"
 #include "compat.hpp"
 #include "md5.hpp"
+#include "platform.hpp"
+#include "waikuteru.hpp"
+
+#include <set>
 
 namespace app {
 
@@ -10,8 +14,10 @@ using mm::gb::ModDetails;
 using mm::gb::ModFile;
 
 bool isUnsupportedPackage(const ModFile& f) {
-    return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl");
+    return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl") || mm::wk::isWiiUOnly(f);
 }
+
+bool isLocalFile(const ModFile& f) { return f.downloadUrl.rfind("file://", 0) == 0; }
 
 bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
     std::vector<std::string> labels;
@@ -22,6 +28,7 @@ bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
 FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, bool versionWordIsMod) {
     if (mm::endsWithI(f.filename, ".bnp")) return {"Needs BCML on a PC", ui::warn()};
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
+    if (mm::wk::isWiiUOnly(f)) return {"Wii U only", ui::warn()};
     if (mm::saysAllVersions(f.description)) return {"Works on all game versions", ui::ok(), true};
     auto named = mm::mentionedGameVersions(f.description + " " + f.version, game, false, versionWordIsMod);
     switch (mm::checkCompat(installed, named)) {
@@ -29,7 +36,7 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, 
         case mm::Compat::Mismatch: return {"For game " + named.front(), ui::warn()};
         case mm::Compat::Unknown: break;
     }
-    return {formatSize(f.size), ui::muted()};
+    return {formatFileSize(f.size), ui::muted()};
 }
 
 // The file we'd pick for the user: one made for their game version, else the newest
@@ -207,7 +214,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         text->setShrink(1);
         text->setMarginLeft(12);
         text->addView(ui::label(file.filename, 17, ui::text()));
-        auto descText = file.description.empty() ? formatSize(file.size) : file.description + " · " + formatSize(file.size);
+        auto descText = file.description.empty() ? formatFileSize(file.size) : file.description + " · " + formatFileSize(file.size);
         auto* desc = ui::label(descText, 14, ui::muted());
         desc->setMarginTop(3);
         text->addView(desc);
@@ -239,6 +246,10 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                     true);
         return;
     }
+    if (mm::wk::isWiiUOnly(file)) {
+        showMessage("Wii U only", "This file is for the Wii U version of the game. Pick the Switch file instead.", true);
+        return;
+    }
     if (!file.avClean) {
         showMessage("File blocked", "GameBanana's virus scan flagged this file, so it won't be installed.", true);
         return;
@@ -246,6 +257,18 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
 
     auto& st = AppState::get();
     bool cached = st.isDownloaded(file);
+    // Rough need: the archive, its unpacked files, the library copy and the SD copy.
+    uint64_t free = st.freeSpace();
+    if (file.size > 0 && free > 0) {
+        uint64_t need = static_cast<uint64_t>(file.size) * (cached ? 2 : 3);
+        if (free < need) {
+            showMessage("Not enough free space",
+                        "Installing this needs about " + formatSize(need) + " free on the SD card, and there's " +
+                            formatSize(free) + ". Remove some mods or other files and try again.",
+                        true);
+            return;
+        }
+    }
     setBusy(true);
     cancel_ = std::make_shared<std::atomic<bool>>(false);
     setWorking(cached ? "Unpacking…" : "Downloading…", 0);
@@ -265,7 +288,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
     st.runFileJob(
         [=](mm::Library&) {
             auto& state = AppState::get();
-            if (!cached) {
+            if (!cached && !isLocalFile(file)) {
                 state.savePending(pending);  // remember it even if the app closes mid-download
                 int lastPct = -1;
                 try {
@@ -322,8 +345,17 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
             }
             const auto& layout = prep->layout;
             if (layout.kind != mm::PackageKind::Installable) {
+                std::string message = mm::packageKindMessage(layout.kind);
+                if (layout.kind == mm::PackageKind::Empty) {
+                    // Maybe it's for the other game (common with links and SD card files).
+                    auto other = pending.game == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk;
+                    std::error_code ec;
+                    if (mm::fs::exists(work, ec) && mm::detectLayout(work, other, slug).kind == mm::PackageKind::Installable)
+                        message = "This looks like a mod for " + std::string(mm::gameInfo(other).displayName) +
+                                  ". Switch game with ZL/ZR, then install it again.";
+                }
                 mm::removeTree(work);
-                showMessage("Can't install this file", mm::packageKindMessage(layout.kind), true);
+                showMessage("Can't install this file", message, true);
                 return;
             }
             if (layout.variants.size() == 1)
@@ -384,13 +416,26 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     });
     list->registerAction("Install", brls::BUTTON_START, install);
 
+    // Option folders often share a long prefix ("BreathOfTheWild_NoFall…", "BreathOfTheWild_
+    // Reduced…"): show only the part that differs.
+    size_t common = 0;
+    if (variants.size() > 1) {
+        common = variants[0].name.size();
+        for (const auto& v : variants) {
+            size_t n = 0;
+            while (n < common && n < v.name.size() && v.name[n] == variants[0].name[n]) ++n;
+            common = n;
+        }
+        while (common > 0 && variants[0].name[common - 1] != '_' && variants[0].name[common - 1] != '/' && variants[0].name[common - 1] != ' ')
+            --common;  // cut at a word boundary
+    }
     brls::View* first = nullptr;
     for (size_t i = 0; i < variants.size(); ++i) {
-        const auto& v = prep->layout.variants[i];
+        const auto& v = variants[i];
         auto* row = ui::focusRow();
         auto* box = ui::label((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff, 26, ui::accent());
         row->addView(box);
-        auto* name = ui::label(v.name, 18, ui::text());
+        auto* name = ui::label(v.name.substr(common), 18, ui::text());
         name->setMarginLeft(12);
         name->setGrow(1);
         name->setShrink(1);
@@ -421,17 +466,19 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
 void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
                          std::vector<size_t> variants) {
     auto& st = AppState::get();
+    bool fromGameBanana = d.summary.sourceKey.rfind("gb:", 0) == 0;
+    auto newId = fromGameBanana ? "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id)
+                                : "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
     // Other files of the same mod already installed (an older version, usually).
     std::vector<std::string> others;
     std::string otherNames;
-    auto newId = "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id);
     for (const auto* m : st.mods(st.game()))
-        if (m->gamebananaModId == d.summary.id && m->id != newId) {
+        if (!d.summary.sourceKey.empty() && m->sourceKey == d.summary.sourceKey && m->id != newId) {
             others.push_back(m->id);
             otherNames += (otherNames.empty() ? "" : ", ") + m->sourceFile;
         }
 
-    auto run = [this, d, file, prep, variants, newId](std::vector<std::string> replace) {
+    auto run = [this, d, file, prep, variants, newId, fromGameBanana](std::vector<std::string> replace) {
         auto& st = AppState::get();
         mm::ModRecord r;
         r.id = newId;
@@ -441,8 +488,11 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         r.version = file.version.empty() ? d.version : file.version;
         r.sourceFile = file.filename;
         r.profileUrl = d.summary.profileUrl;
-        r.gamebananaModId = d.summary.id;
-        r.gamebananaFileId = file.id;
+        r.sourceKey = d.summary.sourceKey;
+        if (fromGameBanana) {
+            r.gamebananaModId = d.summary.id;
+            r.gamebananaFileId = file.id;
+        }
         // File labels are specific; the free-form description only counts next to a game word.
         r.gameVersionsNamed = mm::mentionedGameVersions(file.description, r.game, false, modUsesVersionWord(d, r.game));
         if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
@@ -491,13 +541,58 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
             });
     };
 
+    // Before copying anything, say what this mod will cover up: other mods' files and files
+    // already on the SD card (e.g. a randomizer). Nothing is lost either way; this is so the
+    // user isn't surprised when one of them stops working.
+    auto checkConflicts = [this, d, prep, variants, newId, run](std::vector<std::string> replace) {
+        auto& st = AppState::get();
+        std::set<std::string> targets;
+        for (const auto& f : mm::mergeVariants(prep->layout, variants)) targets.insert(mm::toLower(f.target));
+        std::set<std::string> owned;
+        std::vector<std::string> clashing;
+        for (const auto* m : st.mods(st.game())) {
+            bool replaced = std::find(replace.begin(), replace.end(), m->id) != replace.end();
+            for (const auto& t : m->files) {
+                owned.insert(mm::toLower(t));
+                if (m->enabled && !replaced && m->id != newId && targets.count(mm::toLower(t)) &&
+                    std::find(clashing.begin(), clashing.end(), m->name) == clashing.end())
+                    clashing.push_back(m->name);
+            }
+        }
+        size_t onCard = 0;
+        std::error_code ec;
+        for (const auto& t : targets)
+            if (!owned.count(t) && mm::fs::exists(platform::sdRoot() / mm::fs::path(t), ec)) ++onCard;
+        if (clashing.empty() && !onCard) {
+            run(replace);
+            return;
+        }
+        std::string text = "Before you install " + d.summary.name + ":";
+        if (!clashing.empty()) {
+            std::string names;
+            for (const auto& n : clashing) names += (names.empty() ? "" : ", ") + n;
+            text += "\n\nIt changes files that " + names + " also change. The mod higher in My mods wins; new installs go to the top.";
+        }
+        if (onCard)
+            text += "\n\nIt replaces " + std::to_string(onCard) + (onCard == 1 ? " file" : " files") +
+                    " already on your SD card (from a randomizer or another tool). They come back when you turn this mod off or remove it.";
+        auto* dialog = new brls::Dialog(text);
+        dialog->addButton("Install", [run, replace] { run(replace); });
+        dialog->addButton("Cancel", [this, prep] {
+            mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+            leave();
+        });
+        dialog->setCancelable(false);
+        dialog->open();
+    };
+
     if (others.empty()) {
-        run({});
+        checkConflicts({});
         return;
     }
     auto* dialog = new brls::Dialog("You already have " + otherNames + " from this mod. Replace it with " + file.filename + "?");
-    dialog->addButton("Replace", [run, others] { run(others); });  // the usual case: an update
-    dialog->addButton("Keep both", [run] { run({}); });
+    dialog->addButton("Replace", [checkConflicts, others] { checkConflicts(others); });  // the usual case: an update
+    dialog->addButton("Keep both", [checkConflicts] { checkConflicts({}); });
     dialog->setCancelable(false);
     dialog->open();
 }

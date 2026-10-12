@@ -144,6 +144,31 @@ void copyFileCreatingDirs(const fs::path& from, const fs::path& to) {
     fs::copy_file(from, to, fs::copy_options::overwrite_existing);
 }
 
+int64_t stableId(std::string_view s) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : s) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return static_cast<int64_t>(h & 0x7fffffffffffffffull) | 1;
+}
+
+std::string urlDecode(std::string_view s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '%' && i + 2 < s.size() && std::isxdigit(static_cast<unsigned char>(s[i + 1])) &&
+            std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+            out += static_cast<char>(std::stoi(std::string(s.substr(i + 1, 2)), nullptr, 16));
+            i += 2;
+        } else if (s[i] == '+') {
+            out += ' ';
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
 std::string readFile(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);
     if (!in) throw std::runtime_error("cannot open " + p.string());

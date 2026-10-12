@@ -12,6 +12,8 @@ Mods belong to their authors.
 ## Features
 
 - **Browse and search** GameBanana with a live preview of each mod
+- **Waikuteru's mods** ([waikuteru-zelda-mods.com](https://www.waikuteru-zelda-mods.com)) as a second source in Browse (L/R); only Switch versions are offered
+- **Add mods from anywhere**: copy archives into `switch/patchwork/inbox` on the SD card, or send a link from your phone (open the address/QR code the Switch shows, paste a link)
 - **Picks the right file** for your installed game version and warns about mismatches
 - **One-press install** from zip, 7z and rar, including archives with several options or nested archives
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
@@ -38,6 +40,7 @@ Requires Atmosphère and an internet connection. Mods are stored in `sd:/switch/
 | Y | Change sort | |
 | X | Search | Remove |
 | L / R | | Move up / down in load order |
+| L / R | GameBanana / Waikuteru | |
 | ZL / ZR | Switch game | Switch game |
 | + | Quit | Quit |
 

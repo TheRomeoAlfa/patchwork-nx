@@ -21,6 +21,7 @@ struct ModRecord {
     std::string version;
     std::string sourceFile;  // archive filename it came from
     std::string profileUrl;
+    std::string sourceKey;  // see gb::ModSummary::sourceKey; "" for imported files
     int64_t gamebananaModId = 0;
     int64_t gamebananaFileId = 0;
     int64_t installedAt = 0;  // unix seconds

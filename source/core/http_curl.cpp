@@ -135,6 +135,41 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
     fs::rename(part, dest);
 }
 
+int64_t CurlHttpClient::contentLength(const std::string& url) {
+    // Ask for the first byte only: "Content-Range: bytes 0-0/<total>" gives the size even from
+    // servers whose HEAD replies leave it out (Wix file hosting does). If a server ignores the
+    // range, stop reading after the first chunk and use Content-Length.
+    struct State {
+        int64_t total = -1, length = -1;
+        size_t received = 0;
+    } st;
+    auto h = makeHandle(url, userAgent_, caBundle_);
+    curl_easy_setopt(h.get(), CURLOPT_RANGE, "0-0");
+    curl_easy_setopt(h.get(), CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(h.get(), CURLOPT_HEADERDATA, &st);
+    curl_easy_setopt(h.get(), CURLOPT_HEADERFUNCTION, +[](char* buf, size_t size, size_t n, void* ud) -> size_t {
+        auto* s = static_cast<State*>(ud);
+        std::string line(buf, size * n);
+        auto lower = line;
+        for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lower.rfind("http/", 0) == 0) *s = State{};  // a new response (after a redirect)
+        if (lower.rfind("content-range:", 0) == 0) {
+            auto slash = lower.rfind('/');
+            if (slash != std::string::npos && std::isdigit(static_cast<unsigned char>(lower[slash + 1]))) s->total = std::stoll(lower.substr(slash + 1));
+        }
+        if (lower.rfind("content-length:", 0) == 0) s->length = std::stoll(lower.substr(15));
+        return size * n;
+    });
+    curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, &st);
+    curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, +[](char*, size_t size, size_t n, void* ud) -> size_t {
+        auto* s = static_cast<State*>(ud);
+        s->received += size * n;
+        return s->received > 4096 ? 0 : size * n;  // abort: the server is sending the whole file
+    });
+    curl_easy_perform(h.get());  // an abort above is expected; use whatever headers arrived
+    return st.total > 0 ? st.total : st.length > 1 ? st.length : -1;
+}
+
 std::string urlEncode(const std::string& s) {
     static const char* hex = "0123456789ABCDEF";
     std::string out;

@@ -18,6 +18,7 @@
 
 #include "gamebanana.hpp"
 #include "library.hpp"
+#include "waikuteru.hpp"
 
 namespace app {
 
@@ -44,7 +45,7 @@ struct LibrarySnapshot {
     std::vector<mm::ModRecord> mods;  // all games, highest priority first within a game
     std::map<mm::Game, std::vector<mm::Conflict>> conflicts;
     std::map<mm::Game, std::vector<mm::PatchOverlap>> overlaps;
-    std::set<int64_t> installedGbMods;
+    std::set<std::string> installedKeys;  // sourceKey of every installed mod
     struct Unmanaged {
         size_t files = 0;
         uint64_t bytes = 0;
@@ -95,8 +96,17 @@ public:
     const mm::ModRecord* findMod(const std::string& id) const;
 
     // ---- caches (UI thread only)
-    std::optional<mm::gb::ModDetails> cachedDetails(int64_t modId) const;
+    std::optional<mm::gb::ModDetails> cachedDetails(const std::string& sourceKey) const;
     void cacheDetails(const mm::gb::ModDetails& d);
+
+    // ---- sources (network; call from runNetwork, not the UI thread)
+    // Details for a mod from any source, by its summary (GameBanana id or page URL).
+    mm::gb::ModDetails fetchDetails(const mm::gb::ModSummary& s);
+    // Waikuteru's mod list (fetched once per session).
+    std::vector<mm::wk::ListEntry> waikuteruMods();
+    // Turn a pasted link into something installable: a GameBanana or Waikuteru mod page, or
+    // a direct link to an archive. Throws with a message for the user (e.g. wrong game).
+    mm::gb::ModDetails resolveLink(const std::string& url, mm::Game game);
     // Load an image URL into `image` unless `stillWanted` says the view moved on.
     void loadImage(brls::Image* image, const std::string& url, std::function<bool()> stillWanted);
 
@@ -107,6 +117,7 @@ public:
     const mm::fs::path& dataDir() const { return dataDir_; }
     mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
     mm::fs::path workDir() const { return dataDir_ / "work"; }
+    mm::fs::path inboxDir() const { return dataDir_ / "inbox"; }  // archives copied here by the user
     // Each install unpacks into its own folder so two attempts can never mix files.
     mm::fs::path workDirFor(int64_t fileId) const { return workDir() / std::to_string(fileId); }
     mm::fs::path archivePathFor(const mm::gb::ModFile& f) const;
@@ -114,7 +125,7 @@ public:
 
     // Downloads waiting to be installed. The sidecar is written before downloading starts.
     std::vector<PendingInstall> pendingInstalls(mm::Game g) const;
-    std::optional<PendingInstall> pendingFor(int64_t modId) const;
+    std::optional<PendingInstall> pendingFor(const std::string& sourceKey) const;
     void savePending(const PendingInstall& p) const;
     // Thread-safe (filesystem only): delete the archive, its sidecar and its unpack folder.
     void discardPending(int64_t fileId) const;
@@ -141,7 +152,9 @@ private:
     brls::VoidEvent gameChanged_;
     brls::VoidEvent libraryChanged_;
 
-    std::map<int64_t, mm::gb::ModDetails> details_;
+    std::map<std::string, mm::gb::ModDetails> details_;
+    std::mutex wkMutex_;
+    std::vector<mm::wk::ListEntry> wkList_;
     // Small LRU of downloaded image bytes keyed by URL.
     std::list<std::pair<std::string, std::shared_ptr<std::string>>> images_;
     std::set<std::string> imagesInFlight_;
@@ -149,6 +162,7 @@ private:
 
 // Text helpers shared by the views.
 std::string formatSize(uint64_t bytes);
+std::string formatFileSize(int64_t bytes);  // "size unknown" for 0 / -1
 std::string formatCount(int64_t n);
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
 

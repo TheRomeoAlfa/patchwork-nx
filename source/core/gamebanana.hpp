@@ -18,6 +18,9 @@ struct Category {
 
 struct ModSummary {
     int64_t id = 0;
+    // Where the mod comes from: "gb:<id>" (GameBanana), "wk:<game>/<slug>" (Waikuteru),
+    // "url:<link>" or "file:<name>". Identifies the mod across sources.
+    std::string sourceKey;
     int64_t gameId = 0;
     std::string name;
     std::string author;

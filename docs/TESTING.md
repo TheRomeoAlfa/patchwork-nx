@@ -26,6 +26,9 @@
 | My mods | On/off, move up/down, remove (dialog), import files already on SD, stop managing |
 | Settings | NSFW toggle persists; delete unfinished downloads; re-copy mods |
 | Restart | Library, settings and game choice survive a restart |
+| Waikuteru | Source switch (L/R); BOTW list = 12 Switch mods, TOTK = 5; preview image, credit; Wii U file refused; install a small mod |
+| Add mods | Inbox: install a zip, a non-mod zip (clear message), clash warning with installed mods; delete a file |
+| Add mods | Link page: GET page, reject non-links, GameBanana page link, wrong-game link message, direct file link; B stops the server |
 
 ## On the Switch (can't be automated here)
 
@@ -45,5 +48,9 @@ Run these after any release build; they cover what the desktop build can't.
    fully. Remove it afterwards.
 7. **Files already on SD** (BOTW randomizer): My mods shows the entry; import only if you
    have the free space it lists.
-8. **Power/HOME during a copy** (optional, on a test mod): reopen the app; Settings →
+8. **Send a link from your phone:** Add mods → Send a link. Scan the QR code (or type the
+   address) on a phone on the same Wi-Fi; paste a GameBanana or Waikuteru link; the Switch
+   shows "Link received". Press B and check the address stops responding.
+9. **Waikuteru:** Browse → R. Install No Fall Damage (BOTW) and check it in-game.
+10. **Power/HOME during a copy** (optional, on a test mod): reopen the app; Settings →
    Re-copy enabled mods; nothing half-installed remains.
