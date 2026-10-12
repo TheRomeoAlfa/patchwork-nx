@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -21,6 +22,7 @@ namespace {
 std::vector<std::string> steps;
 size_t next = 0;
 std::string pendingShot;
+std::set<int> heldButtons;
 
 void writePng(const std::string& path, int w, int h, const std::vector<unsigned char>& rgba) {
     std::string raw;
@@ -65,6 +67,21 @@ void runNext() {
         }
         if (op == 'q') {
             brls::Application::quit();
+            return;
+        }
+        if (op == 'h') {
+            static const std::map<std::string, brls::ControllerButton> names = {
+                {"l", brls::BUTTON_LB}, {"r", brls::BUTTON_RB}, {"minus", brls::BUTTON_BACK}, {"plus", brls::BUTTON_START},
+                {"zl", brls::BUTTON_LT}, {"zr", brls::BUTTON_RT}, {"a", brls::BUTTON_A}, {"b", brls::BUTTON_B}};
+            auto comma = arg.find(',');
+            std::stringstream list(arg.substr(0, comma));
+            std::string name;
+            while (std::getline(list, name, '+'))
+                if (auto it = names.find(name); it != names.end()) heldButtons.insert(it->second);
+            brls::delay(std::stol(arg.substr(comma + 1)), [] {
+                heldButtons.clear();
+                runNext();
+            });
             return;
         }
         if (op == 't') {
@@ -120,6 +137,8 @@ void runNext() {
 
 }  // namespace
 
+bool isHeld(int button) { return heldButtons.count(button) > 0; }
+
 void startScriptFromEnv() {
     const char* s = std::getenv("MM_DEBUG_SCRIPT");
     if (!s) return;
@@ -153,6 +172,7 @@ void afterFrame() {
 
 namespace app::debug {
 void startScriptFromEnv() {}
+bool isHeld(int) { return false; }
 void afterFrame() {}
 }  // namespace app::debug
 

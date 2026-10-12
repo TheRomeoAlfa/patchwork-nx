@@ -52,7 +52,8 @@ ModSummary parseSummary(const json& r) {
     m.dateModified = num(r, "_tsDateModified");
     m.likes = num(r, "_nLikeCount");
     m.views = num(r, "_nViewCount");
-    m.hasContentRatings = flag(r, "_bHasContentRatings");
+    m.hasContentRatings = flag(r, "_bHasContentRatings");  // list results
+    if (auto c = r.find("_aContentRatings"); c != r.end() && !c->empty()) m.hasContentRatings = true;  // ProfilePage
     auto visibility = str(r, "_sInitialVisibility");
     m.nsfw = m.hasContentRatings && (visibility == "warn" || visibility == "hide");
     m.obsolete = flag(r, "_bIsObsolete");
@@ -146,9 +147,9 @@ std::string Client::searchUrl(Game game, const std::string& query, int page) {
 }
 
 std::string Client::detailsUrl(int64_t modId) {
-    return std::string(kApi) + "/Mod/" + std::to_string(modId) +
-           "?_csvProperties=_sName,_aGame,_aSubmitter,_aCategory,_aPreviewMedia,_sText,_sVersion,_aFiles,"
-           "_nLikeCount,_nViewCount,_nDownloadCount,_tsDateAdded,_tsDateModified,_bIsObsolete,_sProfileUrl";
+    // ProfilePage, unlike /Mod/<id>?_csvProperties=…, includes the content rating, so a mod
+    // opened by link or number can be checked against the NSFW filter.
+    return std::string(kApi) + "/Mod/" + std::to_string(modId) + "/ProfilePage";
 }
 
 Page Client::list(Game game, Sort sort, int page, int perPage, int64_t categoryId) {

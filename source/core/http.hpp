@@ -2,11 +2,23 @@
 
 #include <cstdint>
 #include <functional>
+#include <stdexcept>
 #include <string>
 
 #include "util.hpp"
 
 namespace mm {
+
+// The server answered, but not with success (404 and so on).
+class HttpStatusError : public std::runtime_error {
+public:
+    explicit HttpStatusError(long status)
+        : std::runtime_error("the server answered with error " + std::to_string(status)), status_(status) {}
+    long status() const { return status_; }
+
+private:
+    long status_;
+};
 
 // Return false to cancel the transfer.
 using DownloadProgressFn = std::function<bool(uint64_t done, uint64_t total)>;

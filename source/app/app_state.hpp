@@ -63,7 +63,10 @@ struct PendingInstall {
 };
 
 struct Settings {
-    bool hideNsfw = true;  // hide mods GameBanana treats as NSFW
+    // Hide mods GameBanana treats as NSFW. Not saved: every launch starts hidden, and the
+    // setting itself only appears after holding L + R + minus on the Settings page.
+    bool hideNsfw = true;
+    bool nsfwSettingRevealed = false;
     // Atmosphère mod-loader crash reports already told about; null until the first check,
     // so reports from before Patchwork was installed aren't announced.
     std::optional<std::vector<std::string>> seenCrashReports;
