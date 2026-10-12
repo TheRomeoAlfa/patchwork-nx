@@ -354,6 +354,7 @@ void BrowsePage::loadMore() {
     bool waikuteru = source_ == Source::Waikuteru && !search;
     AppState::get().runNetwork([=, this] {
         mm::gb::Page result;
+        size_t fetched = 0;  // mods on the page before hiding any
         std::string error;
         try {
             if (waikuteru) {
@@ -371,7 +372,15 @@ void BrowsePage::loadMore() {
             } else {
                 result = search ? AppState::get().gamebanana().search(game, query, page)
                                 : AppState::get().gamebanana().list(game, sort, page, 30);
+                // Hide mods that only come as BCML/TKMM packages: they can't be installed here.
+                fetched = result.mods.size();
+                auto pcOnly = AppState::get().needsPcTool(result.mods);
+                std::vector<mm::gb::ModSummary> keep;
+                for (size_t i = 0; i < result.mods.size(); ++i)
+                    if (!pcOnly[i]) keep.push_back(result.mods[i]);
+                result.mods = std::move(keep);
             }
+            if (!fetched) fetched = result.mods.size();
         } catch (const std::exception& e) {
             error = e.what();
         }
@@ -387,7 +396,7 @@ void BrowsePage::loadMore() {
             }
             page_ = page;
             total_ = result.totalCount;
-            reachedEnd_ = result.isLast || result.mods.empty();
+            reachedEnd_ = result.isLast || fetched == 0;
             bool wasEmpty = items_.empty();
             size_t firstNew = items_.size();
             for (const auto& m : result.mods)

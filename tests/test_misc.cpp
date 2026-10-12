@@ -211,3 +211,13 @@ TEST("compat: add-on files vs newer versions of the same file") {
     CHECK(!isAddOnFileOf("short_v2.zip", "abc.zip"));  // too short to compare
     CHECK(!isAddOnFileOf("defogger.zip", "dark_defogger.zip"));
 }
+
+TEST("gamebanana: mods that only come as PC packages") {
+    auto names = gb::parseFileNames(R"([{"_sFile":"fastswim.bnp"},{"_sFile":"old.zip","_bIsArchived":true}])");
+    CHECK_EQ(names.size(), 1u);
+    CHECK(gb::needsPcTool(names));
+    CHECK(gb::pcToolMessage(names).find("BCML") != std::string::npos);
+    CHECK(!gb::needsPcTool({"mod.bnp", "mod-switch.zip"}));  // has something installable
+    CHECK(gb::needsPcTool({"a.TKCL"}));
+    CHECK(!gb::needsPcTool({}));  // no files listed: don't hide
+}

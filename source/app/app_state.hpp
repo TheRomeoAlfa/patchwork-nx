@@ -110,6 +110,10 @@ public:
     mm::gb::ModDetails fetchDetails(const mm::gb::ModSummary& s);
     // Waikuteru's mod list (fetched once per session).
     std::vector<mm::wk::ListEntry> waikuteruMods();
+    // For each mod: true if every file is a PC-only package (BCML/TKMM), so it's hidden from
+    // lists. Asks GameBanana for uncached mods (several at once); remembered on the SD card.
+    // Network thread only. A mod that can't be checked counts as installable.
+    std::vector<bool> needsPcTool(const std::vector<mm::gb::ModSummary>& mods);
     // Turn a pasted link into something installable: a GameBanana or Waikuteru mod page, or
     // a direct link to an archive. Throws with a message for the user (e.g. wrong game).
     mm::gb::ModDetails resolveLink(const std::string& url, mm::Game game);
@@ -160,6 +164,9 @@ private:
 
     std::map<std::string, mm::gb::ModDetails> details_;
     std::mutex wkMutex_;
+    std::mutex pcMutex_;
+    bool pcLoaded_ = false;
+    std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
     std::vector<mm::wk::ListEntry> wkList_;
     // Small LRU of downloaded image bytes keyed by URL.
     std::list<std::pair<std::string, std::shared_ptr<std::string>>> images_;
