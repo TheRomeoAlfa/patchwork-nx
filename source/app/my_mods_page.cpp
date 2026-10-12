@@ -286,7 +286,7 @@ void MyModsPage::discardPending(const PendingInstall& p) {
                                     formatFileSize(p.file.size) + ")?");
     dialog->addButton("Cancel", [] {});
     dialog->addButton("Delete", [this, fileId = p.file.id] {
-        runJob("Deleting…", [fileId](mm::Library&) { AppState::get().discardPending(fileId); });
+        runJob("Deleting…", [fileId](mm::Library&, const auto&) { AppState::get().discardPending(fileId); });
     });
     dialog->open();
 }
@@ -306,7 +306,7 @@ void MyModsPage::importUnmanaged(size_t files, uint64_t bytes) {
     dialog->addButton("Import", [this] {
         auto game = AppState::get().game();
         auto name = std::string("Existing files (") + std::string(mm::gameInfo(game).displayName) + ")";
-        runJob("Importing files…", [game, name](mm::Library& lib) { lib.importUnmanaged(game, name); });
+        runJob("Importing files…", [game, name](mm::Library& lib, const auto& p) { lib.importUnmanaged(game, name, p); });
     });
     dialog->open();
 }
@@ -387,24 +387,67 @@ void MyModsPage::showDetails(const std::string& id) {
     pane_->addView(infoL);
 }
 
-void MyModsPage::runJob(const std::string& status, std::function<void(mm::Library&)> job) {
+void MyModsPage::runJob(const std::string& status, std::function<void(mm::Library&, const mm::ProgressFn&)> job) {
     if (busy_) return;
-    if (AppState::get().fileJobRunning())
-        brls::Application::notify("Waiting for the current install to finish…");
     busy_ = true;
+    AppState::get().setInstallBusy(true);  // also blocks switching game
     clearPane();
     auto* box = ui::vbox();
     box->setGrow(1);
     box->setJustifyContent(brls::JustifyContent::CENTER);
     box->setAlignItems(brls::AlignItems::CENTER);
     box->addView(new brls::ProgressSpinner());
-    auto* l = ui::label(status, 20, ui::text());
-    l->setMarginTop(16);
-    box->addView(l);
+    auto* label = ui::label(status, 20, ui::text());
+    label->setMarginTop(16);
+    box->addView(label);
+    auto* bar = new ui::ProgressBar(360);
+    bar->setMarginTop(14);
+    bar->setVisibility(brls::Visibility::INVISIBLE);
+    box->addView(bar);
+    auto* count = ui::label("", 15, ui::muted());
+    count->setWidth(360);
+    count->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+    count->setMarginTop(10);
+    box->addView(count);
+    auto* hint = ui::label(AppState::get().fileJobRunning() ? "Waiting for the current install to finish…" : "Copying files on the SD card. Please wait.",
+                           15, ui::muted());
+    hint->setMarginTop(12);
+    box->addView(hint);
+    // Hold focus here until the files are in place, so nothing else can start meanwhile.
+    box->setFocusable(true);
+    box->setHideHighlight(true);
+    for (auto button : {brls::BUTTON_NAV_LEFT, brls::BUTTON_NAV_RIGHT, brls::BUTTON_NAV_UP, brls::BUTTON_NAV_DOWN, brls::BUTTON_A,
+                        brls::BUTTON_X, brls::BUTTON_Y})
+        box->registerAction("", button, [](brls::View*) { return true; }, true);
+    for (auto button : {brls::BUTTON_B, brls::BUTTON_START})
+        box->registerAction("", button, [](brls::View*) {
+            brls::Application::notify("Please wait until the files are copied");
+            return true;
+        }, true);
     pane_->addView(box);
-
     auto alive = alive_;
-    AppState::get().runFileJob(std::move(job), [this, alive](const std::string& error) {
+    // A dialog that started this job hands focus back when it closes, so take it on the next frame.
+    brls::sync([this, alive, box] {
+        if (*alive && busy_) brls::Application::giveFocus(box);
+    });
+    brls::Application::giveFocus(box);
+
+    auto shown = std::make_shared<int>(-1);
+    mm::ProgressFn progress = [this, alive, bar, count, shown](size_t done, size_t total, const std::string&) {
+        if (!total) return;
+        int step = static_cast<int>(done * 50 / total);  // ~2% steps
+        if (step == *shown && done != total) return;
+        *shown = step;
+        brls::sync([this, alive, bar, count, done, total] {
+            if (!*alive || !busy_) return;
+            bar->setVisibility(brls::Visibility::VISIBLE);
+            bar->setProgress(static_cast<float>(done) / total);
+            count->setText(std::to_string(done) + " / " + std::to_string(total) + " files");
+        });
+    };
+    AppState::get().runFileJob([job = std::move(job), progress](mm::Library& lib) { job(lib, progress); },
+                               [this, alive](const std::string& error) {
+        AppState::get().setInstallBusy(false);
         if (!*alive) return;
         busy_ = false;
         if (!error.empty()) brls::Application::notify("Something went wrong: " + error);
@@ -417,11 +460,11 @@ void MyModsPage::toggle(const std::string& id) {
     if (!m) return;
     bool enable = !m->enabled;
     runJob(enable ? "Turning on " + m->name + "…" : "Turning off " + m->name + "…",
-           [id, enable](mm::Library& lib) { lib.setEnabled(id, enable); });
+           [id, enable](mm::Library& lib, const auto& p) { lib.setEnabled(id, enable, p); });
 }
 
 void MyModsPage::move(const std::string& id, int delta) {
-    runJob("Updating load order…", [id, delta](mm::Library& lib) { lib.move(id, delta); });
+    runJob("Updating load order…", [id, delta](mm::Library& lib, const auto& p) { lib.move(id, delta, p); });
 }
 
 void MyModsPage::remove(const std::string& id) {
@@ -437,7 +480,7 @@ void MyModsPage::remove(const std::string& id) {
         dialog->addButton("Cancel", [] {});
         dialog->addButton("Stop managing", [this, id] {
             if (focusedId_ == id) focusedId_.clear();
-            runJob("Updating…", [id](mm::Library& lib) { lib.forget(id); });
+            runJob("Updating…", [id](mm::Library& lib, const auto&) { lib.forget(id); });
         });
         dialog->open();
         return;
@@ -446,7 +489,7 @@ void MyModsPage::remove(const std::string& id) {
     dialog->addButton("Cancel", [] {});
     dialog->addButton("Remove", [this, id, name = m->name] {
         if (focusedId_ == id) focusedId_.clear();
-        runJob("Removing " + name + "…", [id](mm::Library& lib) { lib.remove(id); });
+        runJob("Removing " + name + "…", [id](mm::Library& lib, const auto& p) { lib.remove(id, p); });
     });
     dialog->open();
 }

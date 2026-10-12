@@ -68,7 +68,7 @@ void MainActivity::onContentAvailable() {
 
 void MainActivity::switchGame() {
     if (AppState::get().installBusy()) {
-        brls::Application::notify("Finish or cancel the install first");
+        brls::Application::notify("Wait for the current change to finish");
         return;
     }
     auto& st = AppState::get();

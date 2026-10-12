@@ -27,7 +27,7 @@ public:
 private:
     void rebuild();
     void showDetails(const std::string& id);
-    void runJob(const std::string& status, std::function<void(mm::Library&)> job);
+    void runJob(const std::string& status, std::function<void(mm::Library&, const mm::ProgressFn&)> job);
     void toggle(const std::string& id);
     void move(const std::string& id, int delta);
     void remove(const std::string& id);
