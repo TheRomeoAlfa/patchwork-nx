@@ -623,17 +623,20 @@ std::string formatCount(int64_t n) {
     return buf;
 }
 
-std::string formatDateTime(int64_t unixSeconds) {
-    std::time_t t = static_cast<std::time_t>(unixSeconds);
+std::string formatDateTime(int64_t unixSeconds, bool inConsoleZone) {
     std::tm tm{};
-    localtime_r(&t, &tm);
+    if (inConsoleZone) {
+        tm = platform::localTime(unixSeconds);
+    } else {
+        std::time_t t = static_cast<std::time_t>(unixSeconds);
+        localtime_r(&t, &tm);
+    }
+    static const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    int hour = tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12;
     char buf[48];
-    std::strftime(buf, sizeof buf, "%b %e, %Y %l:%M %p", &tm);
-    std::string s(buf);
-    // %e and %l pad with a space.
-    for (size_t at; (at = s.find("  ")) != std::string::npos;) s.erase(at, 1);
-    if (!s.empty() && s[0] == ' ') s.erase(0, 1);
-    return s;
+    std::snprintf(buf, sizeof buf, "%s %d, %d %d:%02d %s", months[(tm.tm_mon % 12 + 12) % 12], tm.tm_mday, tm.tm_year + 1900, hour,
+                  tm.tm_min, tm.tm_hour < 12 ? "AM" : "PM");
+    return buf;
 }
 
 std::string stripHtml(const std::string& html, size_t maxLen) {

@@ -189,7 +189,10 @@ private:
 std::string formatSize(uint64_t bytes);
 std::string formatFileSize(int64_t bytes);  // "size unknown" for 0 / -1
 std::string formatCount(int64_t n);
-std::string formatDateTime(int64_t unixSeconds);  // "May 24, 2023 6:50 PM", local time
+// "May 24, 2023 6:50 PM". `inConsoleZone`: a real moment (now, a backup), shown in the
+// console's time zone. Otherwise a time read from an archive: zip times are wall-clock
+// times that libarchive converted with the C library's zone, so convert back the same way.
+std::string formatDateTime(int64_t unixSeconds, bool inConsoleZone = true);
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
 
 }  // namespace app

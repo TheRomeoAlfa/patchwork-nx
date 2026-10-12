@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,6 +40,10 @@ mm::fs::path resourcePath(const std::string& name);
 // included. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why);
+
+// Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
+// Switch (it gives UTC), so this asks the system.
+std::tm localTime(int64_t unixSeconds);
 
 // User profiles on the console. On desktop: $MM_USERS ("Ryan,Kid"), default "Player".
 struct UserProfile {

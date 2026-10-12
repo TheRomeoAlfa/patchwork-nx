@@ -256,11 +256,15 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
                 mm::removeTree(current.dir);
                 throw std::runtime_error(std::string("Couldn't back up the current saves, so nothing was changed: ") + e.what());
             }
-            mm::restoreSave(b.dir / "save", data->root(), [&] { data->commit(); }, [busy, alive](size_t done, size_t total) mutable {
-                brls::sync([busy, alive, done, total]() mutable {
-                    if (*alive) busy.update(done, total);
+            try {
+                mm::restoreSave(b.dir / "save", data->root(), [&] { data->commit(); }, [busy, alive](size_t done, size_t total) mutable {
+                    brls::sync([busy, alive, done, total]() mutable {
+                        if (*alive) busy.update(done, total);
+                    });
                 });
-            });
+            } catch (const std::exception& e) {
+                throw std::runtime_error(std::string(e.what()) + ". The saves from just before are in the newest backup; try restoring again.");
+            }
         },
         [this, alive, box = busy.box, name = b.userName](const std::string& error) {
             AppState::get().setInstallBusy(false);

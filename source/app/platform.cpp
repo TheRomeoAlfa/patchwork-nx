@@ -134,6 +134,29 @@ bool idToUid(const std::string& id, AccountUid& uid) {
 #endif
 }  // namespace
 
+std::tm localTime(int64_t unixSeconds) {
+    std::tm tm{};
+    std::time_t t = static_cast<std::time_t>(unixSeconds);
+#ifdef __SWITCH__
+    TimeCalendarTime cal{};
+    TimeCalendarAdditionalInfo info{};
+    if (unixSeconds > 0 && R_SUCCEEDED(timeToCalendarTimeWithMyRule(static_cast<u64>(unixSeconds), &cal, &info))) {
+        tm.tm_year = cal.year - 1900;
+        tm.tm_mon = cal.month - 1;
+        tm.tm_mday = cal.day;
+        tm.tm_hour = cal.hour;
+        tm.tm_min = cal.minute;
+        tm.tm_sec = cal.second;
+        tm.tm_wday = static_cast<int>(info.wday);
+        return tm;
+    }
+    gmtime_r(&t, &tm);
+#else
+    localtime_r(&t, &tm);
+#endif
+    return tm;
+}
+
 std::vector<UserProfile> userProfiles(std::string& why) {
     std::vector<UserProfile> out;
 #ifdef __SWITCH__
