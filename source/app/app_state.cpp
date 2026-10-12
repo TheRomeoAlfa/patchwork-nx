@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <regex>
 
 #include <webp/decode.h>
@@ -620,6 +621,19 @@ std::string formatCount(int64_t n) {
     else
         std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(n));
     return buf;
+}
+
+std::string formatDateTime(int64_t unixSeconds) {
+    std::time_t t = static_cast<std::time_t>(unixSeconds);
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    char buf[48];
+    std::strftime(buf, sizeof buf, "%b %e, %Y %l:%M %p", &tm);
+    std::string s(buf);
+    // %e and %l pad with a space.
+    for (size_t at; (at = s.find("  ")) != std::string::npos;) s.erase(at, 1);
+    if (!s.empty() && s[0] == ' ') s.erase(0, 1);
+    return s;
 }
 
 std::string stripHtml(const std::string& html, size_t maxLen) {

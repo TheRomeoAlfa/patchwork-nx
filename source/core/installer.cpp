@@ -11,7 +11,7 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
                                const ExtractProgressFn& progress) {
     std::string err;
     if (!removeTree(workDir, &err)) throw std::runtime_error("couldn't clear the unpack folder: " + err);
-    PreparedArchive p{workDir, {}};
+    PreparedArchive p{workDir, {}, {}};
     if (endsWithI(archive.filename().string(), ".bnp")) {
         // A BCML package: installable when it only needs its resource sizes merged.
         extractArchive(archive, workDir, {}, progress);
@@ -36,7 +36,7 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
         p.layout.kind = PackageKind::Tkmm;
         return p;
     }
-    extractArchive(archive, workDir, {}, progress);
+    extractArchive(archive, workDir, {}, progress, &p.fileTimes);
     extractNestedArchives(workDir);
     p.layout = detectLayout(workDir, game, modSlug);
     return p;

@@ -74,6 +74,17 @@ private:
     brls::Box* fill_;
 };
 
+// A full-pane "please wait" view that holds focus and swallows every button (B and + say
+// `pleaseWait`) until it is removed, so nothing else can start while files are changing.
+struct BusyBox {
+    brls::Box* box;
+    brls::Label* status;
+    ProgressBar* bar;     // hidden until the first update
+    brls::Label* count;   // "3 / 10 files"
+    void update(size_t done, size_t total);
+};
+BusyBox busyBox(const std::string& status, const std::string& hint, const std::string& pleaseWait);
+
 brls::Label* label(const std::string& text, float size, NVGcolor color, bool singleLine = true);
 brls::Box* hbox();
 brls::Box* vbox();

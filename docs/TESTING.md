@@ -86,3 +86,19 @@ Run these after any release build; they cover what the desktop build can't.
 21. **Size table merging with the Randomizer:** with your BOTW Randomizer files on the card,
    install a BCML package: the game still starts and the Randomizer works. Turn the package
    off: the Randomizer's own size table is restored.
+22. **Save file (TOTK):** close TOTK first (HOME, X). Install Shrines Unlocked Save File
+   (number 445614). Pick your profile; it suggests the first empty slot. Leave photos off,
+   press "Back up and install". Start TOTK, Load: the save is there with the shrines unlocked,
+   and your own saves and photos are untouched.
+23. **Save backups:** Settings → Save backups lists the backup from step 22. Restore it: the
+   installed save is gone and your saves are as before; a second backup ("Before restoring…")
+   appears. X on a backup deletes it.
+24. **Game open:** with TOTK suspended in the background, try installing a save: Patchwork asks
+   you to close the game first and changes nothing.
+25. **Photos toggle:** install a save with "Also copy the save's photos" on (e.g. 445614 again,
+   into another slot): the in-game album shows the save's photos. Restore the backup to get
+   yours back.
+26. **Whole-save downloads:** a download with all six slots (e.g. 447106) lists them with their
+   dates and highlights the latest. A BOTW Master Mode save (e.g. 582966's master mode file)
+   only offers Master Mode slots; check it loads in Master Mode.
+
