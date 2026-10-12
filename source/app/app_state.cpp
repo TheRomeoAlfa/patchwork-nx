@@ -203,6 +203,10 @@ mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) 
         }
         for (const auto& g : mm::kGames)
             if (d.summary.gameId == g.gamebananaId && g.game != game) throw otherGame(g.game);
+        constexpr int64_t kBotwWiiU = 5866;  // GameBanana's separate Wii U section
+        if (d.summary.gameId == kBotwWiiU)
+            throw std::runtime_error("That mod is in GameBanana's Wii U section. Wii U mods use a different file format and "
+                                     "don't work on the Switch. Look for a Switch version of it.");
         if (d.summary.gameId && d.summary.gameId != mm::gameInfo(game).gamebananaId)
             throw std::runtime_error("That GameBanana mod isn't for Breath of the Wild or Tears of the Kingdom.");
         if (d.summary.nsfw && settings_.hideNsfw)
