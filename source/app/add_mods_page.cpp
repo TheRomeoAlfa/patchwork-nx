@@ -178,7 +178,7 @@ void AddModsPage::rebuild() {
         if (!first || p.string() == focusedPath_) first = row;
     }
     if (files.empty()) {
-        auto* none = ui::label("No files yet. Copy .zip, .7z or .rar files into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
+        auto* none = ui::label("No files yet. Copy .zip, .7z, .rar or BCML .bnp files into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
         none->setMargins(0, 6, 6, 6);
         list_->addView(none);
     }
@@ -252,7 +252,7 @@ void AddModsPage::showInboxFile(const mm::fs::path& path) {
     pane_->addView(ui::label("Press A to unpack it and see what's inside. It installs for " + std::string(game) +
                                  " (switch game with ZL/ZR); you'll pick options and see any clashes next, like any other install.",
                              16, nvgRGB(0xc8, 0xc8, 0xc8), false));
-    auto* more = ui::label("To add more, copy zip, 7z or rar files into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
+    auto* more = ui::label("To add more, copy zip, 7z, rar or BCML .bnp files into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
                            "(for example with DBI or sys-ftpd). The file stays here after installing; X deletes it.",
                            15, ui::muted(), false);
     more->setMarginTop(14);

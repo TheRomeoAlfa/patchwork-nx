@@ -30,7 +30,14 @@ struct ModRecord {
     bool enabled = false;
     int priority = 0;  // higher wins on conflicts
     std::vector<std::string> files;  // targets, relative to SD root
+    // BCML packages: resource sizes merged into BOTW's size table (romfs path -> bytes, 0 = remove).
+    std::map<std::string, uint32_t> resourceSizes;
 };
+
+// BOTW's resource size table. Patchwork merges it from every enabled mod instead of letting
+// the top mod's copy win (see mergeSizeTables).
+inline constexpr const char* kBotwSizeTable =
+    "atmosphere/contents/01007EF00011E000/romfs/System/Resource/ResourceSizeTable.product.srsizetable";
 
 struct Conflict {
     std::string target;
@@ -96,6 +103,12 @@ public:
     // as a "repair" after an interrupted operation.
     void apply(const ProgressFn& progress = {});
 
+    // The game's own size table, read from the console; the base for BCML packages' sizes.
+    void setOriginalSizeTable(fs::path path) { originalSizeTable_ = std::move(path); }
+    // False if enabling this mod would need a size table to build on and there's none: not the
+    // game's original, not one already on the SD card, and no enabled mod ships one.
+    bool canMergeSizes(const ModRecord& mod) const;
+
     const fs::path& sdRoot() const { return sdRoot_; }
     const fs::path& dataDir() const { return dataDir_; }
 
@@ -106,8 +119,13 @@ private:
     void renumber(std::vector<ModRecord*> ordered);
     fs::path backupPath(const std::string& storedTarget) const { return dataDir_ / "backup" / fs::path(storedTarget); }
     void dropBackup(const std::string& key);
+    // Owner id for the merged size table, or "" if no merging is needed. The id changes
+    // whenever the inputs do, so apply() rebuilds it.
+    std::string sizeTableOwner() const;
+    void writeMergedSizeTable(const fs::path& sdPath) const;
+    bool hasOriginalSizeTableOnCard() const;
 
-    fs::path sdRoot_, dataDir_;
+    fs::path sdRoot_, dataDir_, originalSizeTable_;
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
     // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.

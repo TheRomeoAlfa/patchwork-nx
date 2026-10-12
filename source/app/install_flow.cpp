@@ -13,9 +13,12 @@ namespace app {
 using mm::gb::ModDetails;
 using mm::gb::ModFile;
 
-bool isUnsupportedPackage(const ModFile& f) {
-    return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl") || mm::wk::isWiiUOnly(f);
+// A package that has to be merged on a PC (TKMM, or a BCML package that needs merging).
+bool needsPcTool(const ModFile& f) {
+    return mm::endsWithI(f.filename, ".tkcl") || (mm::endsWithI(f.filename, ".bnp") && f.bcml == ModFile::Bcml::NeedsPc);
 }
+
+bool isUnsupportedPackage(const ModFile& f) { return needsPcTool(f) || mm::wk::isWiiUOnly(f); }
 
 bool isLocalFile(const ModFile& f) { return f.downloadUrl.rfind("file://", 0) == 0; }
 
@@ -26,7 +29,11 @@ bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
 }
 
 FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, bool versionWordIsMod) {
-    if (mm::endsWithI(f.filename, ".bnp")) return {"Needs BCML on a PC", ui::warn()};
+    if (mm::endsWithI(f.filename, ".bnp")) {
+        if (f.bcml == ModFile::Bcml::NeedsPc) return {"Needs BCML on a PC", ui::warn()};
+        if (f.bcml == ModFile::Bcml::Installable) return {"BCML package · installs here", ui::ok()};
+        return {"BCML package", ui::muted()};
+    }
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
     if (mm::wk::isWiiUOnly(f)) return {"Wii U only", ui::warn()};
     if (mm::isRestoreOriginalsFile(f.filename, f.description))
@@ -239,7 +246,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
 
 void InstallFlow::install(const ModDetails& d, const ModFile& file) {
     active_ = true;
-    if (isUnsupportedPackage(file)) {
+    if (needsPcTool(file)) {
         bool bnp = mm::endsWithI(file.filename, ".bnp");
         showMessage(bnp ? "Needs BCML" : "Needs TKMM",
                     std::string("This file is a ") + (bnp ? "BCML" : "TKMM") +
@@ -347,7 +354,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
             }
             const auto& layout = prep->layout;
             if (layout.kind != mm::PackageKind::Installable) {
-                std::string message = mm::packageKindMessage(layout.kind);
+                std::string message = layout.problem.empty() ? mm::packageKindMessage(layout.kind) : layout.problem;
                 if (layout.kind == mm::PackageKind::Empty) {
                     // Maybe it's for the other game (common with links and SD card files).
                     auto other = pending.game == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk;
@@ -556,6 +563,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
             r.gameVersionsNamed = mm::mentionedGameVersions(d.descriptionHtml, r.game, true);
         for (auto i : variants) r.variants.push_back(prep->layout.variants.at(i).name);
+        r.resourceSizes = mm::mergeVariantSizes(prep->layout, variants);
         auto files = mm::mergeVariants(prep->layout, variants);
         setBusy(true);
         cancel_.reset();  // copying can't be cancelled half-way; the library rolls back on failure
@@ -565,6 +573,10 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
             [this, alive, r, files, replace, prep, fileId = file.id](mm::Library& lib) {
                 size_t lastStep = 0;
                 try {
+                if (!lib.canMergeSizes(r))
+                    throw std::runtime_error(
+                        "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
+                        "Close Patchwork, then open it by holding R while starting Breath of the Wild, and install again.");
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;

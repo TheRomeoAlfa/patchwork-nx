@@ -1,5 +1,10 @@
 #include "app_state.hpp"
 
+#include "bnp.hpp"
+#include "remote7z.hpp"
+#include "sizetable.hpp"
+
+#include <chrono>
 #include <cstdio>
 #include <regex>
 
@@ -9,6 +14,18 @@
 #include "platform.hpp"
 
 namespace app {
+
+namespace {
+// Nothing in the mod can be installed here: TKMM packages, and BCML packages that need merging.
+bool onlyPcPackages(const std::vector<mm::gb::ModFile>& files) {
+    if (files.empty()) return false;
+    for (const auto& f : files) {
+        if (mm::endsWithI(f.filename, ".tkcl") || f.bcml == mm::gb::ModFile::Bcml::NeedsPc) continue;
+        return false;
+    }
+    return true;
+}
+}  // namespace
 
 using json = nlohmann::json;
 
@@ -58,8 +75,10 @@ void WorkQueue::post(std::function<void()> job) {
 // ------------------------------------------------------------------ AppState
 
 AppState& AppState::get() {
-    static AppState instance;
-    return instance;
+    // Never destroyed: background downloads may still be finishing while the app exits, and
+    // they must not find their locks and caches gone.
+    static auto* instance = new AppState();
+    return *instance;
 }
 
 AppState::AppState() = default;
@@ -89,15 +108,55 @@ void AppState::init() {
             if (!gameVersions_[g.game].empty()) game_ = g.game;
 
     auto staleWork = workDir();
-    runFileJob([staleWork](mm::Library& lib) {
+    auto originalTable = dataDir_ / "original" / "botw" / "ResourceSizeTable.product.srsizetable";
+    runFileJob([this, staleWork, originalTable](mm::Library& lib) {
         mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
         lib.load();
+        auto status = captureOriginalSizeTable(originalTable);
+        lib.setOriginalSizeTable(originalTable);
+        std::lock_guard lock(statusMutex_);
+        sizeTableStatus_ = status;
     }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });
 }
 
 void AppState::shutdown() { saveSettings(); }
+
+std::string AppState::sizeTableStatus() const {
+    std::lock_guard lock(statusMutex_);
+    return sizeTableStatus_;
+}
+
+// BOTW's own resource size table, the base BCML packages' sizes are merged into. Read from
+// the game when Patchwork runs in place of it, and again after a game update.
+std::string AppState::captureOriginalSizeTable(const mm::fs::path& path) {
+    const auto& version = gameVersions_[mm::Game::Botw];
+    auto versionFile = path.parent_path() / "version.txt";
+    std::error_code ec;
+    std::string savedVersion;
+    if (mm::fs::exists(versionFile, ec)) savedVersion = mm::readFile(versionFile);
+    bool have = mm::fs::exists(path, ec);
+    if (have && (savedVersion == version || version.empty())) return "Read from game " + savedVersion;
+
+    std::string data, why;
+    if (!platform::readGameFile(mm::Game::Botw, "System/Resource/ResourceSizeTable.product.srsizetable", data, why)) {
+        if (have) return "Needs update for " + version;
+        return "Not read yet";
+    }
+    try {
+        mm::SizeTable::parse(data);
+    } catch (const std::exception& e) {
+        return "Unreadable";
+    }
+    // If Atmosphère handed us the SD card's (modded) copy instead, it's not the original.
+    auto onCard = platform::sdRoot() / mm::kBotwSizeTable;
+    if (mm::fs::exists(onCard, ec) && mm::readFile(onCard) == data)
+        return "Got the SD card's copy";
+    mm::writeFileAtomic(path, data);
+    mm::writeFileAtomic(versionFile, version);
+    return "Read from game " + version;
+}
 
 void AppState::setGame(mm::Game g) {
     if (g == game_) return;
@@ -182,7 +241,9 @@ mm::gb::ModDetails AppState::fetchDetails(const mm::gb::ModSummary& s) {
         if (d.files.empty()) throw std::runtime_error("No download links found on the mod's page.");
         return d;
     }
-    return gb_->details(s.id);
+    auto d = gb_->details(s.id);
+    checkBcmlFiles(d.files);
+    return d;
 }
 
 mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) {
@@ -211,9 +272,12 @@ mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) 
             throw std::runtime_error("That GameBanana mod isn't for Breath of the Wild or Tears of the Kingdom.");
         if (d.summary.nsfw && settings_.hideNsfw)
             throw std::runtime_error("GameBanana marks this mod as NSFW, so it's hidden.");
-        std::vector<std::string> names;
-        for (const auto& f : d.files) names.push_back(f.filename);
-        if (mm::gb::needsPcTool(names)) throw std::runtime_error(mm::gb::pcToolMessage(names));
+        checkBcmlFiles(d.files);
+        if (onlyPcPackages(d.files)) {
+            std::vector<std::string> names;
+            for (const auto& f : d.files) names.push_back(f.filename);
+            throw std::runtime_error(mm::gb::pcToolMessage(names));
+        }
         return d;
     }
     // Waikuteru mod page
@@ -258,22 +322,71 @@ mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) 
     return d;
 }
 
+void AppState::loadPcCacheLocked() {
+    if (pcLoaded_) return;
+    pcLoaded_ = true;
+    // Seed from the list shipped with the app (popular BOTW mods, checked ahead of time), then
+    // what this console has learned since. Entries for updated mods are re-checked anyway.
+    try {
+        auto seed = json::parse(mm::readFile(platform::resourcePath("bnp-cache.json")));
+        for (const auto& [id, v] : seed["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
+        for (const auto& [id, v] : seed["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+    } catch (...) {
+    }
+    try {
+        auto cached = json::parse(mm::readFile(dataDir_ / "pc-only-cache.json"));  // keep alive while iterating
+        if (!cached.contains("mods")) return;  // older format: start over
+        for (const auto& [id, v] : cached["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
+        for (const auto& [id, v] : cached["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+    } catch (...) {
+        // none yet, or unreadable: start over
+    }
+}
+
+void AppState::savePcCacheLocked() {
+    try {
+        json j = {{"mods", json::object()}, {"bnp", json::object()}};
+        for (const auto& [id, v] : pcOnly_) j["mods"][std::to_string(id)] = {v.first, v.second};
+        for (const auto& [id, ok] : bnpInstallable_) j["bnp"][std::to_string(id)] = ok;
+        mm::writeFileAtomic(dataDir_ / "pc-only-cache.json", j.dump());
+    } catch (const std::exception& e) {
+        brls::Logger::warning("saving the file-type cache failed: {}", e.what());
+    }
+}
+
+bool AppState::bnpInstallable(const mm::gb::ModFile& f) {
+    {
+        std::lock_guard lock(pcMutex_);
+        loadPcCacheLocked();
+        auto it = bnpInstallable_.find(f.id);
+        if (it != bnpInstallable_.end()) return it->second;
+    }
+    bool ok;
+    try {
+        ok = mm::checkBnp(mm::remote7zListing(*http_, f.downloadUrl)).installable();
+    } catch (const std::exception& e) {
+        brls::Logger::warning("couldn't look inside {}: {}", f.filename, e.what());
+        return false;  // not remembered: try again next time
+    }
+    std::lock_guard lock(pcMutex_);
+    bnpInstallable_[f.id] = ok;
+    savePcCacheLocked();
+    return ok;
+}
+
+void AppState::checkBcmlFiles(std::vector<mm::gb::ModFile>& files) {
+    for (auto& f : files)
+        if (mm::endsWithI(f.filename, ".bnp") && f.id)
+            f.bcml = bnpInstallable(f) ? mm::gb::ModFile::Bcml::Installable : mm::gb::ModFile::Bcml::NeedsPc;
+}
+
+
 std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& mods) {
-    auto cacheFile = dataDir_ / "pc-only-cache.json";
     std::vector<bool> out(mods.size(), false);
     std::vector<size_t> todo;
     {
         std::lock_guard lock(pcMutex_);
-        if (!pcLoaded_) {
-            pcLoaded_ = true;
-            try {
-                auto cached = json::parse(mm::readFile(cacheFile));  // keep alive while iterating
-                for (const auto& [id, v] : cached.items())
-                    pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
-            } catch (...) {
-                // none yet, or unreadable: start over
-            }
-        }
+        loadPcCacheLocked();
         for (size_t i = 0; i < mods.size(); ++i) {
             auto it = pcOnly_.find(mods[i].id);
             if (it != pcOnly_.end() && it->second.first == mods[i].dateModified)
@@ -289,15 +402,29 @@ std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& m
     auto worker = [&] {
         for (size_t k; (k = next++) < todo.size();) {
             try {
-                found[k] = mm::gb::needsPcTool(gb_->fileNames(mods[todo[k]].id)) ? 1 : 0;
+                auto files = gb_->files(mods[todo[k]].id);
+                // Only packages need a closer look; anything else installs.
+                bool allPackages = !files.empty() && std::all_of(files.begin(), files.end(), [](const mm::gb::ModFile& f) {
+                    return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl");
+                });
+                bool pcOnly = allPackages;
+                // One installable package is enough to show the mod; stop there.
+                for (const auto& f : files) {
+                    if (!pcOnly) break;
+                    if (mm::endsWithI(f.filename, ".bnp") && bnpInstallable(f)) pcOnly = false;
+                }
+                found[k] = pcOnly ? 1 : 0;
             } catch (const std::exception& e) {
                 brls::Logger::warning("file list for {} failed: {}", mods[todo[k]].id, e.what());
             }
         }
     };
+    auto started = std::chrono::steady_clock::now();
     std::vector<std::thread> workers;
     for (int t = 0; t < 4; ++t) workers.emplace_back(worker);
     for (auto& t : workers) t.join();
+    brls::Logger::info("checked {} mods for PC-only packages in {} ms", todo.size(),
+                       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
 
     std::lock_guard lock(pcMutex_);
     for (size_t k = 0; k < todo.size(); ++k) {
@@ -306,13 +433,7 @@ std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& m
         pcOnly_[m.id] = {m.dateModified, found[k] == 1};
         out[todo[k]] = found[k] == 1;
     }
-    try {
-        json j = json::object();
-        for (const auto& [id, v] : pcOnly_) j[std::to_string(id)] = {v.first, v.second};
-        mm::writeFileAtomic(cacheFile, j.dump());
-    } catch (const std::exception& e) {
-        brls::Logger::warning("saving the file-type cache failed: {}", e.what());
-    }
+    savePcCacheLocked();
     return out;
 }
 
