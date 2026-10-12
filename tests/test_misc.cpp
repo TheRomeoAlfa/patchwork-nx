@@ -221,3 +221,21 @@ TEST("gamebanana: mods that only come as PC packages") {
     CHECK(gb::needsPcTool({"a.TKCL"}));
     CHECK(!gb::needsPcTool({}));  // no files listed: don't hide
 }
+
+TEST("compat: downloads that restore the original files") {
+    CHECK(isRestoreOriginalsFile("uninstall_zeldas_ballad_switch_helm.rar"));
+    CHECK(isRestoreOriginalsFile("Helm-Pack-Restore.zip"));
+    CHECK(isRestoreOriginalsFile("vanilla_files.zip"));
+    CHECK(isRestoreOriginalsFile("helm_pack_b.zip", "Uninstall: copy these over to go back to vanilla"));
+    CHECK(!isRestoreOriginalsFile("install_zeldas_ballad_switch_helmpa.rar"));
+    CHECK(!isRestoreOriginalsFile("vanilla_plus_armor.zip"));
+    CHECK(!isRestoreOriginalsFile("restoration_project.zip"));
+}
+
+TEST("compat: a bare two-part version is the mod's, not the game's") {
+    CHECK(mentionedGameVersions("Version: 1.0", Game::Botw).empty());
+    CHECK(mentionedGameVersions("v1.5", Game::Botw).empty());
+    CHECK_EQ(mentionedGameVersions("Version 1.6.0", Game::Botw).size(), 1u);
+    CHECK_EQ(mentionedGameVersions("For game 1.6", Game::Botw).size(), 1u);
+    CHECK_EQ(mentionedGameVersions("TOTK 1.2", Game::Totk).size(), 1u);
+}

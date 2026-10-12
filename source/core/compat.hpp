@@ -52,4 +52,8 @@ size_t closestVersionOption(const std::vector<std::string>& options, Game game, 
 // of it ("fierce_deity_v102.7z" of "fierce_deity.7z"). Compares names without extensions.
 bool isAddOnFileOf(const std::string& own, const std::string& other);
 
+// True for downloads that put the game's original files back ("uninstall_helm_pack.rar",
+// "vanilla_files.zip"), meant for undoing a hand-copied install. Patchwork undoes mods itself.
+bool isRestoreOriginalsFile(const std::string& filename, const std::string& description = "");
+
 }  // namespace mm
