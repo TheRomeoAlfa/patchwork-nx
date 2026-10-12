@@ -67,6 +67,8 @@ AppState::AppState() = default;
 void AppState::init() {
     dataDir_ = platform::sdRoot() / "switch" / "patchwork";
     mm::fs::create_directories(dataDir_);
+    std::error_code ec;
+    mm::fs::create_directories(inboxDir(), ec);
     for (const auto& g : mm::kGames) gameVersions_[g.game] = platform::gameVersion(g.game);
 
     http_ = std::make_unique<mm::CurlHttpClient>(platform::userAgent(), platform::caBundle());
@@ -135,7 +137,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
     for (const auto& g : mm::kGames) {
         for (const auto* m : lib.mods(g.game)) {
             snap->mods.push_back(*m);
-            if (m->gamebananaModId) snap->installedGbMods.insert(m->gamebananaModId);
+            if (!m->sourceKey.empty()) snap->installedKeys.insert(m->sourceKey);
         }
         snap->conflicts[g.game] = lib.conflicts(g.game);
         snap->overlaps[g.game] = lib.patchOverlaps(g.game);
@@ -161,15 +163,95 @@ const mm::ModRecord* AppState::findMod(const std::string& id) const {
     return nullptr;
 }
 
-std::optional<mm::gb::ModDetails> AppState::cachedDetails(int64_t modId) const {
-    auto it = details_.find(modId);
+std::optional<mm::gb::ModDetails> AppState::cachedDetails(const std::string& sourceKey) const {
+    auto it = details_.find(sourceKey);
     if (it == details_.end()) return std::nullopt;
     return it->second;
 }
 
 void AppState::cacheDetails(const mm::gb::ModDetails& d) {
     if (details_.size() > 200) details_.clear();
-    details_[d.summary.id] = d;
+    details_[d.summary.sourceKey] = d;
+}
+
+mm::gb::ModDetails AppState::fetchDetails(const mm::gb::ModSummary& s) {
+    if (s.sourceKey.rfind("wk:", 0) == 0) {
+        auto d = mm::wk::parseModPage(http_->get(s.profileUrl), s);
+        for (auto& f : d.files) f.size = http_->contentLength(f.downloadUrl);  // not on the page
+        if (d.files.empty()) throw std::runtime_error("No download links found on the mod's page.");
+        return d;
+    }
+    return gb_->details(s.id);
+}
+
+mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) {
+    auto otherGame = [&](mm::Game g) {
+        return std::runtime_error(std::string("That's a mod for ") + std::string(mm::gameInfo(g).displayName) +
+                                  ". Switch game with ZL/ZR, then send the link again.");
+    };
+    // GameBanana mod page: https://gamebanana.com/mods/123456
+    static const std::regex gbRe(R"(^https?://(www\.)?gamebanana\.com/mods/(\d+))", std::regex::icase);
+    std::smatch m;
+    if (std::regex_search(url, m, gbRe)) {
+        auto d = gb_->details(std::stoll(m[2].str()));
+        for (const auto& g : mm::kGames)
+            if (d.summary.gameId == g.gamebananaId && g.game != game) throw otherGame(g.game);
+        if (d.summary.gameId && d.summary.gameId != mm::gameInfo(game).gamebananaId)
+            throw std::runtime_error("That GameBanana mod isn't for Breath of the Wild or Tears of the Kingdom.");
+        return d;
+    }
+    // Waikuteru mod page
+    if (mm::wk::isModPageUrl(url)) {
+        auto key = mm::wk::sourceKeyForUrl(url);
+        mm::gb::ModSummary s;
+        try {
+            for (const auto& e : waikuteruMods())
+                if (e.summary.sourceKey == key) s = e.summary;
+        } catch (...) {
+        }
+        if (s.sourceKey.empty()) {
+            s.sourceKey = key;
+            s.name = mm::urlDecode(url.substr(url.rfind('/') + 1));
+            s.author = "Waikuteru";
+            s.profileUrl = url;
+            s.id = mm::stableId(key);
+        }
+        auto g = key.rfind("wk:totk/", 0) == 0 ? mm::Game::Totk : mm::Game::Botw;
+        if (g != game) throw otherGame(g);
+        return fetchDetails(s);
+    }
+    // Anything else: a direct download. Name it after the file.
+    std::string path = url.substr(0, url.find_first_of("?#"));
+    std::string filename = mm::urlDecode(path.substr(path.rfind('/') + 1));
+    auto dn = url.find("dn=");
+    if (dn != std::string::npos) filename = mm::urlDecode(mm::urlDecode(url.substr(dn + 3, url.find('&', dn) - dn - 3)));
+    if (filename.empty()) filename = "download.zip";
+    mm::gb::ModDetails d;
+    d.summary.sourceKey = "url:" + path;
+    d.summary.id = mm::stableId(d.summary.sourceKey);
+    d.summary.name = filename.substr(0, filename.rfind('.'));
+    d.summary.author = url.substr(url.find("//") + 2, url.find('/', url.find("//") + 2) - url.find("//") - 2);
+    d.summary.profileUrl = url;
+    mm::gb::ModFile f;
+    f.id = mm::stableId(url);
+    f.filename = filename;
+    f.downloadUrl = url;
+    f.size = http_->contentLength(url);
+    f.description = "From a link";
+    d.files.push_back(f);
+    return d;
+}
+
+std::vector<mm::wk::ListEntry> AppState::waikuteruMods() {
+    {
+        std::lock_guard lock(wkMutex_);
+        if (!wkList_.empty()) return wkList_;
+    }
+    auto list = mm::wk::parseDownloadsPage(http_->get(mm::wk::kDownloadsUrl));
+    if (list.empty()) throw std::runtime_error("Couldn't read Waikuteru's Downloads page (the site may have changed).");
+    std::lock_guard lock(wkMutex_);
+    wkList_ = list;
+    return wkList_;
 }
 
 namespace {
@@ -224,6 +306,7 @@ uint64_t AppState::freeSpace() const { return platform::freeSpaceBytes(); }
 // ------------------------------------------------------------------ pending installs
 
 mm::fs::path AppState::archivePathFor(const mm::gb::ModFile& f) const {
+    if (f.downloadUrl.rfind("file://", 0) == 0) return f.downloadUrl.substr(7);  // already on the SD card
     // slugify keeps the extension, which prepareArchive checks for .bnp/.tkcl.
     return downloadsDir() / (std::to_string(f.id) + "-" + mm::slugify(f.filename, 80));
 }
@@ -260,6 +343,7 @@ void AppState::savePending(const PendingInstall& p) const {
     const auto& d = p.details;
     json j{{"game", std::string(mm::gameInfo(p.game).key)},
            {"modId", d.summary.id},
+           {"sourceKey", d.summary.sourceKey},
            {"name", d.summary.name},
            {"author", d.summary.author},
            {"category", d.summary.category},
@@ -282,6 +366,7 @@ std::vector<PendingInstall> AppState::pendingInstalls(mm::Game g) const {
             p.game = mm::gameFromKey(j.value("game", "totk")).value_or(mm::Game::Totk);
             if (p.game != g) continue;
             p.details.summary.id = j.value("modId", int64_t{0});
+            p.details.summary.sourceKey = j.value("sourceKey", "gb:" + std::to_string(p.details.summary.id));
             p.details.summary.name = j.value("name", "");
             p.details.summary.author = j.value("author", "");
             p.details.summary.category = j.value("category", "");
@@ -300,9 +385,9 @@ std::vector<PendingInstall> AppState::pendingInstalls(mm::Game g) const {
     return out;
 }
 
-std::optional<PendingInstall> AppState::pendingFor(int64_t modId) const {
+std::optional<PendingInstall> AppState::pendingFor(const std::string& sourceKey) const {
     for (auto& p : pendingInstalls(game_))
-        if (p.details.summary.id == modId) return p;
+        if (p.details.summary.sourceKey == sourceKey) return p;
     return std::nullopt;
 }
 
@@ -317,6 +402,8 @@ void AppState::discardPending(int64_t fileId) const {
 }
 
 // ------------------------------------------------------------------ text helpers
+
+std::string formatFileSize(int64_t bytes) { return bytes > 0 ? formatSize(static_cast<uint64_t>(bytes)) : "size unknown"; }
 
 std::string formatSize(uint64_t bytes) {
     char buf[32];

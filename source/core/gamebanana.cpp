@@ -45,6 +45,7 @@ const json* images(const json& record) {
 ModSummary parseSummary(const json& r) {
     ModSummary m;
     m.id = num(r, "_idRow");
+    m.sourceKey = "gb:" + std::to_string(m.id);
     m.name = str(r, "_sName");
     m.profileUrl = str(r, "_sProfileUrl");
     m.dateAdded = num(r, "_tsDateAdded");
@@ -100,6 +101,7 @@ ModDetails parseModDetails(const std::string& body, int64_t modId) {
     ModDetails d;
     d.summary = parseSummary(j);
     d.summary.id = modId;
+    d.summary.sourceKey = "gb:" + std::to_string(modId);
     if (d.summary.profileUrl.empty()) d.summary.profileUrl = "https://gamebanana.com/mods/" + std::to_string(modId);
     d.version = str(j, "_sVersion");
     d.descriptionHtml = str(j, "_sText");
@@ -145,7 +147,7 @@ std::string Client::searchUrl(Game game, const std::string& query, int page) {
 
 std::string Client::detailsUrl(int64_t modId) {
     return std::string(kApi) + "/Mod/" + std::to_string(modId) +
-           "?_csvProperties=_sName,_aSubmitter,_aCategory,_aPreviewMedia,_sText,_sVersion,_aFiles,"
+           "?_csvProperties=_sName,_aGame,_aSubmitter,_aCategory,_aPreviewMedia,_sText,_sVersion,_aFiles,"
            "_nLikeCount,_nViewCount,_nDownloadCount,_tsDateAdded,_tsDateModified,_bIsObsolete,_sProfileUrl";
 }
 

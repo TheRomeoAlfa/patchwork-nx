@@ -98,6 +98,7 @@ if(PLATFORM_DESKTOP)
 endif()
 
 file(GLOB_RECURSE APP_SOURCES source/app/*.cpp)
+list(APPEND APP_SOURCES source/third_party/qrcodegen/qrcodegen.cpp)
 set(APP_PLATFORM_LIB ${CMAKE_THREAD_LIBS_INIT})
 if(PLATFORM_DESKTOP)
     pkg_check_modules(LIBWEBP REQUIRED IMPORTED_TARGET libwebp)  # GameBanana serves some previews as WebP

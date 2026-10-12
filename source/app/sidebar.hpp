@@ -7,7 +7,7 @@
 
 namespace app {
 
-enum class Page { Browse, Search, MyMods, Settings };
+enum class Page { Browse, Search, AddMods, MyMods, Settings };
 
 // Left navigation. Shows icons + labels while it has focus and shrinks to an icon
 // rail when focus moves into the page, giving the preview pane more room.

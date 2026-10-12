@@ -110,7 +110,7 @@ void MyModsPage::rebuild() {
             text->setGrow(1);
             text->setShrink(1);
             text->addView(ui::label(p.details.summary.name, 18, ui::text()));
-            auto* sub = ui::label(p.file.filename + " · " + formatSize(static_cast<uint64_t>(p.file.size)), 14, ui::muted());
+            auto* sub = ui::label(p.file.filename + " · " + formatFileSize(p.file.size), 14, ui::muted());
             sub->setMarginTop(3);
             text->addView(sub);
             row->addView(text);
@@ -271,7 +271,7 @@ void MyModsPage::onChildFocusGained(brls::View* directChild, brls::View* focused
 void MyModsPage::showPending(const PendingInstall& p) {
     clearPane();
     pane_->addView(ui::label(p.details.summary.name, 26, ui::text()));
-    auto* meta = ui::label(p.file.filename + " · " + formatSize(static_cast<uint64_t>(p.file.size)), 16, ui::muted());
+    auto* meta = ui::label(p.file.filename + " · " + formatFileSize(p.file.size), 16, ui::muted());
     meta->setMargins(4, 0, 16, 0);
     pane_->addView(meta);
     pane_->addView(ui::label(
@@ -283,7 +283,7 @@ void MyModsPage::showPending(const PendingInstall& p) {
 
 void MyModsPage::discardPending(const PendingInstall& p) {
     auto* dialog = new brls::Dialog("Delete the download of " + p.details.summary.name + " (" +
-                                    formatSize(static_cast<uint64_t>(p.file.size)) + ")?");
+                                    formatFileSize(p.file.size) + ")?");
     dialog->addButton("Cancel", [] {});
     dialog->addButton("Delete", [this, fileId = p.file.id] {
         runJob("Deleting…", [fileId](mm::Library&) { AppState::get().discardPending(fileId); });

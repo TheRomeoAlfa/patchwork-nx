@@ -18,6 +18,8 @@ public:
     virtual std::string get(const std::string& url) = 0;
     // Stream a URL to a file (following redirects). Throws on error.
     virtual void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) = 0;
+    // Size of the file at a URL (HEAD request, following redirects); -1 if unknown.
+    virtual int64_t contentLength(const std::string& url) = 0;
 };
 
 // libcurl implementation (works on macOS and on Switch via devkitPro's switch-curl).
@@ -29,6 +31,7 @@ public:
     ~CurlHttpClient() override;
     std::string get(const std::string& url) override;
     void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) override;
+    int64_t contentLength(const std::string& url) override;
 
 private:
     std::string userAgent_;

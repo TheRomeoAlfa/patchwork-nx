@@ -43,7 +43,14 @@ private:
     void showEmptyState(const std::string& message, const std::string& action);
     std::unique_ptr<InstallFlow> makeFlow();
 
+    enum class Source { GameBanana, Waikuteru };
+    void setSource(Source s);
+    void updateTabs();
+
     bool searchMode_;
+    Source source_ = Source::GameBanana;
+    brls::Box* tabs_ = nullptr;
+    brls::Label* tabLabels_[2] = {nullptr, nullptr};
     std::string query_;
     mm::gb::Sort sort_ = mm::gb::Sort::MostDownloaded;
     std::vector<mm::gb::ModSummary> items_;

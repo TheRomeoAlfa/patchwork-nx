@@ -5,6 +5,7 @@
 #include "app_state.hpp"
 #include "compat.hpp"
 #include "install_flow.hpp"
+#include "waikuteru.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -62,6 +63,7 @@ public:
     brls::Label* status;
     int row = -1;
     int64_t modId = 0;
+    std::string sourceKey;
     bool imageLoaded = false;
     std::function<void(int)> onFocus;
 };
@@ -126,6 +128,27 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     left->setLineRight(1);
     left->setLineColor(ui::line());
 
+    // Source switch (Browse only): GameBanana / Waikuteru, changed with L and R.
+    if (!searchMode_) {
+        tabs_ = ui::hbox();
+        tabs_->setMargins(0, 18, 12, 12);
+        tabs_->setBackgroundColor(nvgRGB(0x26, 0x26, 0x26));
+        tabs_->setCornerRadius(16);
+        tabs_->setPadding(3, 3, 3, 3);
+        const char* names[2] = {"GameBanana", "Waikuteru"};
+        for (int i = 0; i < 2; ++i) {
+            auto* pill = ui::hbox();
+            pill->setGrow(1);
+            pill->setHeight(28);
+            pill->setCornerRadius(14);
+            pill->setJustifyContent(brls::JustifyContent::CENTER);
+            tabLabels_[i] = ui::label(names[i], 15, ui::muted());
+            pill->addView(tabLabels_[i]);
+            tabs_->addView(pill);
+        }
+        left->addView(tabs_);
+    }
+
     auto* header = ui::hbox();
     header->setMargins(0, 18, 10, 12);
     // The title takes the free space itself; a separate spacer left it measured too narrow.
@@ -167,9 +190,22 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     flow_ = makeFlow();
 
     // Page-wide actions (they show in the footer while anything inside has focus).
+    if (!searchMode_) {
+        registerAction("Source", brls::BUTTON_LB, [this](brls::View*) {
+            if (flow_->active()) return false;
+            setSource(Source::GameBanana);
+            return true;
+        });
+        registerAction("Source", brls::BUTTON_RB, [this](brls::View*) {
+            if (flow_->active()) return false;
+            setSource(Source::Waikuteru);
+            return true;
+        }, true);
+        updateTabs();
+    }
     if (!searchMode_)
         registerAction("Sort", brls::BUTTON_Y, [this](brls::View*) {
-            if (searchMode_ || flow_->active()) return false;
+            if (searchMode_ || flow_->active() || source_ != Source::GameBanana) return false;
             sort_ = nextSort(sort_);
             reload();
             return true;
@@ -187,6 +223,23 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
         showEmptyState("Find mods by name, author or keyword.", "Search GameBanana");
     } else {
         reload();
+    }
+}
+
+void BrowsePage::setSource(Source s) {
+    if (s == source_) return;
+    source_ = s;
+    updateTabs();
+    reload();
+}
+
+void BrowsePage::updateTabs() {
+    if (!tabs_) return;
+    for (int i = 0; i < 2; ++i) {
+        bool on = static_cast<int>(source_) == i;
+        auto* pill = static_cast<brls::Box*>(tabLabels_[i]->getParent());
+        pill->setBackgroundColor(on ? ui::accent() : nvgRGBA(0, 0, 0, 0));
+        tabLabels_[i]->setTextColor(on ? nvgRGB(0x10, 0x28, 0x2d) : ui::muted());
     }
 }
 
@@ -248,6 +301,8 @@ brls::View* BrowsePage::rowFocus() {
 void BrowsePage::updateHeader() {
     if (searchMode_)
         title_->setText(query_.empty() ? "Search" : "Results for \"" + query_ + "\"");
+    else if (source_ == Source::Waikuteru)
+        title_->setText(std::string(mm::gameInfo(AppState::get().game()).displayName));
     else
         title_->setText(sortTitle(sort_));
     count_->setText(total_ ? formatCount(total_) + " mods" : "");
@@ -285,12 +340,21 @@ void BrowsePage::loadMore() {
         clearPane();
         pane_->addView(new brls::ProgressSpinner());
     }
+    bool waikuteru = source_ == Source::Waikuteru && !search;
     AppState::get().runNetwork([=, this] {
         mm::gb::Page result;
         std::string error;
         try {
-            result = search ? AppState::get().gamebanana().search(game, query, page)
-                            : AppState::get().gamebanana().list(game, sort, page, 30);
+            if (waikuteru) {
+                // One page: every mod for this game that has a Switch version.
+                for (const auto& e : AppState::get().waikuteruMods())
+                    if (e.game == game && e.onSwitch) result.mods.push_back(e.summary);
+                result.totalCount = static_cast<int64_t>(result.mods.size());
+                result.isLast = true;
+            } else {
+                result = search ? AppState::get().gamebanana().search(game, query, page)
+                                : AppState::get().gamebanana().list(game, sort, page, 30);
+            }
         } catch (const std::exception& e) {
             error = e.what();
         }
@@ -354,9 +418,10 @@ void BrowsePage::appendRows(size_t from) {
         auto* row = new ModRow();
         row->row = static_cast<int>(i);
         row->modId = m.id;
+        row->sourceKey = m.sourceKey;
         row->name->setText(m.name);
         row->meta->setText(m.author + " · " + m.category);
-        row->status->setText(AppState::get().snapshot().installedGbMods.count(m.id) ? ui::icon::check : "");
+        row->status->setText(AppState::get().snapshot().installedKeys.count(m.sourceKey) ? ui::icon::check : "");
         row->onFocus = [this](int r) { onRowFocused(r); };
         int index = static_cast<int>(i);
         row->registerClickAction([this, index](brls::View*) {
@@ -393,8 +458,8 @@ void BrowsePage::updateThumbnails(int around) {
 }
 
 void BrowsePage::refreshCells() {
-    const auto& installed = AppState::get().snapshot().installedGbMods;
-    for (auto* r : rows_) r->status->setText(installed.count(r->modId) ? ui::icon::check : "");
+    const auto& installed = AppState::get().snapshot().installedKeys;
+    for (auto* r : rows_) r->status->setText(installed.count(r->sourceKey) ? ui::icon::check : "");
 }
 
 void BrowsePage::onRowFocused(int row) {
@@ -414,9 +479,9 @@ void BrowsePage::onRowFocused(int row) {
 
 void BrowsePage::onRowClicked(int row) {
     if (flow_->active() || row < 0 || row >= rowCount()) return;
-    auto id = items_[row].id;
+    auto summary = items_[row];
     *previewToken_ = false;
-    if (auto d = AppState::get().cachedDetails(id)) {
+    if (auto d = AppState::get().cachedDetails(summary.sourceKey)) {
         flow_->showFilePicker(*d);
         return;
     }
@@ -428,7 +493,7 @@ void BrowsePage::onRowClicked(int row) {
     auto current = [this, alive, token, flow] { return *alive && token == clickToken_ && flow_.get() == flow && flow_->active(); };
     AppState::get().runNetwork([=, this] {
         try {
-            auto d = AppState::get().gamebanana().details(id);
+            auto d = AppState::get().fetchDetails(summary);
             brls::sync([=, this] {
                 if (!current()) return;
                 AppState::get().cacheDetails(d);
@@ -488,7 +553,7 @@ void BrowsePage::showPreview(int row) {
     hero->setClipsToBounds(true);
     content->addView(hero);
     auto alive = alive_;
-    int64_t id = summary.id;
+    auto key = summary.sourceKey;
     // Only for this preview, while it's on screen (it may be rebuilt for the same mod).
     auto wanted = [alive, token] { return *alive && *token; };
     AppState::get().loadImage(hero, summary.thumbnailUrl, wanted);
@@ -500,10 +565,12 @@ void BrowsePage::showPreview(int row) {
     name->setShrink(1);
     titleRow->addView(name);
     titleRow->addView(ui::grow());
-    auto* likes = ui::label(std::string(ui::icon::heart) + " " + formatCount(summary.likes), 16, ui::muted());
-    likes->setShrink(0);
-    likes->setMarginLeft(12);
-    titleRow->addView(likes);
+    if (summary.sourceKey.rfind("gb:", 0) == 0) {  // other sources have no likes
+        auto* likes = ui::label(std::string(ui::icon::heart) + " " + formatCount(summary.likes), 16, ui::muted());
+        likes->setShrink(0);
+        likes->setMarginLeft(12);
+        titleRow->addView(likes);
+    }
     content->addView(titleRow);
     auto* meta = ui::label("by " + summary.author + " · " + summary.category, 16, ui::muted());
     meta->setMarginTop(6);
@@ -514,21 +581,33 @@ void BrowsePage::showPreview(int row) {
     body->addView(new brls::ProgressSpinner());
     content->addView(body);
 
-    auto fill = [body, hero, wanted, id](const ModDetails& d) {
+    // Waikuteru's list has no thumbnails; once a mod's page is read, use its title card.
+    ModRow* listRow = row < static_cast<int>(rows_.size()) ? rows_[row] : nullptr;
+    int gen = generation_;
+    auto rowWanted = [this, alive, gen, listRow, key] { return *alive && gen == generation_ && listRow->sourceKey == key; };
+    auto fill = [body, hero, wanted, key, listRow, rowWanted](const ModDetails& d) {
         if (!wanted()) return;
         body->clearViews();
         auto& st = AppState::get();
         auto game = st.game();
         const auto& installed = st.gameVersion(game);
         if (!d.screenshotUrls.empty()) st.loadImage(hero, d.screenshotUrls[0], wanted);
+        if (listRow && key.rfind("wk:", 0) == 0 && !d.screenshotUrls.empty() && !listRow->imageLoaded) {
+            listRow->imageLoaded = true;
+            st.loadImage(listRow->thumb, d.screenshotUrls[0], rowWanted);
+        }
 
         auto line = [body](const std::string& text, NVGcolor color) {
             auto* l = ui::label(text, 16, color);
             l->setMarginBottom(6);
             body->addView(l);
         };
-        if (st.snapshot().installedGbMods.count(id)) line(std::string(ui::icon::check) + "  Installed", ui::ok());
-        if (st.pendingFor(id)) line(std::string(ui::icon::file) + "  Downloaded, not installed yet: press A to finish", ui::accent());
+        if (st.snapshot().installedKeys.count(key)) line(std::string(ui::icon::check) + "  Installed", ui::ok());
+        if (key.rfind("wk:", 0) == 0) {
+            line(std::string(ui::icon::heart) + "  Made by Waikuteru. New mods come out early on Patreon:", ui::muted());
+            line("     " + std::string(mm::wk::kPatreon) + "  ·  waikuteru-zelda-mods.com", ui::accent());
+        }
+        if (st.pendingFor(key)) line(std::string(ui::icon::file) + "  Downloaded, not installed yet: press A to finish", ui::accent());
 
         bool anyMatch = false, allUnsupported = !d.files.empty();
         bool versionWordIsMod = modUsesVersionWord(d, game);
@@ -547,8 +626,8 @@ void BrowsePage::showPreview(int row) {
             if (!installed.empty() && mm::checkCompat(installed, named) == mm::Compat::Mismatch)
                 line(std::string(ui::icon::warning) + "  Mentions game v" + named.front() + ", you have v" + installed, ui::warn());
         }
-        line(std::to_string(d.files.size()) + (d.files.size() == 1 ? " file" : " files") + " · " +
-                 formatCount(d.downloads) + " downloads",
+        line(std::to_string(d.files.size()) + (d.files.size() == 1 ? " file" : " files") +
+                 (key.rfind("gb:", 0) == 0 ? " · " + formatCount(d.downloads) + " downloads" : std::string()),
              ui::muted());
 
         // Full description, one focusable chunk per paragraph so it can be scrolled through.
@@ -565,26 +644,26 @@ void BrowsePage::showPreview(int row) {
         }
     };
 
-    if (auto d = AppState::get().cachedDetails(id)) {
+    if (auto d = AppState::get().cachedDetails(key)) {
         fill(*d);
         return;
     }
     // Debounce: only fetch if the user stays on this row for a moment.
-    previewDelay_ = brls::delay(250, [this, alive, id, fill, wanted] {
+    previewDelay_ = brls::delay(250, [this, alive, summary, fill, wanted] {
         // (the debounce: only fetch if the preview is still showing this mod)
         if (!*alive) return;
         previewDelay_ = 0;
         if (!wanted()) return;
-        AppState::get().runNetwork([alive, id, fill] {
+        AppState::get().runNetwork([alive, summary, fill] {
             try {
-                auto d = AppState::get().gamebanana().details(id);
+                auto d = AppState::get().fetchDetails(summary);
                 brls::sync([alive, d, fill] {
                     if (!*alive) return;
                     AppState::get().cacheDetails(d);
                     fill(d);
                 });
             } catch (const std::exception& e) {
-                brls::Logger::warning("details {} failed: {}", id, e.what());
+                brls::Logger::warning("details {} failed: {}", summary.sourceKey, e.what());
             }
         });
     });

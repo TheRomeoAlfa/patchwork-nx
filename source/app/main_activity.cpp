@@ -1,6 +1,7 @@
 #include "main_activity.hpp"
 
 #include "app_state.hpp"
+#include "add_mods_page.hpp"
 #include "browse_page.hpp"
 #include "my_mods_page.hpp"
 #include "settings_page.hpp"
@@ -90,6 +91,7 @@ void MainActivity::showPage(Page page) {
     switch (page) {
         case Page::Browse: view = new BrowsePage(false); break;
         case Page::Search: view = new BrowsePage(true); break;
+        case Page::AddMods: view = new AddModsPage(); break;
         case Page::MyMods: view = new MyModsPage(); break;
         case Page::Settings: view = new SettingsPage(); break;
     }
