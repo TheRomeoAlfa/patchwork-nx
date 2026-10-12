@@ -1,6 +1,8 @@
 #include "settings_page.hpp"
 
 #include "app_state.hpp"
+#include "platform.hpp"
+#include "sysmodules.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -42,6 +44,43 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     auto* nsfwNote = ui::label("Uses GameBanana's own content ratings: mods with nudity or sexual themes are hidden from Browse and Search.", 14, ui::muted(), false);
     nsfwNote->setMargins(6, 4, 0, 4);
     content->addView(nsfwNote);
+
+    section("Background add-ons");
+    auto modules = mm::listSysmodules(platform::sdRoot());
+    if (modules.empty()) {
+        auto* none = ui::label("No add-ons (sysmodules) found in atmosphere/contents.", 14, ui::muted(), false);
+        none->setMargins(6, 4, 0, 4);
+        content->addView(none);
+    }
+    for (const auto& m : modules) {
+        auto* cell = new brls::BooleanCell();
+        cell->init(m.name, m.enabled, [id = m.titleId, name = m.name, needed = m.needed](bool on) {
+            try {
+                mm::setSysmoduleEnabled(platform::sdRoot(), id, on);
+                if (!on && needed)
+                    brls::Application::notify(name + " is off. Some games may not start without it. Restart the Switch to apply.");
+                else
+                    brls::Application::notify(name + (on ? " turned on" : " turned off") + ". Restart the Switch to apply.");
+            } catch (const std::exception& e) {
+                brls::Application::notify("Couldn't change " + name + ": " + e.what());
+            }
+        });
+        content->addView(cell);
+        if (!m.about.empty() || m.needed) {
+            auto* about = ui::label(m.about + (m.needed ? " · Needed to start some games" : ""), 14, ui::muted(), false);
+            about->setMargins(2, 4, 4, 4);
+            content->addView(about);
+        }
+    }
+    auto* addonsNote = ui::label(
+        "These start when the Switch boots, and changes apply after a restart.\n"
+        "Game crashing with an Atmosphère error (Program ID 010041544D530000) when mods are on? That's usually "
+        "not the mod: add-ons can use up the memory Atmosphère needs to load mods, or not match your Atmosphère "
+        "version. Turn them off, restart and try the game. If it works, turn them back on one at a time "
+        "(restarting each time) to find the one causing it.",
+        14, ui::muted(), false);
+    addonsNote->setMargins(8, 4, 0, 4);
+    content->addView(addonsNote);
 
     section("Storage");
     auto* cache = new brls::DetailCell();

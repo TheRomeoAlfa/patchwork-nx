@@ -17,6 +17,7 @@ public:
 private:
     void showPage(Page page);
     void switchGame();
+    void checkModLoaderCrashes();
     bool focusInside(brls::View* container) const;
 
     Page page_ = Page::Browse;
