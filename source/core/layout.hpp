@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -29,12 +31,14 @@ struct FileMapping {
 struct Variant {
     std::string name;
     std::vector<FileMapping> files;
+    std::map<std::string, uint32_t> resourceSizes;  // BCML packages: romfs path -> size (0 = remove)
 };
 
 struct LayoutResult {
     PackageKind kind = PackageKind::Empty;
     std::vector<Variant> variants;
     std::vector<std::string> warnings;
+    std::string problem;  // why it can't be installed, when more specific than the kind's message
 };
 
 // Inspect an extracted archive and decide where each file belongs on the SD card.

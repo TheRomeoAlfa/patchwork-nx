@@ -13,7 +13,9 @@ namespace mm {
 class HttpStatusError : public std::runtime_error {
 public:
     explicit HttpStatusError(long status)
-        : std::runtime_error("the server answered with error " + std::to_string(status)), status_(status) {}
+        : std::runtime_error(status == 429 ? "the server is busy (too many requests). Wait a minute and try again"
+                                           : "the server answered with error " + std::to_string(status)),
+          status_(status) {}
     long status() const { return status_; }
 
 private:
@@ -32,6 +34,9 @@ public:
     virtual void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) = 0;
     // Size of the file at a URL (HEAD request, following redirects); -1 if unknown.
     virtual int64_t contentLength(const std::string& url) = 0;
+    // Bytes [from, to] of a URL. Throws if the server doesn't support ranges. `finalUrl`
+    // receives where redirects led, so follow-up ranges can skip them.
+    virtual std::string getRange(const std::string& url, uint64_t from, uint64_t to, std::string* finalUrl = nullptr) = 0;
 };
 
 // libcurl implementation (works on macOS and on Switch via devkitPro's switch-curl).
@@ -44,6 +49,7 @@ public:
     std::string get(const std::string& url) override;
     void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) override;
     int64_t contentLength(const std::string& url) override;
+    std::string getRange(const std::string& url, uint64_t from, uint64_t to, std::string* finalUrl = nullptr) override;
 
 private:
     std::string userAgent_;

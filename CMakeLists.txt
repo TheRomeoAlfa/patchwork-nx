@@ -46,7 +46,8 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBARCHIVE REQUIRED IMPORTED_TARGET libarchive)
     find_package(CURL REQUIRED)
-    target_link_libraries(mmcore PUBLIC PkgConfig::LIBARCHIVE CURL::libcurl)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(mmcore PUBLIC PkgConfig::LIBARCHIVE CURL::libcurl ZLIB::ZLIB)
 endif()
 
 # ---------------------------------------------------------------- host tools

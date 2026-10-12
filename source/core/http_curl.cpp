@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 
 #include "http.hpp"
@@ -31,12 +32,30 @@ int progressCb(void* userdata, curl_off_t dltotal, curl_off_t dlnow, curl_off_t,
     return 0;
 }
 
+// Shared between all requests (from any thread): DNS answers and TLS sessions, so a burst of
+// small requests to the same host skips most of the handshake.
+CURLSH* sharedState() {
+    // Never destroyed: download threads may still be finishing while the app exits.
+    static auto* locks = new std::mutex[CURL_LOCK_DATA_LAST];
+    static CURLSH* share = [] {
+        CURLSH* s = curl_share_init();
+        curl_share_setopt(s, CURLSHOPT_LOCKFUNC, +[](CURL*, curl_lock_data data, curl_lock_access, void*) { locks[data].lock(); });
+        curl_share_setopt(s, CURLSHOPT_UNLOCKFUNC, +[](CURL*, curl_lock_data data, void*) { locks[data].unlock(); });
+        curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+        curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+        // Not CURL_LOCK_DATA_CONNECT: libcurl doesn't support sharing connections across threads.
+        return s;
+    }();
+    return share;
+}
+
 using CurlPtr = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 
 CurlPtr makeHandle(const std::string& url, const std::string& userAgent, const std::string& caBundle) {
     CurlPtr h(curl_easy_init(), curl_easy_cleanup);
     if (!h) throw std::runtime_error("curl_easy_init failed");
     curl_easy_setopt(h.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(h.get(), CURLOPT_SHARE, sharedState());
     curl_easy_setopt(h.get(), CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(h.get(), CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(h.get(), CURLOPT_MAXREDIRS, 10L);
@@ -133,6 +152,36 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
     std::error_code ec;
     fs::remove(dest, ec);
     fs::rename(part, dest);
+}
+
+std::string CurlHttpClient::getRange(const std::string& url, uint64_t from, uint64_t to, std::string* finalUrl) {
+    struct State {
+        std::string body;
+        size_t limit;
+    } st{{}, static_cast<size_t>(to - from + 1)};
+    auto h = makeHandle(url, userAgent_, caBundle_);
+    auto range = std::to_string(from) + "-" + std::to_string(to);
+    curl_easy_setopt(h.get(), CURLOPT_RANGE, range.c_str());
+    curl_easy_setopt(h.get(), CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, &st);
+    curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, +[](char* buf, size_t size, size_t n, void* ud) -> size_t {
+        auto* s = static_cast<State*>(ud);
+        if (s->body.size() + size * n > s->limit) return 0;  // the whole file is coming: stop
+        s->body.append(buf, size * n);
+        return size * n;
+    });
+    auto rc = curl_easy_perform(h.get());
+    long status = 0;
+    curl_easy_getinfo(h.get(), CURLINFO_RESPONSE_CODE, &status);
+    if (rc == CURLE_WRITE_ERROR || (rc == CURLE_OK && status == 200)) throw std::runtime_error("the server doesn't support partial downloads");
+    if (rc != CURLE_OK) throw std::runtime_error(std::string("network error: ") + curl_easy_strerror(rc));
+    if (status != 206) throw HttpStatusError(status);
+    if (finalUrl) {
+        char* effective = nullptr;
+        curl_easy_getinfo(h.get(), CURLINFO_EFFECTIVE_URL, &effective);
+        *finalUrl = effective ? effective : url;
+    }
+    return st.body;
 }
 
 int64_t CurlHttpClient::contentLength(const std::string& url) {

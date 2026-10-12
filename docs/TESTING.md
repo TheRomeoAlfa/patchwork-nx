@@ -74,3 +74,15 @@ Run these after any release build; they cover what the desktop build can't.
    FastSwim, 372295). The first visit to a page takes a moment longer; later visits are
    instant (switch/patchwork/pc-only-cache.json). Entering 372295 as a mod number explains
    that it needs BCML on a PC.
+18. **BOTW size table (needed for BCML packages):** open Patchwork by holding **R** while
+   starting Breath of the Wild. Settings → Storage → "BOTW size table" should say
+   "Read from game 1.6.0". If it says "Got the SD card's copy" or "Unreadable", report it.
+   Opening Patchwork from the Album afterwards keeps the saved copy.
+19. **BCML package that installs as-is:** in BOTW Browse, find Linkle Armor Stands (or enter
+   246556): its .bnp shows "BCML package · installs here". Install it, start the game and
+   look at an armor stand. Then turn it off: the stands are back to normal.
+20. **BCML package that needs merging** (e.g. FastSwim, 372295): not listed in Browse; the
+   number says it needs BCML on a PC.
+21. **Size table merging with the Randomizer:** with your BOTW Randomizer files on the card,
+   install a BCML package: the game still starts and the Randomizer works. Turn the package
+   off: the Randomizer's own size table is restored.
