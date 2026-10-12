@@ -128,6 +128,37 @@ ModDetails parseModDetails(const std::string& body, int64_t modId) {
     return d;
 }
 
+std::vector<std::string> parseFileNames(const std::string& body) {
+    std::vector<std::string> out;
+    auto j = parse(body);
+    if (!j.is_array()) return out;
+    for (const auto& f : j)
+        if (!flag(f, "_bIsArchived")) out.push_back(str(f, "_sFile"));
+    return out;
+}
+
+bool needsPcTool(const std::vector<std::string>& names) {
+    if (names.empty()) return false;
+    for (const auto& n : names)
+        if (!endsWithI(n, ".bnp") && !endsWithI(n, ".tkcl")) return false;
+    return true;
+}
+
+std::string pcToolMessage(const std::vector<std::string>& names) {
+    bool bnp = false, tkcl = false;
+    for (const auto& n : names) {
+        bnp |= endsWithI(n, ".bnp");
+        tkcl |= endsWithI(n, ".tkcl");
+    }
+    if (bnp && !tkcl)
+        return "This mod only comes as a BCML package (.bnp). Those have to be merged with other mods on a PC using "
+               "BCML, so Patchwork can't install it.";
+    if (tkcl && !bnp)
+        return "This mod only comes as a TKMM package (.tkcl). Those have to be merged on a PC using TKMM, so "
+               "Patchwork can't install it.";
+    return "This mod only comes as packages that have to be merged on a PC (BCML or TKMM), so Patchwork can't install it.";
+}
+
 std::vector<Category> parseCategories(const std::string& body) {
     std::vector<Category> out;
     for (const auto& c : parse(body)) out.push_back({num(c, "_idRow"), str(c, "_sName")});
@@ -165,6 +196,10 @@ Page Client::search(Game game, const std::string& query, int page) {
 }
 
 ModDetails Client::details(int64_t modId) { return parseModDetails(http_.get(detailsUrl(modId)), modId); }
+
+std::vector<std::string> Client::fileNames(int64_t modId) {
+    return parseFileNames(http_.get(std::string(kApi) + "/Mod/" + std::to_string(modId) + "/Files"));
+}
 
 std::vector<Category> Client::categories(Game game) {
     return parseCategories(http_.get(std::string(kApi) + "/Mod/Categories?_idGameRow=" +

@@ -211,6 +211,9 @@ mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) 
             throw std::runtime_error("That GameBanana mod isn't for Breath of the Wild or Tears of the Kingdom.");
         if (d.summary.nsfw && settings_.hideNsfw)
             throw std::runtime_error("GameBanana marks this mod as NSFW, so it's hidden.");
+        std::vector<std::string> names;
+        for (const auto& f : d.files) names.push_back(f.filename);
+        if (mm::gb::needsPcTool(names)) throw std::runtime_error(mm::gb::pcToolMessage(names));
         return d;
     }
     // Waikuteru mod page
@@ -253,6 +256,64 @@ mm::gb::ModDetails AppState::resolveLink(const std::string& url, mm::Game game) 
     f.description = "From a link";
     d.files.push_back(f);
     return d;
+}
+
+std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& mods) {
+    auto cacheFile = dataDir_ / "pc-only-cache.json";
+    std::vector<bool> out(mods.size(), false);
+    std::vector<size_t> todo;
+    {
+        std::lock_guard lock(pcMutex_);
+        if (!pcLoaded_) {
+            pcLoaded_ = true;
+            try {
+                auto cached = json::parse(mm::readFile(cacheFile));  // keep alive while iterating
+                for (const auto& [id, v] : cached.items())
+                    pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
+            } catch (...) {
+                // none yet, or unreadable: start over
+            }
+        }
+        for (size_t i = 0; i < mods.size(); ++i) {
+            auto it = pcOnly_.find(mods[i].id);
+            if (it != pcOnly_.end() && it->second.first == mods[i].dateModified)
+                out[i] = it->second.second;
+            else
+                todo.push_back(i);
+        }
+    }
+    if (todo.empty()) return out;
+
+    std::vector<int> found(todo.size(), -1);
+    std::atomic<size_t> next{0};
+    auto worker = [&] {
+        for (size_t k; (k = next++) < todo.size();) {
+            try {
+                found[k] = mm::gb::needsPcTool(gb_->fileNames(mods[todo[k]].id)) ? 1 : 0;
+            } catch (const std::exception& e) {
+                brls::Logger::warning("file list for {} failed: {}", mods[todo[k]].id, e.what());
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 4; ++t) workers.emplace_back(worker);
+    for (auto& t : workers) t.join();
+
+    std::lock_guard lock(pcMutex_);
+    for (size_t k = 0; k < todo.size(); ++k) {
+        if (found[k] < 0) continue;
+        const auto& m = mods[todo[k]];
+        pcOnly_[m.id] = {m.dateModified, found[k] == 1};
+        out[todo[k]] = found[k] == 1;
+    }
+    try {
+        json j = json::object();
+        for (const auto& [id, v] : pcOnly_) j[std::to_string(id)] = {v.first, v.second};
+        mm::writeFileAtomic(cacheFile, j.dump());
+    } catch (const std::exception& e) {
+        brls::Logger::warning("saving the file-type cache failed: {}", e.what());
+    }
+    return out;
 }
 
 std::vector<mm::wk::ListEntry> AppState::waikuteruMods() {

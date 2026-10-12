@@ -70,6 +70,12 @@ Page parseModList(const std::string& body);
 ModDetails parseModDetails(const std::string& body, int64_t modId);
 std::vector<Category> parseCategories(const std::string& body);
 
+std::vector<std::string> parseFileNames(const std::string& body);
+// True if every file is a package that must be merged on a PC first (BCML .bnp, TKMM .tkcl).
+bool needsPcTool(const std::vector<std::string>& fileNames);
+// What to tell the user about such a mod.
+std::string pcToolMessage(const std::vector<std::string>& fileNames);
+
 class Client {
 public:
     explicit Client(HttpClient& http) : http_(http) {}
@@ -77,6 +83,8 @@ public:
     Page list(Game game, Sort sort, int page, int perPage = 20, int64_t categoryId = 0);
     Page search(Game game, const std::string& query, int page);  // GameBanana returns 15 per page
     ModDetails details(int64_t modId);
+    // Just the names of a mod's current files (a small request, for filtering lists).
+    std::vector<std::string> fileNames(int64_t modId);
     std::vector<Category> categories(Game game);
 
     static std::string listUrl(Game game, Sort sort, int page, int perPage, int64_t categoryId);

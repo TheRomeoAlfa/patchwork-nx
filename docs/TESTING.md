@@ -70,3 +70,7 @@ Run these after any release build; they cover what the desktop build can't.
 16. **Size table warning (TOTK):** install a mod whose files include
    `ResourceSizeTable.Product.<version>.rsizetable.zs` but not your version's (e.g. mod
    455219 on 1.2.1): a warning names the versions it supports; Cancel is the default.
+17. **PC-only mods hidden:** BOTW Browse doesn't list mods whose only files are .bnp (e.g.
+   FastSwim, 372295). The first visit to a page takes a moment longer; later visits are
+   instant (switch/patchwork/pc-only-cache.json). Entering 372295 as a mod number explains
+   that it needs BCML on a PC.
