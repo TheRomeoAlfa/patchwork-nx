@@ -32,7 +32,9 @@ bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
 FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, bool versionWordIsMod) {
     if (mm::endsWithI(f.filename, ".bnp")) {
         if (f.bcml == ModFile::Bcml::NeedsPc) return {"Needs BCML on a PC", ui::warn()};
-        if (f.bcml == ModFile::Bcml::Installable) return {"BCML package · installs here", ui::ok()};
+        if (f.bcml == ModFile::Bcml::Installable)
+            return AppState::get().bcmlSetupNeeded() ? FileNote{"BCML package · one-time setup", ui::accent()}
+                                                     : FileNote{"BCML package · installs here", ui::ok()};
         return {"BCML package", ui::muted()};
     }
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
@@ -156,6 +158,29 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
     if (progress >= 0) bar_->setProgress(progress);
 }
 
+namespace {
+// Marks an install error that's really the BCML setup step (see showBcmlSetup).
+const std::string kSetupMarker = "\x01" "bcml-setup:";
+}  // namespace
+
+void InstallFlow::showBcmlSetup(bool fromInbox) {
+    using A = AppState::GameAccess;
+    auto access = AppState::get().botwAccess();
+    std::string body;
+    if (access == A::ModsOn)
+        body = "Patchwork was opened from Breath of the Wild, but L wasn't held, so mods were on and it couldn't read the "
+               "game's own files. Try again holding both buttons:\n\n";
+    else
+        body = "This mod is a BCML package. Patchwork merges it with Breath of the Wild's own files, which it reads from "
+               "the game itself. To let it:\n\n";
+    body += AppState::bcmlSetupSteps(!fromInbox);
+    if (fromInbox) body += "\n4. Install it again from Add mods.";
+    body += "\n\nPatchwork keeps copies of the game files on the SD card, so this is only needed again after a game "
+            "update, or if another package needs other files.";
+    if (!fromInbox) body += " The download is kept; it won't download again.";
+    showMessage("One-time setup for BCML packages", body, false);
+}
+
 void InstallFlow::showMessage(const std::string& title, const std::string& body, bool isError) {
     active_ = true;
     setBusy(false);
@@ -164,7 +189,9 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     box->setGrow(1);
     box->setFocusable(true);
     box->setHideHighlight(true);
-    box->addView(ui::label(std::string(isError ? ui::icon::warning : ui::icon::check) + "  " + title, 24, isError ? ui::warn() : ui::ok()));
+    bool setup = title.rfind("One-time setup", 0) == 0;
+    box->addView(ui::label(std::string(isError ? ui::icon::warning : setup ? ui::icon::info : ui::icon::check) + "  " + title, 24,
+                           isError ? ui::warn() : setup ? ui::accent() : ui::ok()));
     auto* b = ui::label(body, 17, ui::text(), false);
     b->setMarginTop(14);
     box->addView(b);
@@ -588,22 +615,10 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
             [this, alive, r, files, logs, logDirs, replace, prep, fileId = file.id](mm::Library& lib) {
                 size_t lastStep = 0;
                 try {
-                if (!lib.canMergeSizes(r))
-                    throw std::runtime_error(
-                        "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
-                        "Close Patchwork, then open it by holding L and R while starting Breath of the Wild, and install again.");
+                if (!lib.canMergeSizes(r)) throw std::runtime_error(kSetupMarker + "size table");
                 if (!logDirs.empty()) {
                     auto missing = lib.missingGameFiles(logDirs);
-                    if (!missing.empty()) {
-                        std::string names;
-                        for (size_t k = 0; k < missing.size() && k < 3; ++k)
-                            names += (k ? ", " : "") + missing[k].substr(missing[k].find("romfs/") + 6);
-                        if (missing.size() > 3) names += " and " + std::to_string(missing.size() - 3) + " more";
-                        throw std::runtime_error(
-                            "This BCML package is merged with Breath of the Wild's own files (" + names +
-                            "), which Patchwork hasn't read yet. Close Patchwork, then open it by holding L and R while "
-                            "starting Breath of the Wild, and install again.");
-                    }
+                    if (!missing.empty()) throw std::runtime_error(kSetupMarker + missing.front());
                 }
                 if (!logs.empty())
                     brls::sync([this, alive] {
@@ -619,6 +634,10 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                         if (*alive && workingLabel_) setWorking(msg, pct);
                     });
                 }, logs);
+                } catch (const mm::BcmlMergeError& e) {
+                    mm::removeTree(prep->extractDir);  // the download itself stays for another try
+                    if (std::string(e.what()).find("hasn't read yet") != std::string::npos) throw std::runtime_error(kSetupMarker + e.what());
+                    throw;
                 } catch (...) {
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
                     throw;
@@ -628,13 +647,17 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 // Installed: the download and the unpacked copy aren't needed any more.
                 AppState::get().discardPending(fileId);
             },
-            [this, alive, d](const std::string& error) {
+            [this, alive, d, file](const std::string& error) {
                 if (!*alive) {
                     // The page was closed meanwhile; still tell the user how it went.
                     brls::Application::notify(error.empty() ? d.summary.name + " installed" : "Install of " + d.summary.name + " failed");
                     return;
                 }
                 setBusy(false);
+                if (error.rfind(kSetupMarker, 0) == 0) {
+                    showBcmlSetup(isLocalFile(file));
+                    return;
+                }
                 if (!error.empty()) {
                     showMessage("Install failed", error + "\n\nThe download was kept. Try again from here or from My mods; it won't download again.", true);
                     return;

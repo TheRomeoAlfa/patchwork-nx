@@ -47,6 +47,8 @@ public:
     void showFilePicker(const mm::gb::ModDetails& d);
     void install(const mm::gb::ModDetails& d, const mm::gb::ModFile& file);
     void showMessage(const std::string& title, const std::string& body, bool isError);
+    // The one-time setup BCML packages need (reading the game's files), as steps.
+    void showBcmlSetup(bool fromInbox);
 
 private:
     void setWorking(const std::string& status, float progress = -1);

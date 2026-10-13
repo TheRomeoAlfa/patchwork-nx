@@ -201,6 +201,37 @@ void AppState::init() {
 
 void AppState::shutdown() { saveSettings(); }
 
+AppState::GameAccess AppState::botwAccess() const {
+    if (!platform::runningAsGame(mm::Game::Botw)) return GameAccess::NotFromGame;
+    if (sizeTableStatus().find("mod's copy") != std::string::npos) return GameAccess::ModsOn;
+    return GameAccess::Ready;
+}
+
+size_t AppState::keptGameFiles() const {
+    size_t n = 0;
+    std::error_code ec;
+    auto dir = dataDir_ / "original" / "botw-files";
+    for (mm::fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && !mm::endsWithI(it->path().filename().string(), ".absent") && it->path().filename() != "version.txt") ++n;
+    return n;
+}
+
+std::vector<std::string> AppState::pendingBcmlNames() const {
+    std::vector<std::string> out;
+    for (const auto& p : pendingInstalls(mm::Game::Botw))
+        if (mm::endsWithI(p.file.filename, ".bnp")) out.push_back(p.details.summary.name);
+    return out;
+}
+
+std::string AppState::bcmlSetupSteps(bool thenFinishInMyMods) {
+    std::string s =
+        "1. Press + to close Patchwork.\n"
+        "2. Hold L and R, and start Breath of the Wild. Keep holding until the Homebrew Menu opens.\n"
+        "3. Open Patchwork from the Homebrew Menu.";
+    if (thenFinishInMyMods) s += "\n4. Go to My mods and choose Finish installing.";
+    return s;
+}
+
 std::string AppState::sizeTableStatus() const {
     std::lock_guard lock(statusMutex_);
     return sizeTableStatus_;
@@ -295,6 +326,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
         auto un = lib.unmanagedFiles(g.game);
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
     }
+    snap->bcmlWaiting = lib.bcmlPending();
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);
         libraryChanged_.fire();

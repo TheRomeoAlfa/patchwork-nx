@@ -63,6 +63,12 @@ struct UnmanagedFiles {
 
 using ProgressFn = std::function<void(size_t done, size_t total, const std::string& current)>;
 
+// A change involving a BCML package couldn't be merged (usually: game files not read yet).
+// The library is consistent; the package's files stay off the SD card until it can be.
+struct BcmlMergeError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 // Owns the mod library on the SD card and keeps the deployed LayeredFS files in
 // sync with which mods are enabled. Layout under `dataDir`:
 //   state.json                       records + what is deployed
@@ -145,8 +151,10 @@ private:
     void refreshBcml();
     std::string bcmlKey() const;
 public:
-    // Enabled BCML packages that haven't been merged yet (a game file was missing).
+    // Enabled BCML packages that haven't been merged yet (a game file was missing). Their files
+    // stay off the SD card until they are; bcmlError() says why.
     bool bcmlPending() const { return bcmlKey() != bcmlKey_; }
+    const std::string& bcmlError() const { return bcmlError_; }
 private:
     void writeMergedSizeTable(const fs::path& sdPath) const;
     bool hasOriginalSizeTableOnCard() const;
@@ -159,6 +167,8 @@ private:
     std::string bcmlKey_;
     std::vector<std::string> bcmlOutputs_;
     std::map<std::string, uint32_t> bcmlSizes_;
+    std::string bcmlError_;  // why the last merge didn't happen
+    bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
     // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.

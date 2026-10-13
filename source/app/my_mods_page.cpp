@@ -278,6 +278,16 @@ void MyModsPage::showPending(const PendingInstall& p) {
     auto* meta = ui::label(p.file.filename + " · " + formatFileSize(p.file.size), 16, ui::muted());
     meta->setMargins(4, 0, 16, 0);
     pane_->addView(meta);
+    auto& st = AppState::get();
+    bool bcmlSetup = mm::endsWithI(p.file.filename, ".bnp") && st.botwAccess() != AppState::GameAccess::Ready;
+    if (bcmlSetup) {
+        // A BCML package waiting for the one-time setup, most likely.
+        pane_->addView(ui::label("A BCML package, waiting for Patchwork to read Breath of the Wild's files:\n" +
+                                     AppState::bcmlSetupSteps(false) +
+                                     "\n4. Come back here and press A to finish installing.\n\nX deletes the download instead.",
+                                 16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+        return;
+    }
     pane_->addView(ui::label(
         "This file was downloaded but isn't installed yet. The install may have failed, been cancelled, "
         "or the app closed part-way.\n\nPress A to finish installing it (no need to download again), "
@@ -322,8 +332,9 @@ void MyModsPage::showDetails(const std::string& id) {
     if (!m) return;
 
     pane_->addView(ui::label(m->name, 26, ui::text()));
-    std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") + std::to_string(m->files.size()) + " files · " +
-                       (m->enabled ? "on" : "off");
+    bool bcml = !m->bcmlLogs.empty();
+    std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") +
+                       (bcml ? std::string("BCML package") : std::to_string(m->files.size()) + " files") + " · " + (m->enabled ? "on" : "off");
     auto* metaL = ui::label(meta, 16, ui::muted());
     metaL->setMargins(4, 0, 16, 0);
     pane_->addView(metaL);
@@ -366,6 +377,17 @@ void MyModsPage::showDetails(const std::string& id) {
         for (const auto& other : o.modIds)
             if (other != id) names += (names.empty() ? "" : ", ") + nameOf(other);
         addNote(std::string(ui::icon::warning) + "  Also patches the game code like " + names + ". Using both may crash the game.", ui::warn(), ui::warnBg());
+    }
+
+    if (bcml) {
+        if (m->enabled && st.snapshot().bcmlWaiting)
+            addNote(std::string(ui::icon::warning) + "  Not merged yet: Patchwork needs to read some of Breath of the Wild's own files first.\n" +
+                        AppState::bcmlSetupSteps(false),
+                    ui::warn(), ui::warnBg());
+        else
+            addNote(std::string(ui::icon::info) + "  Merged with the game's own files. Patchwork merges again whenever a BCML package is "
+                                                  "turned on or off or moved in the list.",
+                    ui::accent(), ui::accentDim());
     }
 
     const auto& installed = st.gameVersion(m->game);
@@ -423,7 +445,16 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
         AppState::get().setInstallBusy(false);
         if (!*alive) return;
         busy_ = false;
-        if (!error.empty()) brls::Application::notify("Something went wrong: " + error);
+        if (!error.empty() && error.find("hasn't read yet") != std::string::npos) {
+            // A BCML merge needs game files: explain the setup rather than show the raw error.
+            auto* dialog = new brls::Dialog("This change merges BCML packages with Breath of the Wild's own files, which Patchwork "
+                                            "hasn't read yet:\n\n" + AppState::bcmlSetupSteps(false) +
+                                            "\n\nThen make the change again.");
+            dialog->addButton("OK", [] {});
+            dialog->open();
+        } else if (!error.empty()) {
+            brls::Application::notify("Something went wrong: " + error);
+        }
         rebuildWhenSafe();
     });
 }

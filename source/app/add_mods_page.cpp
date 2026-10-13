@@ -252,6 +252,15 @@ void AddModsPage::showInboxFile(const mm::fs::path& path) {
     pane_->addView(ui::label("Press A to unpack it and see what's inside. It installs for " + std::string(game) +
                                  " (switch game with ZL/ZR); you'll pick options and see any clashes next, like any other install.",
                              16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+    if (mm::endsWithI(path.filename().string(), ".bnp")) {
+        std::string text = "A BCML package: Patchwork merges it with Breath of the Wild's own files.";
+        if (AppState::get().bcmlSetupNeeded())
+            text += " Before the first one, Patchwork needs to read those files: open it by holding L and R while starting the "
+                    "game (see Settings, BCML packages).";
+        auto* note = ui::label(std::string(ui::icon::info) + "  " + text, 15, ui::accent(), false);
+        note->setMarginTop(12);
+        pane_->addView(note);
+    }
     auto* more = ui::label("To add more, copy zip, 7z, rar or BCML .bnp files (mods or save files) into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
                            "(for example with DBI or sys-ftpd). The file stays here after installing; X deletes it.",
                            15, ui::muted(), false);

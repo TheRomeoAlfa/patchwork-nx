@@ -110,10 +110,12 @@ Run these after any release build; they cover what the desktop build can't.
    packages and shows timings and memory (also saved to switch/patchwork/bcml-test/report.txt).
    Then "Merged Linkle title screen" → Put in game, start BOTW normally: the title screen shows
    Linkle. Back in Patchwork, "Remove from game".
-28. **BCML package that needs merging (pack + parameters):** hold **L and R** while starting
-   BOTW, open Patchwork, enter mod number 423509 ([LINKLE] Title Screen NX) and install the
-   .bnp ("BCML package · installs here"). It says "Merging with the game's files…". Start BOTW
-   normally: the title screen shows Linkle. Turn it off: the normal title screen is back.
+28. **BCML setup, as a new user would meet it:** open Patchwork from the Album (no buttons
+   held). Settings starts with "BCML packages": Game files "Not read yet". Enter mod number
+   423509 ([LINKLE] Title Screen NX): its .bnp says "BCML package · one-time setup". Install it:
+   a blue "One-time setup for BCML packages" screen lists the steps. Follow them (hold L and R
+   starting BOTW, open Patchwork): a message offers "Open My mods"; choose Finish installing.
+   Start BOTW normally: the title screen shows Linkle. Turn it off: the normal one is back.
 29. **Game files kept:** after step 28, open Patchwork from the Album (no buttons held) and
    install another merging package (e.g. 321704 Early Master Cycle): it installs without asking
    for L and R if it only needs files already read; otherwise it says which files and to

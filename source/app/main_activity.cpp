@@ -69,6 +69,45 @@ void MainActivity::onContentAvailable() {
             return true;
         }, true);
     brls::delay(1200, [this] { checkModLoaderCrashes(); });
+    brls::delay(1800, [this] { checkBcmlSetup(); });
+}
+
+// Opened from Breath of the Wild while BCML packages wait for its files: say what's next.
+void MainActivity::checkBcmlSetup() {
+    auto& st = AppState::get();
+    // Wait for the startup check (it tells whether mods were on) and for any other dialog.
+    if (st.sizeTableProgress() >= 0 || brls::Application::getActivitiesStack().size() > 1) {
+        brls::delay(500, [this] { checkBcmlSetup(); });
+        return;
+    }
+    using A = AppState::GameAccess;
+    auto access = st.botwAccess();
+    if (access == A::NotFromGame) return;
+    auto pending = st.pendingBcmlNames();
+    if (pending.empty() && !st.snapshot().bcmlWaiting) return;
+    std::string names;
+    for (size_t i = 0; i < pending.size() && i < 3; ++i) names += (i ? ", " : "") + pending[i];
+    if (pending.size() > 3) names += " and " + std::to_string(pending.size() - 3) + " more";
+    brls::Dialog* dialog;
+    if (access == A::Ready) {
+        dialog = new brls::Dialog(pending.empty()
+                                      ? std::string("Some BCML packages still couldn't be merged: Patchwork couldn't read all the game "
+                                                    "files they need. Turn them off and on in My mods to see which.")
+                                      : "Patchwork can read Breath of the Wild's files now, so your BCML packages can be installed:\n" +
+                                            names + "\n\nFinish installing them in My mods.");
+        dialog->addButton("Later", [] {});
+        if (!pending.empty())
+            dialog->addButton("Open My mods", [this] {
+                showPage(Page::MyMods);
+                brls::sync([this] { ui::tryFocus(content_); });
+            });
+    } else {
+        dialog = new brls::Dialog("Patchwork was opened from Breath of the Wild, but L wasn't held, so mods were on and it can't "
+                                  "read the game's own files for your BCML packages" +
+                                  (names.empty() ? std::string(".") : " (" + names + ").") + "\n\n" + AppState::bcmlSetupSteps(!pending.empty()));
+        dialog->addButton("OK", [] {});
+    }
+    dialog->open();
 }
 
 // If Atmosphère's mod loader crashed since the last check (the game wouldn't start with

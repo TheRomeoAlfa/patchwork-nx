@@ -57,6 +57,10 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
 // the console's language. On desktop: $MM_GAME_LANG, default "USen".
 std::string gameTextLanguage();
 
+// Whether Patchwork runs in place of the game (opened by holding R while starting it). On
+// desktop: when $MM_GAME_ROMFS_BOTW / _TOTK is set.
+bool runningAsGame(mm::Game game);
+
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.
 std::tm localTime(int64_t unixSeconds);
