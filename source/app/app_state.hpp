@@ -180,7 +180,7 @@ private:
     std::string captureOriginalSizeTable(const mm::fs::path& path, const std::function<void(float)>& progress);
     bool pcLoaded_ = false;
     std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
-    std::map<int64_t, bool> bnpInstallable_;               // file id -> needs no merging
+    std::map<int64_t, std::vector<std::string>> bnpLogs_;  // file id -> BnpCheck::summary()
     void loadPcCacheLocked();
     void savePcCacheLocked();
     bool bnpInstallable(const mm::gb::ModFile& f);  // cached; false if it can't be checked

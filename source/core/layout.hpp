@@ -32,6 +32,7 @@ struct Variant {
     std::string name;
     std::vector<FileMapping> files;
     std::map<std::string, uint32_t> resourceSizes;  // BCML packages: romfs path -> size (0 = remove)
+    fs::path bcmlLogs;  // BCML packages that need merging: this variant's logs folder
 };
 
 struct LayoutResult {

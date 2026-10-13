@@ -200,3 +200,61 @@ TEST("bcml: a missing game file is named") {
     }
     CHECK(error.find("ActorInfo") != std::string::npos);
 }
+
+#include "library.hpp"
+
+TEST("bcml: the library deploys merged files instead of a package's partial packs") {
+    t::TempDir d;
+    auto sd = d.path / "sd", data = d.path / "sd/switch/patchwork", game = d.path / "game";
+    std::string titleLayout = sarcOf({{"blyt/Title.bflyt", "game layout"}, {"timg/__Combined.bntx", "game textures"}});
+    put(game / "01007EF00011E000/romfs/Pack/Title.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(titleLayout)}}));
+    // The game's size table, so size entries have something to merge into.
+    SizeTable table;
+    table.crc[sizeTableCrc("Layout/Title.blarc")] = 100;
+    put(data / "original/botw/ResourceSizeTable.product.srsizetable", yaz0Store(table.write()));
+
+    auto src = d.path / "pkg";
+    std::string partial = sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{"timg/__Combined.bntx", "linkle textures"}}))}});
+    put(src / "Title.pack", partial);
+    put(src / "logs/packs.json", R"({"Pack/Title.pack": "01007EF00011E000/romfs/Pack/Title.pack"})");
+
+    Library lib(sd, data);
+    lib.load();
+    lib.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
+    bcml::FolderGameFiles files(game);
+    lib.setGameFileReader([&](const std::string& p) { return files.read(p); });
+    CHECK(lib.missingGameFiles({src / "logs"}).empty());
+
+    ModRecord r;
+    r.id = "linkle-title";
+    r.game = Game::Botw;
+    r.name = "Linkle title";
+    r.bcmlLogs = {"0"};
+    const std::string target = "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
+    lib.add(r, {{src / "Title.pack", target}}, true, {}, {{src / "logs/packs.json", "bcml/0/packs.json"}});
+
+    auto onCard = readFile(sd / target);
+    CHECK(onCard != partial);
+    auto merged = Sarc::parse(Sarc::parse(onCard).find("Layout/Title.sblarc")->data);
+    CHECK(merged.find("blyt/Title.bflyt")->data == "game layout");
+    CHECK(merged.find("timg/__Combined.bntx")->data == "linkle textures");
+    CHECK(!lib.bcmlPending());
+    // The size table got the merged layout's entry (it only grows).
+    auto sdTable = SizeTable::parse(readFile(sd / kBotwSizeTable));
+    CHECK(sdTable.crc.at(sizeTableCrc("Layout/Title.blarc")) >= 100u);
+    // Logs are kept with the mod, not copied to the SD card.
+    CHECK(fs::exists(data / "library/botw/linkle-title/bcml/0/packs.json"));
+    CHECK(!fs::exists(sd / "bcml"));
+
+    lib.setEnabled("linkle-title", false);
+    CHECK(!fs::exists(sd / target));
+    CHECK(!fs::exists(data / "bcml-merged"));
+    lib.setEnabled("linkle-title", true);
+    CHECK(fs::exists(sd / target));
+
+    // Without the game's files the merge waits, and says what it needs.
+    Library lib2(sd, data);
+    lib2.load();
+    lib2.setGameFileReader([](const std::string&) { return std::optional<std::string>(); });
+    CHECK_EQ(lib2.missingGameFiles({src / "logs"}).size(), 1u);
+}

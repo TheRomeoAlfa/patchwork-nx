@@ -576,18 +576,39 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         for (auto i : variants) r.variants.push_back(prep->layout.variants.at(i).name);
         r.resourceSizes = mm::mergeVariantSizes(prep->layout, variants);
         auto files = mm::mergeVariants(prep->layout, variants);
+        std::vector<mm::fs::path> logDirs;  // BCML packages that need merging
+        auto logs = mm::variantLogFiles(prep->layout, variants, r.bcmlLogs);
+        for (auto i : variants)
+            if (!prep->layout.variants.at(i).bcmlLogs.empty()) logDirs.push_back(prep->layout.variants.at(i).bcmlLogs);
         setBusy(true);
         cancel_.reset();  // copying can't be cancelled half-way; the library rolls back on failure
         setWorking("Installing… 0 / " + std::to_string(files.size()) + " files", 0);
         auto alive = flowAlive_;
         st.runFileJob(
-            [this, alive, r, files, replace, prep, fileId = file.id](mm::Library& lib) {
+            [this, alive, r, files, logs, logDirs, replace, prep, fileId = file.id](mm::Library& lib) {
                 size_t lastStep = 0;
                 try {
                 if (!lib.canMergeSizes(r))
                     throw std::runtime_error(
                         "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
                         "Close Patchwork, then open it by holding L and R while starting Breath of the Wild, and install again.");
+                if (!logDirs.empty()) {
+                    auto missing = lib.missingGameFiles(logDirs);
+                    if (!missing.empty()) {
+                        std::string names;
+                        for (size_t k = 0; k < missing.size() && k < 3; ++k)
+                            names += (k ? ", " : "") + missing[k].substr(missing[k].find("romfs/") + 6);
+                        if (missing.size() > 3) names += " and " + std::to_string(missing.size() - 3) + " more";
+                        throw std::runtime_error(
+                            "This BCML package is merged with Breath of the Wild's own files (" + names +
+                            "), which Patchwork hasn't read yet. Close Patchwork, then open it by holding L and R while "
+                            "starting Breath of the Wild, and install again.");
+                    }
+                }
+                if (!logs.empty())
+                    brls::sync([this, alive] {
+                        if (*alive && workingLabel_) setWorking("Merging with the game's files…", -1);
+                    });
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;
@@ -597,7 +618,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     brls::sync([this, alive, msg, pct] {
                         if (*alive && workingLabel_) setWorking(msg, pct);
                     });
-                });
+                }, logs);
                 } catch (...) {
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
                     throw;

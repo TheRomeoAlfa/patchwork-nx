@@ -510,10 +510,22 @@ std::vector<std::string> splitNested(const std::string& path) {
     return out;
 }
 
-bool canMerge(const std::string& logName) {
+namespace {
+const std::set<std::string>& mergedLogs() {
     static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
+    return merged;
+}
+}  // namespace
+
+bool canMerge(const std::string& logName) {
     static const std::set<std::string> ignored = {"rstb.json", "rstb.log", ".shrink"};
-    return merged.count(logName) || ignored.count(logName);
+    return mergedLogs().count(logName) || ignored.count(logName);
+}
+
+std::string mergeSupportKey() {
+    std::string key;
+    for (const auto& l : mergedLogs()) key += l + ";";
+    return key;
 }
 
 byml::Node toByml(const yaml::Node& n) {

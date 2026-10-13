@@ -1,5 +1,6 @@
 #include "app_state.hpp"
 
+#include "bcml.hpp"
 #include "bnp.hpp"
 #include "remote7z.hpp"
 #include "sizetable.hpp"
@@ -108,6 +109,42 @@ void AppState::init() {
         for (const auto& g : mm::kGames)
             if (!gameVersions_[g.game].empty()) game_ = g.game;
 
+    // Game files BCML packages are merged with, copied the first time they can be read (when
+    // Patchwork runs in place of BOTW with mods off: L and R held). Cleared after a game update.
+    auto gameCache = dataDir_ / "original" / "botw-files";
+    {
+        std::string version = gameVersions_[mm::Game::Botw], cachedVersion;
+        try {
+            cachedVersion = mm::readFile(gameCache / "version.txt");
+        } catch (...) {
+        }
+        if (!version.empty() && cachedVersion != version) {
+            mm::removeTree(gameCache);
+            try {
+                mm::writeFileAtomic(gameCache / "version.txt", version);
+            } catch (...) {
+            }
+        }
+    }
+    library_->setGameFileReader([gameCache](const std::string& path) -> std::optional<std::string> {
+        std::error_code ec;
+        auto cached = gameCache / mm::fs::path(path);
+        if (mm::fs::exists(cached, ec)) return mm::readFile(cached);
+        if (path.rfind(mm::bcml::kContent, 0) != 0) return std::nullopt;  // DLC files: not readable yet
+        auto rel = path.substr(std::string(mm::bcml::kContent).size());
+        std::string data, why;
+        if (!platform::readGameFile(mm::Game::Botw, rel, data, why)) return std::nullopt;
+        // Opened without L, Atmosphère hands over the SD card's (modded) copy: not the game's.
+        auto onCard = platform::sdRoot() / "atmosphere/contents/01007EF00011E000/romfs" / mm::fs::path(rel);
+        if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return std::nullopt;
+        try {
+            mm::writeFileAtomic(cached, data);
+        } catch (const std::exception& e) {
+            brls::Logger::warning("couldn't keep a copy of {}: {}", path, e.what());
+        }
+        return data;
+    });
+
     auto staleWork = workDir();
     auto originalTable = dataDir_ / "original" / "botw" / "ResourceSizeTable.product.srsizetable";
     runFileJob([this, staleWork, originalTable](mm::Library& lib) {
@@ -132,6 +169,14 @@ void AppState::init() {
             finish.status = "Couldn't check";
         }
         lib.setOriginalSizeTable(originalTable);
+        // BCML packages waiting for game files: merge them now if the files can be read.
+        if (lib.bcmlPending()) {
+            try {
+                lib.apply();
+            } catch (const std::exception& e) {
+                brls::Logger::info("BCML merge still waiting: {}", e.what());
+            }
+        }
     }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });
@@ -356,17 +401,26 @@ void AppState::loadPcCacheLocked() {
     pcLoaded_ = true;
     // Seed from the list shipped with the app (popular BOTW mods, checked ahead of time), then
     // what this console has learned since. Entries for updated mods are re-checked anyway.
+    // Packages are remembered by the kinds of merging they need, so what's installable
+    // follows what this version of Patchwork can merge. A mod remembered as "needs a PC"
+    // under older rules is checked again.
+    auto read = [this](const json& j) {
+        bool sameRules = j.value("rules", std::string()) == mm::bcml::mergeSupportKey();
+        for (const auto& [id, v] : j["mods"].items()) {
+            bool pcOnly = v.at(1).get<bool>();
+            if (pcOnly && !sameRules) continue;
+            pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), pcOnly};
+        }
+        if (j.contains("bnpLogs"))
+            for (const auto& [id, v] : j["bnpLogs"].items()) bnpLogs_[std::stoll(id)] = v.get<std::vector<std::string>>();
+    };
     try {
-        auto seed = json::parse(mm::readFile(platform::resourcePath("bnp-cache.json")));
-        for (const auto& [id, v] : seed["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
-        for (const auto& [id, v] : seed["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+        read(json::parse(mm::readFile(platform::resourcePath("bnp-cache.json"))));
     } catch (...) {
     }
     try {
         auto cached = json::parse(mm::readFile(dataDir_ / "pc-only-cache.json"));  // keep alive while iterating
-        if (!cached.contains("mods")) return;  // older format: start over
-        for (const auto& [id, v] : cached["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
-        for (const auto& [id, v] : cached["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+        if (cached.contains("mods")) read(cached);
     } catch (...) {
         // none yet, or unreadable: start over
     }
@@ -374,9 +428,9 @@ void AppState::loadPcCacheLocked() {
 
 void AppState::savePcCacheLocked() {
     try {
-        json j = {{"mods", json::object()}, {"bnp", json::object()}};
+        json j = {{"rules", mm::bcml::mergeSupportKey()}, {"mods", json::object()}, {"bnpLogs", json::object()}};
         for (const auto& [id, v] : pcOnly_) j["mods"][std::to_string(id)] = {v.first, v.second};
-        for (const auto& [id, ok] : bnpInstallable_) j["bnp"][std::to_string(id)] = ok;
+        for (const auto& [id, logs] : bnpLogs_) j["bnpLogs"][std::to_string(id)] = logs;
         mm::writeFileAtomic(dataDir_ / "pc-only-cache.json", j.dump());
     } catch (const std::exception& e) {
         brls::Logger::warning("saving the file-type cache failed: {}", e.what());
@@ -387,20 +441,20 @@ bool AppState::bnpInstallable(const mm::gb::ModFile& f) {
     {
         std::lock_guard lock(pcMutex_);
         loadPcCacheLocked();
-        auto it = bnpInstallable_.find(f.id);
-        if (it != bnpInstallable_.end()) return it->second;
+        auto it = bnpLogs_.find(f.id);
+        if (it != bnpLogs_.end()) return mm::bnpInstallable(it->second);
     }
-    bool ok;
+    std::vector<std::string> summary;
     try {
-        ok = mm::checkBnp(mm::remote7zListing(*http_, f.downloadUrl)).installable();
+        summary = mm::checkBnp(mm::remote7zListing(*http_, f.downloadUrl)).summary();
     } catch (const std::exception& e) {
         brls::Logger::warning("couldn't look inside {}: {}", f.filename, e.what());
         return false;  // not remembered: try again next time
     }
     std::lock_guard lock(pcMutex_);
-    bnpInstallable_[f.id] = ok;
+    bnpLogs_[f.id] = summary;
     savePcCacheLocked();
-    return ok;
+    return mm::bnpInstallable(summary);
 }
 
 void AppState::checkBcmlFiles(std::vector<mm::gb::ModFile>& files) {
