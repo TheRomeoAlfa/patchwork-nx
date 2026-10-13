@@ -126,23 +126,37 @@ void AppState::init() {
             }
         }
     }
-    library_->setGameFileReader([gameCache](const std::string& path) -> std::optional<std::string> {
+    library_->setGameFileReader([gameCache](const std::string& path) {
+        using GF = mm::Library::GameFile;
         std::error_code ec;
         auto cached = gameCache / mm::fs::path(path);
-        if (mm::fs::exists(cached, ec)) return mm::readFile(cached);
-        if (path.rfind(mm::bcml::kContent, 0) != 0) return std::nullopt;  // DLC files: not readable yet
+        if (mm::fs::exists(cached, ec)) return GF{GF::State::Found, mm::readFile(cached)};
+        auto absent = cached;
+        absent += ".absent";
+        if (mm::fs::exists(absent, ec)) return GF{GF::State::Absent, {}};
+        if (path.rfind(mm::bcml::kContent, 0) != 0) return GF{};  // DLC files: not readable yet
         auto rel = path.substr(std::string(mm::bcml::kContent).size());
         std::string data, why;
-        if (!platform::readGameFile(mm::Game::Botw, rel, data, why)) return std::nullopt;
+        bool notInGame = false;
+        if (!platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame)) {
+            if (notInGame) {
+                try {
+                    mm::writeFileAtomic(absent, "");
+                } catch (...) {
+                }
+                return GF{GF::State::Absent, {}};
+            }
+            return GF{};
+        }
         // Opened without L, Atmosphère hands over the SD card's (modded) copy: not the game's.
         auto onCard = platform::sdRoot() / "atmosphere/contents/01007EF00011E000/romfs" / mm::fs::path(rel);
-        if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return std::nullopt;
+        if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return GF{};
         try {
             mm::writeFileAtomic(cached, data);
         } catch (const std::exception& e) {
             brls::Logger::warning("couldn't keep a copy of {}: {}", path, e.what());
         }
-        return data;
+        return GF{GF::State::Found, std::move(data)};
     });
 
     auto staleWork = workDir();

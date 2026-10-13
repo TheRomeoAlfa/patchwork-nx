@@ -117,7 +117,8 @@ std::string readWithProgress(const mm::fs::path& p, const std::function<void(uin
 }  // namespace
 
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
-                  const std::function<void(uint64_t, uint64_t)>& progress) {
+                  const std::function<void(uint64_t, uint64_t)>& progress, bool* notInGame) {
+    if (notInGame) *notInGame = false;
 #ifdef __SWITCH__
     u64 current = 0;
     u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
@@ -131,7 +132,13 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
-        out = readWithProgress("gamefs:/" + romfsPath, progress);
+        std::error_code ec;
+        if (!mm::fs::exists("gamefs:/" + romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The game has no " + romfsPath + ".";
+        } else {
+            out = readWithProgress("gamefs:/" + romfsPath, progress);
+        }
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
@@ -144,6 +151,12 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
+        std::error_code ec;
+        if (!mm::fs::exists(mm::fs::path(env) / romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The game has no " + romfsPath + ".";
+            return false;
+        }
         out = readWithProgress(mm::fs::path(env) / romfsPath, progress);
         return true;
     } catch (const std::exception& e) {

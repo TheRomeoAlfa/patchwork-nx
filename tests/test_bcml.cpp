@@ -222,7 +222,10 @@ TEST("bcml: the library deploys merged files instead of a package's partial pack
     lib.load();
     lib.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
     bcml::FolderGameFiles files(game);
-    lib.setGameFileReader([&](const std::string& p) { return files.read(p); });
+    lib.setGameFileReader([&](const std::string& p) {
+        auto f = files.read(p);
+        return f ? Library::GameFile{Library::GameFile::State::Found, *f} : Library::GameFile{Library::GameFile::State::Absent, {}};
+    });
     CHECK(lib.missingGameFiles({src / "logs"}).empty());
 
     ModRecord r;
@@ -255,6 +258,148 @@ TEST("bcml: the library deploys merged files instead of a package's partial pack
     // Without the game's files the merge waits, and says what it needs.
     Library lib2(sd, data);
     lib2.load();
-    lib2.setGameFileReader([](const std::string&) { return std::optional<std::string>(); });
+    lib2.setGameFileReader([](const std::string&) { return Library::GameFile{}; });
     CHECK_EQ(lib2.missingGameFiles({src / "logs"}).size(), 1u);
+}
+
+namespace {
+using aamp::Parameter;
+using aamp::Type;
+
+std::string bdrop(const std::vector<std::pair<std::string, std::vector<std::pair<std::string, float>>>>& tables) {
+    aamp::ParameterIO pio;
+    auto& h = pio.root.objectOrAdd(aamp::hash("Header"));
+    h.set(aamp::hash("TableNum"), Parameter::s32(int32_t(tables.size())));
+    for (size_t i = 0; i < tables.size(); ++i) {
+        char key[16];
+        std::snprintf(key, sizeof key, "Table%02zu", i + 1);
+        h.set(aamp::hash(key), Parameter::string(Type::String64, tables[i].first));
+        auto& o = pio.root.objectOrAdd(aamp::hash(tables[i].first));
+        for (const char* k : {"RepeatNumMin", "RepeatNumMax", "ApproachType", "OccurrenceSpeedType"}) o.set(aamp::hash(k), Parameter::s32(1));
+        o.set(aamp::hash("ColumnNum"), Parameter::s32(int32_t(tables[i].second.size())));
+        for (size_t k = 0; k < tables[i].second.size(); ++k) {
+            char n[32], p[32];
+            std::snprintf(n, sizeof n, "ItemName%02zu", k + 1);
+            std::snprintf(p, sizeof p, "ItemProbability%02zu", k + 1);
+            o.set(aamp::hash(n), Parameter::string(Type::String64, tables[i].second[k].first));
+            o.set(aamp::hash(p), Parameter::f32(tables[i].second[k].second));
+        }
+    }
+    return aamp::write(pio);
+}
+
+std::string bshop(const std::vector<std::pair<std::string, std::vector<std::string>>>& tables) {
+    aamp::ParameterIO pio;
+    auto& h = pio.root.objectOrAdd(aamp::hash("Header"));
+    h.set(aamp::hash("TableNum"), Parameter::s32(int32_t(tables.size())));
+    for (size_t i = 0; i < tables.size(); ++i) {
+        char key[16];
+        std::snprintf(key, sizeof key, "Table%02zu", i + 1);
+        h.set(aamp::hash(key), Parameter::string(Type::String64, tables[i].first));
+        auto& o = pio.root.objectOrAdd(aamp::hash(tables[i].first));
+        o.set(aamp::hash("ColumnNum"), Parameter::s32(int32_t(tables[i].second.size())));
+        for (size_t k = 0; k < tables[i].second.size(); ++k) {
+            auto key3 = [&](const char* base) {
+                char b[32];
+                std::snprintf(b, sizeof b, "%s%03zu", base, k + 1);
+                return aamp::hash(b);
+            };
+            o.set(key3("ItemSort"), Parameter::s32(int32_t(k)));
+            o.set(key3("ItemName"), Parameter::string(Type::String64, tables[i].second[k]));
+            o.set(key3("ItemNum"), Parameter::s32(1));
+            o.set(key3("ItemAdjustPrice"), Parameter::s32(0));
+            o.set(key3("ItemLookGetFlg"), Parameter::boolean(false));
+            o.set(key3("ItemAmount"), Parameter::s32(0));
+        }
+    }
+    return aamp::write(pio);
+}
+}  // namespace
+
+TEST("bcml: drop tables, shops and animation lists") {
+    t::TempDir d;
+    auto game = d.path / "game";
+    const std::string pack = "01007EF00011E000/romfs/Actor/Pack/Npc_Shop.sbactorpack";
+    aamp::ParameterIO aslist;
+    {
+        auto& defs = aslist.root.listOrAdd(3752287078u);  // ASDefines
+        defs.objectOrAdd(aamp::hash("ASDefine_0")).set(aamp::hash("Name"), Parameter::string(Type::String64, "Wait"));
+        defs.objectOrAdd(aamp::hash("ASDefine_0")).set(aamp::hash("Filename"), Parameter::string(Type::String64, "Npc_Wait"));
+        auto& res = aslist.root.listOrAdd(2777926231u);  // AddReses
+        res.objectOrAdd(aamp::hash("AddRes_0")).set(aamp::hash("Anim"), Parameter::string(Type::String64, "Npc_Base"));
+    }
+    put(game / pack, yaz0Compress(sarcOf({{"Actor/DropTable/Npc_Shop.bdrop", bdrop({{"Normal", {{"Item_Apple", 50}, {"Item_Ore_A", 50}}}, {"Rare", {{"Item_Ore_B", 100}}}})},
+                                          {"Actor/ShopData/Npc_Shop.bshop", bshop({{"Normal", {"Item_Apple", "Item_Meat"}}})},
+                                          {"Actor/ASList/Npc_Shop.baslist", aamp::write(aslist)}})));
+    auto p = d.path / "p";
+    // Drops: Normal changed (an item gone, one added), Rare dropped, Extra new.
+    put(p / "logs/drops.json", R"({")" + pack + R"(//Actor/DropTable/Npc_Shop.bdrop": {
+        "Normal": {"repeat_num_min": 2, "repeat_num_max": 3, "approach_type": 0, "occurrence_speed_type": 0,
+                   "items": {"Item_Apple": 30.0, "Item_Star": 70.0}},
+        "Extra": {"repeat_num_min": 1, "repeat_num_max": 1, "approach_type": 0, "occurrence_speed_type": 0, "items": {"Item_Gem": 100.0}}}})");
+    // Shop: Meat removed, Fish added.
+    {
+        aamp::ParameterIO log;
+        log.type = "";
+        std::string path = pack + "//Actor/ShopData/Npc_Shop.bshop";
+        log.root.objectOrAdd(aamp::hash("Filenames")).set(aamp::hash(path), Parameter::string(Type::StringRef, path));
+        auto& diff = log.root.listOrAdd(aamp::hash(path));
+        auto& add = diff.listOrAdd(aamp::hash("Additions"));
+        auto& addTable = add.listOrAdd(aamp::hash("Normal"));
+        auto& fish = addTable.objectOrAdd(aamp::hash("Item_Fish"));
+        fish.set(aamp::hash("ItemName"), Parameter::string(Type::String64, "Item_Fish"));
+        fish.set(aamp::hash("ItemNum"), Parameter::s32(3));
+        fish.set(aamp::hash("ItemAdjustPrice"), Parameter::s32(5));
+        fish.set(aamp::hash("ItemLookGetFlg"), Parameter::boolean(false));
+        fish.set(aamp::hash("ItemAmount"), Parameter::s32(0));
+        diff.listOrAdd(aamp::hash("Removals")).listOrAdd(aamp::hash("Normal")).objectOrAdd(aamp::hash("Item_Meat"));
+        put(p / "logs/shop.aamp", aamp::write(log));
+    }
+    // AS list: Wait's file changed, a new define, a new animation resource.
+    {
+        aamp::ParameterIO log;
+        log.type = "";
+        std::string path = pack + "//Actor/ASList/Npc_Shop.baslist";
+        log.root.objectOrAdd(aamp::hash("FileTable")).set(aamp::hash("File0"), Parameter::string(Type::StringRef, path));
+        auto& diff = log.root.listOrAdd(aamp::hash(path));
+        auto& defs = diff.listOrAdd(3752287078u);
+        defs.objectOrAdd(aamp::hash("ASDefine_0")).set(aamp::hash("Name"), Parameter::string(Type::String64, "Wait"));
+        defs.objectOrAdd(aamp::hash("ASDefine_0")).set(aamp::hash("Filename"), Parameter::string(Type::String64, "Linkle_Wait"));
+        defs.objectOrAdd(aamp::hash("ASDefine_1")).set(aamp::hash("Name"), Parameter::string(Type::String64, "Dance"));
+        defs.objectOrAdd(aamp::hash("ASDefine_1")).set(aamp::hash("Filename"), Parameter::string(Type::String64, "Linkle_Dance"));
+        diff.listOrAdd(2777926231u).objectOrAdd(aamp::hash("AddRes_0")).set(aamp::hash("Anim"), Parameter::string(Type::String64, "Linkle_Anim"));
+        put(p / "logs/aslist.aamp", aamp::write(log));
+    }
+    bcml::FolderGameFiles files(game);
+    auto r = bcml::merge({{"p", p, {p / "logs"}}}, files);
+    auto out = Sarc::parse(r.files.at(pack));
+
+    auto drops = aamp::parse(out.find("Actor/DropTable/Npc_Shop.bdrop")->data);
+    const auto* header = drops.root.object(aamp::hash("Header"));
+    CHECK_EQ(header->find("TableNum")->asInt(), 2);
+    CHECK_EQ(header->find("Table01")->data, std::string("Normal"));  // the game's order, Rare gone
+    CHECK_EQ(header->find("Table02")->data, std::string("Extra"));
+    const auto* normal = drops.root.object(aamp::hash("Normal"));
+    CHECK_EQ(normal->find("ColumnNum")->asInt(), 2);
+    CHECK_EQ(normal->find("ItemName01")->data, std::string("Item_Apple"));
+    CHECK_EQ(normal->find("ItemProbability01")->asF32(), 30.0f);
+    CHECK_EQ(normal->find("ItemName02")->data, std::string("Item_Star"));
+    CHECK_EQ(normal->find("RepeatNumMax")->asInt(), 3);
+
+    auto shop = aamp::parse(out.find("Actor/ShopData/Npc_Shop.bshop")->data);
+    const auto* table = shop.root.object(aamp::hash("Normal"));
+    CHECK_EQ(table->find("ColumnNum")->asInt(), 2);
+    CHECK_EQ(table->find("ItemName001")->data, std::string("Item_Apple"));
+    CHECK_EQ(table->find("ItemName002")->data, std::string("Item_Fish"));
+    CHECK_EQ(table->find("ItemNum002")->asInt(), 3);
+    CHECK_EQ(table->find("ItemSort002")->asInt(), 1);
+
+    auto as = aamp::parse(out.find("Actor/ASList/Npc_Shop.baslist")->data);
+    const auto* defs = as.root.list(3752287078u);
+    CHECK_EQ(defs->objects.size(), 2u);
+    CHECK_EQ(defs->object(aamp::hash("ASDefine_0"))->find("Filename")->data, std::string("Linkle_Wait"));
+    CHECK_EQ(defs->object(aamp::hash("ASDefine_1"))->find("Name")->data, std::string("Dance"));
+    const auto* res = as.root.list(2777926231u);
+    CHECK_EQ(res->objects.size(), 2u);  // Npc_Base kept, Linkle_Anim added
+    CHECK(r.sizes.count("Actor/ShopData/Npc_Shop.bshop"));
 }

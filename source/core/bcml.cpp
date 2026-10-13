@@ -1,6 +1,7 @@
 #include "bcml.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 
@@ -437,6 +438,375 @@ void deepMerge(Context& c) {
     }
 }
 
+// ---------------------------------------------------------------- AAMP helpers
+
+std::string str3(const char* prefix, int n, int width) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%s%0*d", prefix, width, n);
+    return buf;
+}
+
+void removeObject(aamp::ParameterList& l, uint32_t key) {
+    l.objects.erase(std::remove_if(l.objects.begin(), l.objects.end(), [&](const auto& o) { return o.first == key; }), l.objects.end());
+}
+void removeList(aamp::ParameterList& l, uint32_t key) {
+    l.lists.erase(std::remove_if(l.lists.begin(), l.lists.end(), [&](const auto& o) { return o.first == key; }), l.lists.end());
+}
+
+// Combine "FileTable"-style logs (shop.aamp, aslist.aamp): path -> combined diff.
+template <typename MergeFn>
+std::map<std::string, aamp::ParameterList> fileTableLogs(Context& c, const char* logName, const char* tableName, MergeFn merge) {
+    std::map<std::string, aamp::ParameterList> out;
+    const uint32_t table = aamp::hash(tableName);
+    for (const auto& log : c.logs(logName)) {
+        auto pio = aamp::parse(readFile(log));
+        const auto* files = pio.root.object(table);
+        if (!files) continue;
+        for (const auto& [k, p] : files->params) {
+            if (!p.isString() || p.data.empty()) continue;
+            if (const auto* diff = pio.root.list(aamp::hash(p.data))) merge(out[slashes(p.data)], *diff);
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------- drops
+
+struct DropTable {
+    std::string name;
+    int32_t repeatMin = 0, repeatMax = 0, approach = 0, speed = 0;
+    std::vector<std::pair<std::string, float>> items;  // file order
+};
+
+std::vector<DropTable> readDrops(const aamp::ParameterIO& pio) {
+    std::vector<DropTable> out;
+    const auto* header = pio.root.object(aamp::hash("Header"));
+    if (!header) return out;
+    const auto* num = header->find("TableNum");
+    int n = num ? num->asInt() : 0;
+    for (int i = 1; i <= n; ++i) {
+        const auto* tn = header->find(str3("Table", i, 2));
+        if (!tn) continue;
+        const auto* obj = pio.root.object(aamp::hash(tn->data));
+        if (!obj) continue;
+        DropTable t;
+        t.name = tn->data;
+        if (auto* p = obj->find("RepeatNumMin")) t.repeatMin = p->asInt();
+        if (auto* p = obj->find("RepeatNumMax")) t.repeatMax = p->asInt();
+        if (auto* p = obj->find("ApproachType")) t.approach = p->asInt();
+        if (auto* p = obj->find("OccurrenceSpeedType")) t.speed = p->asInt();
+        int items = int(obj->params.size() > 5 ? (obj->params.size() - 5) / 2 : 0);
+        for (int k = 1; k <= items; ++k) {
+            const auto* name = obj->find(str3("ItemName", k, 2));
+            const auto* prob = obj->find(str3("ItemProbability", k, 2));
+            if (!name || !prob) continue;
+            bool dup = false;
+            for (auto& [in, ip] : t.items)
+                if (in == name->data) {
+                    ip = prob->asF32();
+                    dup = true;
+                }
+            if (!dup) t.items.emplace_back(name->data, prob->asF32());
+        }
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+aamp::ParameterIO writeDrops(const std::vector<DropTable>& tables) {
+    aamp::ParameterIO pio;
+    auto& header = pio.root.objectOrAdd(aamp::hash("Header"));
+    header.set(aamp::hash("TableNum"), aamp::Parameter::s32(int32_t(tables.size())));
+    for (size_t i = 0; i < tables.size(); ++i)
+        header.set(aamp::hash(str3("Table", int(i + 1), 2)), aamp::Parameter::string(aamp::Type::String64, tables[i].name));
+    for (const auto& t : tables) {
+        auto& o = pio.root.objectOrAdd(aamp::hash(t.name));
+        o.set(aamp::hash("RepeatNumMin"), aamp::Parameter::s32(t.repeatMin));
+        o.set(aamp::hash("RepeatNumMax"), aamp::Parameter::s32(t.repeatMax));
+        o.set(aamp::hash("ApproachType"), aamp::Parameter::s32(t.approach));
+        o.set(aamp::hash("OccurrenceSpeedType"), aamp::Parameter::s32(t.speed));
+        o.set(aamp::hash("ColumnNum"), aamp::Parameter::s32(int32_t(t.items.size())));
+        for (size_t k = 0; k < t.items.size(); ++k) {
+            o.set(aamp::hash(str3("ItemName", int(k + 1), 2)), aamp::Parameter::string(aamp::Type::String64, t.items[k].first));
+            o.set(aamp::hash(str3("ItemProbability", int(k + 1), 2)), aamp::Parameter::f32(t.items[k].second));
+        }
+    }
+    return pio;
+}
+
+void mergeDrops(Context& c) {
+    // Per file, the highest priority package's tables replace whole tables.
+    std::map<std::string, nlohmann::json> files;
+    for (const auto& log : c.logs("drops.json")) {
+        auto j = nlohmann::json::parse(readFile(log));
+        for (const auto& [path, tables] : j.items())
+            for (const auto& [name, table] : tables.items()) files[slashes(path)][name] = table;
+    }
+    for (const auto& [path, tables] : files) {
+        auto parts = splitNested(path);
+        std::vector<DropTable> stock;
+        if (auto g = c.gameNested(parts)) {
+            try {
+                stock = readDrops(aamp::parse(*g));
+            } catch (const std::exception&) {
+            }
+        }
+        // The mod's tables, in the game's order where the game has them.
+        std::vector<DropTable> out;
+        auto fromJson = [&](const std::string& name, const nlohmann::json& j, const DropTable* base) {
+            DropTable t;
+            t.name = name;
+            t.repeatMin = j.value("repeat_num_min", base ? base->repeatMin : 0);
+            t.repeatMax = j.value("repeat_num_max", base ? base->repeatMax : 0);
+            t.approach = j.value("approach_type", base ? base->approach : 0);
+            t.speed = j.value("occurrence_speed_type", base ? base->speed : 0);
+            std::map<std::string, float> probs;
+            std::vector<std::string> order;
+            if (base)
+                for (const auto& [n, p] : base->items)
+                    if (j.contains("items") && j["items"].contains(n)) order.push_back(n), probs[n] = p;
+            if (j.contains("items"))
+                for (const auto& [n, p] : j["items"].items()) {
+                    if (!probs.count(n)) order.push_back(n);
+                    probs[n] = p.is_number() ? p.get<float>() : probs[n];  // "UNDERRIDE_CONST" keeps the game's
+                }
+            for (const auto& n : order) t.items.emplace_back(n, probs[n]);
+            return t;
+        };
+        for (const auto& s : stock)
+            if (tables.contains(s.name)) out.push_back(fromJson(s.name, tables[s.name], &s));
+        for (const auto& [name, j] : tables.items()) {
+            bool known = std::any_of(stock.begin(), stock.end(), [&](const DropTable& s) { return s.name == name; });
+            if (!known) out.push_back(fromJson(name, j, nullptr));
+        }
+        if (auto* data = c.edit(parts, true)) *data = aamp::write(writeDrops(out));
+        else c.result.notes.push_back("couldn't place " + path);
+    }
+}
+
+// ---------------------------------------------------------------- shops
+
+const char* const kShopKeys[] = {"ItemName", "ItemNum", "ItemAdjustPrice", "ItemLookGetFlg", "ItemAmount"};
+
+// BCML's "shopdata": TableNames object + a list per table of items keyed by item name.
+aamp::ParameterList shopData(const aamp::ParameterIO& pio) {
+    aamp::ParameterList out;
+    auto& names = out.objectOrAdd(aamp::hash("TableNames"));
+    const auto* header = pio.root.object(aamp::hash("Header"));
+    if (!header) throw std::runtime_error("shop file without a header");
+    for (const auto& [k, t] : header->params) {
+        if (!t.isString()) continue;
+        uint32_t th = aamp::hash(t.data);
+        const auto* obj = pio.root.object(th);
+        if (!obj) continue;
+        aamp::ParameterList items;
+        for (int i = 1; i <= int(obj->params.size()); ++i) {
+            const auto* name = obj->find(str3("ItemName", i, 3));
+            if (!name) continue;
+            aamp::ParameterObject item;
+            for (const char* key : kShopKeys)
+                if (const auto* p = obj->find(str3(key, i, 3))) item.set(aamp::hash(key), *p);
+            items.objects.emplace_back(aamp::hash(name->data), std::move(item));
+        }
+        if (!items.objects.empty()) {
+            names.set(th, aamp::Parameter::string(aamp::Type::String64, t.data));
+            out.lists.emplace_back(th, std::move(items));
+        }
+    }
+    return out;
+}
+
+aamp::ParameterIO writeShop(const aamp::ParameterList& data, const aamp::ParameterIO& base) {
+    aamp::ParameterIO pio;
+    pio.version = base.version;
+    pio.type = "xml";
+    auto& header = pio.root.objectOrAdd(aamp::hash("Header"));
+    const auto* names = data.object(aamp::hash("TableNames"));
+    std::vector<std::string> tables;
+    if (names)
+        for (const auto& [k, p] : names->params) tables.push_back(p.data);
+    header.set(aamp::hash("TableNum"), aamp::Parameter::s32(int32_t(tables.size())));
+    for (size_t i = 0; i < tables.size(); ++i)
+        header.set(aamp::hash(str3("Table", int(i + 1), 2)), aamp::Parameter::string(aamp::Type::String64, tables[i]));
+    for (const auto& t : tables) {
+        uint32_t th = aamp::hash(t);
+        const auto* items = data.list(th);
+        aamp::ParameterObject obj;
+        obj.set(aamp::hash("ColumnNum"), aamp::Parameter::s32(items ? int32_t(items->objects.size()) : 0));
+        if (items)
+            for (size_t j = 0; j < items->objects.size(); ++j) {
+                int n = int(j + 1);
+                obj.set(aamp::hash(str3("ItemSort", n, 3)), aamp::Parameter::s32(int32_t(j)));
+                for (const char* key : kShopKeys)
+                    if (const auto* p = items->objects[j].second.find(key)) obj.set(aamp::hash(str3(key, n, 3)), *p);
+            }
+        pio.root.objects.emplace_back(th, std::move(obj));
+    }
+    return pio;
+}
+
+void mergeShops(Context& c) {
+    auto diffs = fileTableLogs(c, "shop.aamp", "Filenames", [](aamp::ParameterList& dst, const aamp::ParameterList& src) { mergeLists(dst, src); });
+    for (const auto& [path, diff] : diffs) {
+        auto parts = splitNested(path);
+        if (!c.gameFileOpt(parts[0])) continue;  // BCML: only files the game has
+        auto* data = c.edit(parts);
+        if (!data) continue;
+        try {
+            auto pio = aamp::parse(*data);
+            auto shop = shopData(pio);
+            if (const auto* rem = diff.list(aamp::hash("Removals")))
+                for (const auto& [tk, tl] : rem->lists)
+                    if (auto* mine = shop.list(tk)) {
+                        for (const auto& [ik, io] : tl.objects) removeObject(*mine, ik);
+                        if (mine->objects.empty() && mine->lists.empty()) removeList(shop, tk);
+                    }
+            if (const auto* add = diff.list(aamp::hash("Additions"))) mergeLists(shop, *add);
+            *data = aamp::write(writeShop(shop, pio));
+        } catch (const std::exception& e) {
+            c.result.notes.push_back("couldn't merge " + path + ": " + e.what());
+        }
+    }
+}
+
+// ---------------------------------------------------------------- animation (AS) lists
+
+struct CFDefine {
+    std::string name;
+    std::vector<std::string> excepts;
+    std::vector<std::pair<std::string, std::vector<std::pair<uint32_t, aamp::Parameter>>>> posts;  // name -> params
+
+    explicit CFDefine(const aamp::ParameterList& l) {
+        if (const auto* pre = l.object(aamp::hash("CFPre")))
+            if (const auto* n = pre->find("Name")) name = n->data;
+        if (const auto* ex = l.object(aamp::hash("CFExcepts")))
+            for (const auto& [k, p] : ex->params) excepts.push_back(p.data);
+        if (const auto* ps = l.list(aamp::hash("CFPosts")))
+            for (const auto& [k, o] : ps->objects) {
+                const auto* n = o.find("Name");
+                if (!n) continue;
+                std::vector<std::pair<uint32_t, aamp::Parameter>> params;
+                for (const char* key : {"Frame", "StartFrameRate"})
+                    if (const auto* p = o.find(key)) params.emplace_back(aamp::hash(key), *p);
+                posts.emplace_back(n->data, std::move(params));
+            }
+    }
+    void updateFrom(const CFDefine& o) {
+        for (const auto& e : o.excepts)
+            if (std::find(excepts.begin(), excepts.end(), e) == excepts.end()) excepts.push_back(e);
+        for (const auto& [pn, pp] : o.posts) {
+            auto it = std::find_if(posts.begin(), posts.end(), [&](const auto& x) { return x.first == pn; });
+            if (it == posts.end()) {
+                posts.emplace_back(pn, pp);
+                continue;
+            }
+            for (const auto& [k, v] : pp) {
+                auto pit = std::find_if(it->second.begin(), it->second.end(), [&](const auto& x) { return x.first == k; });
+                if (pit == it->second.end()) it->second.emplace_back(k, v);
+                else pit->second = v;
+            }
+        }
+    }
+    aamp::ParameterList toList() const {
+        aamp::ParameterList l;
+        l.objectOrAdd(aamp::hash("CFPre")).set(aamp::hash("Name"), aamp::Parameter::string(aamp::Type::String32, name));
+        if (!excepts.empty()) {
+            auto& ex = l.objectOrAdd(aamp::hash("CFExcepts"));
+            for (size_t i = 0; i < excepts.size(); ++i)
+                ex.set(aamp::hash("Name_" + std::to_string(i)), aamp::Parameter::string(aamp::Type::String32, excepts[i]));
+        }
+        if (!posts.empty()) {
+            auto& ps = l.listOrAdd(aamp::hash("CFPosts"));
+            for (size_t i = 0; i < posts.size(); ++i) {
+                auto& o = ps.objectOrAdd(aamp::hash("CFPost_" + std::to_string(i)));
+                o.set(aamp::hash("Name"), aamp::Parameter::string(aamp::Type::String32, posts[i].first));
+                for (const auto& [k, v] : posts[i].second) o.set(k, v);
+            }
+        }
+        return l;
+    }
+};
+
+// BCML's AS list merge_plists, with its special lists.
+void mergeAsList(aamp::ParameterList& dst, const aamp::ParameterList& src) {
+    const uint32_t addReses = 2777926231u, asDefines = 3752287078u, cfDefines = 3305786543u;
+    for (const auto& [key, sub] : src.lists) {
+        auto& mine = dst.listOrAdd(key);
+        if (key == addReses) {
+            std::vector<std::string> anims;
+            for (const aamp::ParameterList* l : {static_cast<const aamp::ParameterList*>(&mine), &sub})
+                for (const auto& [k, o] : l->objects)
+                    if (const auto* a = o.find("Anim"))
+                        if (std::find(anims.begin(), anims.end(), a->data) == anims.end()) anims.push_back(a->data);
+            for (size_t i = 0; i < anims.size(); ++i)
+                mine.objectOrAdd(aamp::hash("AddRes_" + std::to_string(i))).set(aamp::hash("Anim"), aamp::Parameter::string(aamp::Type::String64, anims[i]));
+        } else if (key == asDefines) {
+            std::map<std::string, size_t> listing;
+            for (size_t i = 0; i < mine.objects.size(); ++i)
+                if (const auto* n = mine.objects[i].second.find("Name")) listing[n->data] = i;
+            std::vector<std::pair<std::string, std::string>> defs;
+            for (const auto& [k, o] : sub.objects) {
+                const auto* n = o.find("Name");
+                const auto* f = o.find("Filename");
+                if (!n || !f) continue;
+                auto it = std::find_if(defs.begin(), defs.end(), [&](const auto& d) { return d.first == n->data; });
+                if (it == defs.end()) defs.emplace_back(n->data, f->data);
+                else it->second = f->data;
+            }
+            size_t next = listing.size();
+            for (const auto& [name, file] : defs) {
+                std::string objKey;
+                if (listing.count(name)) {
+                    objKey = "ASDefine_" + std::to_string(listing[name]);
+                } else {
+                    objKey = "ASDefine_" + std::to_string(next++);
+                    mine.objectOrAdd(aamp::hash(objKey)).set(aamp::hash("Name"), aamp::Parameter::string(aamp::Type::String64, name));
+                }
+                mine.objectOrAdd(aamp::hash(objKey)).set(aamp::hash("Filename"), aamp::Parameter::string(aamp::Type::String64, file));
+            }
+        } else if (key == cfDefines) {
+            std::map<std::string, size_t> listing;
+            for (size_t i = 0; i < mine.lists.size(); ++i) listing[CFDefine(mine.lists[i].second).name] = i;
+            size_t next = listing.size();
+            for (const auto& [k, l] : sub.lists) {
+                CFDefine def(l);
+                if (listing.count(def.name)) {
+                    auto defKey = aamp::hash("CFDefine_" + std::to_string(listing[def.name]));
+                    auto* existing = mine.list(defKey);
+                    if (!existing) continue;
+                    CFDefine merged(*existing);
+                    merged.updateFrom(def);
+                    *existing = merged.toList();
+                } else {
+                    mine.lists.emplace_back(aamp::hash("CFDefine_" + std::to_string(next++)), def.toList());
+                }
+            }
+        } else {
+            mergeAsList(mine, sub);
+        }
+    }
+    for (const auto& [key, obj] : src.objects) {
+        auto& mine = dst.objectOrAdd(key);
+        for (const auto& [pk, p] : obj.params) mine.set(pk, p);
+    }
+}
+
+void mergeAsLists(Context& c) {
+    auto diffs = fileTableLogs(c, "aslist.aamp", "FileTable", [](aamp::ParameterList& dst, const aamp::ParameterList& src) { mergeAsList(dst, src); });
+    for (const auto& [path, diff] : diffs) {
+        auto parts = splitNested(path);
+        auto* data = c.edit(parts);
+        if (!data) continue;
+        try {
+            auto pio = aamp::parse(*data);
+            mergeAsList(pio.root, diff);
+            *data = aamp::write(pio);
+        } catch (const std::exception& e) {
+            c.result.notes.push_back("couldn't merge " + path + ": " + e.what());
+        }
+    }
+}
+
 // ---------------------------------------------------------------- size table
 
 const std::set<std::string>& sizeExcludedExts() {
@@ -512,7 +882,8 @@ std::vector<std::string> splitNested(const std::string& path) {
 
 namespace {
 const std::set<std::string>& mergedLogs() {
-    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
+    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp",
+                                                 "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
     return merged;
 }
 }  // namespace
@@ -590,6 +961,20 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages) {
                 }
             }
             if (has("gamedata.yml") || has("savedata.yml") || has("eventinfo.yml")) out.insert(kBootup);
+            try {
+                if (has("drops.json"))
+                    for (const auto& [path, t] : nlohmann::json::parse(readFile(d / "drops.json")).items())
+                        out.insert(splitNested(slashes(path))[0]);
+                for (const char* log : {"shop.aamp", "aslist.aamp", "deepmerge.aamp"}) {
+                    if (!has(log)) continue;
+                    auto pio = aamp::parse(readFile(d / log));
+                    for (const char* table : {"Filenames", "FileTable"})
+                        if (const auto* files = pio.root.object(aamp::hash(table)))
+                            for (const auto& [k, p] : files->params)
+                                if (p.isString() && !p.data.empty()) out.insert(splitNested(slashes(p.data))[0]);
+                }
+            } catch (const std::exception&) {
+            }
             if (has("actorinfo.yml")) out.insert(kActorInfo);
         }
     return out;
@@ -600,6 +985,9 @@ Result merge(const std::vector<Package>& lowestFirst, GameFiles& game) {
     Context c{lowestFirst, game, result, {}, {}, {}};
     mergePacks(c);
     deepMerge(c);
+    mergeDrops(c);
+    mergeShops(c);
+    mergeAsLists(c);
     mergeActorInfo(c);
     mergeGameData(c);
     mergeSaveData(c);

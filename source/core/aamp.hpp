@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,8 +41,10 @@ struct Parameter {
     uint32_t asU32() const;
 };
 
+// Objects and parameters are deques: a reference to one stays valid while more are added.
+// (Lists can't be: a list holds lists. Don't keep a list reference across listOrAdd.)
 struct ParameterObject {
-    std::vector<std::pair<uint32_t, Parameter>> params;
+    std::deque<std::pair<uint32_t, Parameter>> params;
     const Parameter* find(uint32_t key) const;
     const Parameter* find(const std::string& name) const { return find(hash(name)); }
     void set(uint32_t key, Parameter p);  // replace in place, or append
@@ -50,7 +53,7 @@ struct ParameterObject {
 
 struct ParameterList {
     std::vector<std::pair<uint32_t, ParameterList>> lists;
-    std::vector<std::pair<uint32_t, ParameterObject>> objects;
+    std::deque<std::pair<uint32_t, ParameterObject>> objects;
     const ParameterList* list(uint32_t key) const;
     ParameterList* list(uint32_t key);
     const ParameterObject* object(uint32_t key) const;
