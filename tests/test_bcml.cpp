@@ -451,3 +451,65 @@ TEST("bcml: text changes go into the game's language, controls encoded") {
     CHECK_EQ(talk.attrSize, 0u);
     CHECK_EQ(r.sizes.at("Message/Msg_EUen.product.sarc"), 0u);  // dropped from the size table
 }
+
+TEST("bcml: map units merge by HashId, with and without the DLC") {
+    auto obj = [](uint32_t id, const std::string& name) {
+        Node o = Node::makeDict();
+        o.dict["HashId"] = Node::uinteger(id);
+        o.dict["UnitConfigName"] = Node::str(name);
+        return o;
+    };
+    auto unitOf = [](std::vector<Node> objs) {
+        Node root = Node::makeDict();
+        root.dict["Objs"] = arrayOf(std::move(objs));
+        root.dict["Rails"] = Node::makeArray();
+        return yaz0Compress(bymlOf(root));
+    };
+    auto mapYml = R"(A-1_Static:
+  Objs:
+    add:
+    - {HashId: !u 0x5, UnitConfigName: Anvil}
+    mod:
+      '2': {HashId: !u 0x2, UnitConfigName: TreeChanged}
+    del: [!u 0x3]
+  Rails: {add: [], mod: {}, del: []}
+A-1_Dynamic:
+  Objs:
+    add:
+    - {HashId: !u 0x9, UnitConfigName: Horse}
+    mod: {}
+    del: []
+)";
+    for (bool dlc : {false, true}) {
+        t::TempDir d;
+        auto game = d.path / "game";
+        std::string staticUnit = unitOf({obj(1, "Rock"), obj(2, "Tree"), obj(3, "Bush")});
+        put(game / "01007EF00011E000/romfs/Pack/TitleBG.pack",
+            sarcOf({{"Map/MainField/A-1/A-1_Static.smubin", staticUnit}, {"Actor/Pack/Other.sbactorpack", "other"}}));
+        put(game / "01007EF00011E000/romfs/Map/MainField/A-1/A-1_Dynamic.smubin", unitOf({obj(7, "Enemy")}));
+        if (dlc) {
+            put(game / "01007EF00011F001/romfs/Pack/AocMainField.pack",
+                sarcOf({{"Map/MainField/A-1/A-1_Static.smubin", unitOf({obj(1, "Rock"), obj(2, "Tree"), obj(3, "Bush"), obj(4, "DlcThing")})}}));
+            put(game / "01007EF00011F001/romfs/Map/MainField/A-1/A-1_Dynamic.smubin", unitOf({obj(7, "Enemy"), obj(8, "DlcEnemy")}));
+        }
+        auto p = d.path / "p";
+        put(p / "logs/map.yml", mapYml);
+        bcml::FolderGameFiles files(game);
+        auto r = bcml::merge({{"p", p, {p / "logs"}}}, files);
+        std::string root = dlc ? "01007EF00011F001/romfs/" : "01007EF00011E000/romfs/";
+        auto st = byml::parse(r.files.at(root + "Map/MainField/A-1/A-1_Static.smubin")).root.dict.at("Objs").array;
+        std::vector<std::string> names;
+        for (const auto& o : st) names.push_back(o.dict.at("UnitConfigName").s);
+        std::vector<std::string> want = dlc ? std::vector<std::string>{"Rock", "TreeChanged", "DlcThing", "Anvil"}
+                                            : std::vector<std::string>{"Rock", "TreeChanged", "Anvil"};
+        CHECK(names == want);  // sorted by HashId, Bush deleted
+        auto dyn = byml::parse(r.files.at(root + "Map/MainField/A-1/A-1_Dynamic.smubin")).root.dict.at("Objs").array;
+        CHECK_EQ(dyn.size(), dlc ? 3u : 2u);
+        // TitleBG.pack keeps everything but the static unit, so the loose one is read.
+        auto title = Sarc::parse(r.files.at("01007EF00011E000/romfs/Pack/TitleBG.pack"));
+        CHECK(!title.find("Map/MainField/A-1/A-1_Static.smubin"));
+        CHECK(title.find("Actor/Pack/Other.sbactorpack"));
+        CHECK_EQ(r.files.count("01007EF00011F001/romfs/Pack/AocMainField.pack"), dlc ? 1u : 0u);
+        CHECK(r.sizes.count(dlc ? "Aoc/0010/Map/MainField/A-1/A-1_Static.mubin" : "Map/MainField/A-1/A-1_Static.mubin"));
+    }
+}

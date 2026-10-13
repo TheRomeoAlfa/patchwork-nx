@@ -120,6 +120,17 @@ struct Context {
         return &target->data;
     }
 
+    // Remove a file inside archives (no-op if it isn't there).
+    void removeInner(const std::vector<std::string>& path) {
+        auto* data = edit(path);  // opens the archives and marks them changed
+        if (!data) return;
+        auto& top = packs[path[0]];
+        Pack* pack = top.get();
+        for (size_t i = 1; i + 1 < path.size(); ++i) pack = pack->nested[path[i]].get();
+        auto& files = pack->sarc.files;
+        files.erase(std::remove_if(files.begin(), files.end(), [&](const SarcFile& f) { return f.name == path.back(); }), files.end());
+    }
+
     // Write edited archives back into their parents and into the result.
     std::string close(Pack& p) {
         for (auto& [name, child] : p.nested) {
@@ -885,6 +896,119 @@ void mergeTexts(Context& c) {
     *msgs = yaz0Compress(sarc.write());
 }
 
+// ---------------------------------------------------------------- maps
+
+uint32_t hashIdOf(const Node& obj) {
+    const auto* h = obj.find("HashId");
+    if (!h) return 0;
+    if (h->type == T::UInt || h->type == T::UInt64) return uint32_t(h->u);
+    if (h->type == T::Int || h->type == T::Int64) return uint32_t(h->i);
+    return 0;
+}
+
+struct MapChanges {
+    std::vector<Node> add;              // highest priority first wins per HashId
+    std::map<uint32_t, Node> mod;       // later packages replace
+    std::set<uint32_t> del;
+};
+
+// BCML's merge_entries (maps.rs).
+void mergeMapEntries(Node& entries, const MapChanges& ch) {
+    if (entries.type != T::Array) return;
+    std::vector<uint32_t> stock;
+    for (const auto& e : entries.array) stock.push_back(hashIdOf(e));
+    std::set<uint32_t> stockSet(stock.begin(), stock.end());
+    std::vector<Node> orphans;
+    for (const auto& [h, obj] : ch.mod) {
+        auto it = std::find(stock.begin(), stock.end(), h);
+        if (it != stock.end()) entries.array[size_t(it - stock.begin())] = obj;
+        else orphans.push_back(obj);
+    }
+    for (size_t i = entries.array.size(); i-- > 0;)
+        if (ch.del.count(stock[i])) entries.array.erase(entries.array.begin() + long(i));
+    for (const std::vector<Node>* list : {&ch.add, static_cast<const std::vector<Node>*>(&orphans)})
+        for (const auto& o : *list)
+            if (!stockSet.count(hashIdOf(o))) entries.array.push_back(o);
+    std::stable_sort(entries.array.begin(), entries.array.end(), [](const Node& a, const Node& b) { return hashIdOf(a) < hashIdOf(b); });
+}
+
+void mergeMaps(Context& c) {
+    // Per unit ("A-1_Static"), per section (Objs, Rails).
+    std::map<std::string, std::map<std::string, MapChanges>> units;
+    std::map<std::string, std::map<std::string, std::set<uint32_t>>> addSeen;
+    std::error_code ec;
+    std::vector<std::vector<Node>> perPackage;
+    for (const auto& p : c.packages) {
+        std::vector<Node> logs;
+        for (const auto& d : p.logDirs)
+            if (fs::exists(d / "map.yml", ec)) logs.push_back(toByml(yaml::parse(readFile(d / "map.yml"))));
+        if (!logs.empty()) perPackage.push_back(std::move(logs));
+    }
+    if (perPackage.empty()) return;
+    auto sectionsOf = [](const Node& unit) {
+        std::vector<std::pair<std::string, const Node*>> out;
+        if (unit.find("Objs") || unit.find("Rails")) {
+            for (const char* s : {"Objs", "Rails"})
+                if (const auto* n = unit.find(s)) out.emplace_back(s, n);
+        } else {
+            out.emplace_back("Objs", &unit);  // an older log without sections
+        }
+        return out;
+    };
+    // Additions: highest priority first; changes and deletions: lowest first (later replace / add up).
+    for (auto it = perPackage.rbegin(); it != perPackage.rend(); ++it)
+        for (const auto& log : *it)
+            for (const auto& [unit, data] : log.dict)
+                for (const auto& [section, node] : sectionsOf(data))
+                    if (const auto* a = node->find("add"))
+                        for (const auto& o : a->array)
+                            if (addSeen[unit][section].insert(hashIdOf(o)).second) units[unit][section].add.push_back(o);
+    for (const auto& logs : perPackage)
+        for (const auto& log : logs)
+            for (const auto& [unit, data] : log.dict)
+                for (const auto& [section, node] : sectionsOf(data)) {
+                    auto& ch = units[unit][section];
+                    if (const auto* m = node->find("mod"))
+                        for (const auto& [k, o] : m->dict) {
+                            try {
+                                ch.mod[uint32_t(std::stoull(k))] = o;
+                            } catch (...) {
+                            }
+                        }
+                    if (const auto* d = node->find("del"))
+                        for (const auto& h : d->array) ch.del.insert(h.type == T::UInt ? uint32_t(h.u) : uint32_t(h.i));
+                }
+
+    const std::string aocPack = std::string(kDlc) + "Pack/AocMainField.pack";
+    const std::string titleBg = std::string(kContent) + "Pack/TitleBG.pack";
+    bool dlc = c.gameFileOpt(aocPack).has_value();
+    for (const auto& [unit, sections] : units) {
+        auto sep = unit.rfind('_');
+        if (sep == std::string::npos) continue;
+        std::string area = unit.substr(0, sep), type = unit.substr(sep + 1);
+        std::string rel = "Map/MainField/" + area + "/" + unit + ".smubin";
+        std::optional<std::string> base;
+        if (type == "Static") {
+            base = dlc ? c.gameNested({aocPack, rel}) : c.gameNested({titleBg, rel});
+            if (!base) base = c.gameNested({titleBg, rel});
+        } else {
+            base = c.gameFileOpt((dlc ? kDlc : kContent) + rel);
+            if (!base) base = c.gameFileOpt(kContent + rel);
+        }
+        if (!base) {
+            c.result.notes.push_back("no map " + unit + " in the game; its changes were skipped");
+            continue;
+        }
+        auto doc = byml::parse(*base);
+        for (const auto& [section, ch] : sections)
+            if (auto it = doc.root.dict.find(section); it != doc.root.dict.end()) mergeMapEntries(it->second, ch);
+        c.result.files[(dlc ? kDlc : kContent) + rel] = yaz0Compress(byml::write(doc));
+        // The game prefers the copy in TitleBG.pack: take it out so the merged one is used.
+        if (type == "Static") c.removeInner({titleBg, rel});
+    }
+    if (dlc) c.result.files[aocPack] = "";  // empty: the game then reads the loose DLC maps
+}
+
 // ---------------------------------------------------------------- size table
 
 const std::set<std::string>& sizeExcludedExts() {
@@ -960,7 +1084,7 @@ std::vector<std::string> splitNested(const std::string& path) {
 
 namespace {
 const std::set<std::string>& mergedLogs() {
-    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp", "texts.json",
+    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp", "texts.json", "map.yml",
                                                  "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
     return merged;
 }
@@ -1055,6 +1179,20 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
             }
             if (has("actorinfo.yml")) out.insert(kActorInfo);
             if (has("texts.json")) out.insert(std::string(kContent) + "Pack/Bootup_" + options.language + ".pack");
+            if (has("map.yml")) {
+                out.insert(std::string(kDlc) + "Pack/AocMainField.pack");
+                out.insert(std::string(kContent) + "Pack/TitleBG.pack");
+                try {
+                    for (const auto& [unit, data] : yaml::parse(readFile(d / "map.yml")).map) {
+                        auto sep = unit.rfind('_');
+                        if (sep == std::string::npos || unit.substr(sep + 1) != "Dynamic") continue;
+                        auto rel = "Map/MainField/" + unit.substr(0, sep) + "/" + unit + ".smubin";
+                        out.insert(kContent + rel);
+                        out.insert(kDlc + rel);
+                    }
+                } catch (const std::exception&) {
+                }
+            }
         }
     return out;
 }
@@ -1069,6 +1207,7 @@ Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Opt
     mergeAsLists(c);
     mergeTexts(c);
     mergeActorInfo(c);
+    mergeMaps(c);
     mergeGameData(c);
     mergeSaveData(c);
     mergeEventInfo(c);

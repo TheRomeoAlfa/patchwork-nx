@@ -96,7 +96,7 @@ TEST("bnp: which BCML packages can be installed") {
     CHECK(!checkBnp({"logs/packs.json", "logs/packs.log"}).installable());  // BCML 2 format
     CHECK(!bnpInstallable({"packs.json", "!wiiu"}));
     CHECK(!checkBnp({"content/Model/A.sbfres", "logs/rstb.json"}).forSwitch);
-    CHECK(!checkBnp({"01007EF00011E000/romfs/A", "options/Extra/01007EF00011E000/romfs/B", "options/Extra/logs/map.yml"}).installable());
+    CHECK(!checkBnp({"01007EF00011E000/romfs/A", "options/Extra/01007EF00011E000/romfs/B", "options/Extra/logs/mainstatic.yml"}).installable());
     CHECK(checkBnp({"01007EF00011E000/romfs/A", "options/Extra/logs/rstb.log"}).installable());
 }
 
