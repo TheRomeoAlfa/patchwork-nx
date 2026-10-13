@@ -37,6 +37,10 @@ std::string userAgent();
 // Certificate bundle shipped with the app ("" = system store).
 std::string caBundle();
 
+// Read one of BOTW's DLC files (path inside the DLC's romfs). `notInGame` is set when the DLC
+// isn't installed or has no such file. On desktop: from $MM_GAME_ROMFS_BOTW_DLC.
+bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame = nullptr);
+
 // A data file shipped with the app (romfs on Switch, ./resources on desktop).
 mm::fs::path resourcePath(const std::string& name);
 

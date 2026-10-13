@@ -364,6 +364,51 @@ void SaveData::commit() {
 #endif
 }
 
+bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame) {
+    if (notInGame) *notInGame = false;
+#ifdef __SWITCH__
+    constexpr u64 kBotwDlc = 0x01007EF00011F001ull;
+    FsStorage storage;
+    Result rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_SdCard);
+    if (R_FAILED(rc)) rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_BuiltInUser);
+    if (R_FAILED(rc)) {
+        // Not installed (or not readable this way): treat as no DLC.
+        if (notInGame) *notInGame = true;
+        why = "The Breath of the Wild DLC isn't installed (error " + resultCode(rc) + ").";
+        return false;
+    }
+    rc = romfsMountFromStorage(storage, 0, "dlcfs");
+    if (R_FAILED(rc)) {
+        fsStorageClose(&storage);
+        why = "Couldn't open the DLC's files (error " + resultCode(rc) + ").";
+        return false;
+    }
+    try {
+        std::error_code ec;
+        if (!mm::fs::exists("dlcfs:/" + romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The DLC has no " + romfsPath + ".";
+        } else {
+            out = readWithProgress("dlcfs:/" + romfsPath, {});
+        }
+    } catch (const std::exception& e) {
+        why = std::string("Couldn't read the file: ") + e.what();
+    }
+    romfsUnmount("dlcfs");
+    return why.empty();
+#else
+    const char* env = std::getenv("MM_GAME_ROMFS_BOTW_DLC");
+    std::error_code ec;
+    if (!env || !mm::fs::exists(mm::fs::path(env) / romfsPath, ec)) {
+        if (notInGame) *notInGame = true;
+        why = "No DLC file " + romfsPath + ".";
+        return false;
+    }
+    out = readWithProgress(mm::fs::path(env) / romfsPath, {});
+    return true;
+#endif
+}
+
 mm::fs::path resourcePath(const std::string& name) {
 #ifdef __SWITCH__
     return mm::fs::path("romfs:/") / name;

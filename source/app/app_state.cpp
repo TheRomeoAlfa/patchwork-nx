@@ -135,11 +135,13 @@ void AppState::init() {
         auto absent = cached;
         absent += ".absent";
         if (mm::fs::exists(absent, ec)) return GF{GF::State::Absent, {}};
-        if (path.rfind(mm::bcml::kContent, 0) != 0) return GF{};  // DLC files: not readable yet
-        auto rel = path.substr(std::string(mm::bcml::kContent).size());
+        bool dlc = path.rfind(mm::bcml::kDlc, 0) == 0;
+        if (!dlc && path.rfind(mm::bcml::kContent, 0) != 0) return GF{};
+        auto rel = path.substr(std::string(dlc ? mm::bcml::kDlc : mm::bcml::kContent).size());
         std::string data, why;
         bool notInGame = false;
-        if (!platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame)) {
+        bool ok = dlc ? platform::readDlcFile(rel, data, why, &notInGame) : platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame);
+        if (!ok) {
             if (notInGame) {
                 try {
                     mm::writeFileAtomic(absent, "");
@@ -150,7 +152,7 @@ void AppState::init() {
             return GF{};
         }
         // Opened without L, Atmosphère hands over the SD card's (modded) copy: not the game's.
-        auto onCard = platform::sdRoot() / "atmosphere/contents/01007EF00011E000/romfs" / mm::fs::path(rel);
+        auto onCard = platform::sdRoot() / "atmosphere/contents" / mm::fs::path(dlc ? "01007EF00011F001/romfs" : "01007EF00011E000/romfs") / mm::fs::path(rel);
         if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return GF{};
         try {
             mm::writeFileAtomic(cached, data);
