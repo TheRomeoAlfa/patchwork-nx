@@ -879,7 +879,7 @@ void InstallFlow::showSaveOptions(const ModDetails& d, const ModFile& file, std:
     list->addView(slotCell);
     if (save.masterMode()) {
         auto* l = ui::label("This is a Master Mode save, so it goes into a Master Mode slot.", 14, ui::muted(), false);
-        l->setMargins(2, 4, 4, 4);
+        l->setMargins(10, 4, 4, 4);
         list->addView(l);
     }
 
@@ -893,7 +893,7 @@ void InstallFlow::showSaveOptions(const ModDetails& d, const ModFile& file, std:
                                 : "Off: your own photos stay. On: the save's album and compendium pictures replace yours, for every "
                                   "slot; without them, this save's compendium may show blank pictures.",
                             14, ui::muted(), false);
-        l->setMargins(2, 4, 4, 4);
+        l->setMargins(10, 4, 4, 4);
         list->addView(l);
     }
 

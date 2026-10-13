@@ -49,7 +49,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     auto* nsfwNote = ui::label("Uses GameBanana's own content ratings: mods with nudity or sexual themes are hidden from Browse, "
                                "Search and links. Turns back on every time Patchwork starts.",
                                14, ui::muted(), false);
-    nsfwNote->setMargins(6, 4, 0, 4);
+    nsfwNote->setMargins(10, 4, 0, 4);
     content->addView(nsfwNote);
     nsfwViews_.push_back(nsfwNote);
     if (!AppState::get().settings().nsfwSettingRevealed) {
@@ -67,7 +67,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     auto modules = mm::listSysmodules(platform::sdRoot());
     if (modules.empty()) {
         auto* none = ui::label("No add-ons (sysmodules) found in atmosphere/contents.", 14, ui::muted(), false);
-        none->setMargins(6, 4, 0, 4);
+        none->setMargins(10, 4, 0, 4);
         content->addView(none);
     }
     for (const auto& m : modules) {
@@ -86,7 +86,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         content->addView(cell);
         if (!m.about.empty() || m.needed) {
             auto* about = ui::label(m.about + (m.needed ? " · Needed to start some games" : ""), 14, ui::muted(), false);
-            about->setMargins(2, 4, 4, 4);
+            about->setMargins(10, 4, 4, 4);
             content->addView(about);
         }
     }
@@ -97,7 +97,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         "version. Turn them off, restart and try the game. If it works, turn them back on one at a time "
         "(restarting each time) to find the one causing it.",
         14, ui::muted(), false);
-    addonsNote->setMargins(8, 4, 0, 4);
+    addonsNote->setMargins(10, 4, 0, 4);
     content->addView(addonsNote);
 
     section("Save backups · " + std::string(mm::gameInfo(AppState::get().game()).displayName));
@@ -147,10 +147,26 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     sizes->setText("BOTW size table");
     sizes->setDetailText(AppState::get().sizeTableStatus());
     content->addView(sizes);
+    auto* sizesBar = new ui::ProgressBar(300);
+    sizesBar->setMargins(10, 4, 0, 4);
+    content->addView(sizesBar);
+    auto showSizes = [sizes, sizesBar] {
+        float p = AppState::get().sizeTableProgress();
+        sizes->setDetailText(AppState::get().sizeTableStatus());
+        sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+        if (p >= 0) sizesBar->setProgress(p);
+        return p >= 0;
+    };
+    if (showSizes()) {
+        sizeTimer_.setCallback([this, showSizes] {
+            if (!showSizes()) sizeTimer_.stop();
+        });
+        sizeTimer_.start(150);
+    }
     auto* sizesNote = ui::label("Needed to install BCML packages (.bnp): Patchwork reads it from Breath of the Wild when it's "
                                 "opened by holding R while starting the game.",
                                 14, ui::muted(), false);
-    sizesNote->setMargins(2, 4, 4, 4);
+    sizesNote->setMargins(10, 4, 4, 4);
     content->addView(sizesNote);
 
     auto* where = new brls::DetailCell();
@@ -177,7 +193,7 @@ void SettingsPage::fillBackups() {
     auto list = mm::listSaveBackups(AppState::get().saveBackupsDir(), AppState::get().game());
     if (list.empty()) {
         auto* none = ui::label("No backups yet.", 14, ui::muted(), false);
-        none->setMargins(6, 4, 0, 4);
+        none->setMargins(10, 4, 0, 4);
         backups_->addView(none);
         return;
     }
@@ -210,7 +226,7 @@ void SettingsPage::fillBackups() {
         backups_->addView(cell);
         if (!b.reason.empty()) {
             auto* l = ui::label(b.reason, 14, ui::muted(), false);
-            l->setMargins(2, 4, 4, 4);
+            l->setMargins(10, 4, 4, 4);
             backups_->addView(l);
         }
     }
