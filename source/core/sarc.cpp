@@ -60,24 +60,11 @@ std::string extensionOf(const std::string& name) {
     return dot == std::string::npos ? "" : name.substr(dot);
 }
 
-// Extensions of files that are SARC archives (BCML's SARC_EXTS, minus .sbeventpack which
-// it doesn't merge).
-bool isArchiveName(const std::string& name) {
-    static const char* exts[] = {".sarc", ".pack", ".bactorpack", ".sbactorpack", ".bmodelsh", ".sbmodelsh", ".beventpack",
-                                 ".stera", ".sbtera", ".stats", ".sstats", ".blarc", ".sblarc", ".bfarc", ".sbfarc",
-                                 ".bgenv", ".sbgenv", ".genvb", ".sgenvb", ".bfarc", ".sbreviewtex", ".breviewtex",
-                                 ".sbstftex", ".bstftex", ".sbstats", ".bstats", ".ssarc"};
-    auto ext = extensionOf(name);
-    for (const char* e : exts)
-        if (ext == e) return true;
-    return false;
-}
-
 // BCML leaves these alone (merged by other means, or not safely merged per file).
 bool isSpecial(const std::string& name) {
     static const char* names[] = {"gamedata", "savedataformat", "tera_resource.Nin_NX_NVN", "Dungeon", "Bootup_", "AocMainField"};
     for (const char* n : names)
-        if (name == n) return true;
+        if (name.find(n) != std::string::npos) return true;
     return false;
 }
 
@@ -196,41 +183,64 @@ std::string Sarc::write() const {
     return out;
 }
 
-std::string mergeSarcs(const std::vector<std::string>& archives, bool compress) {
+std::string mergeSarcs(const std::vector<std::string>& archives, bool compress, bool firstIsGame) {
     std::vector<Sarc> opened;
-    for (const auto& a : archives) {
+    std::vector<bool> isGame;
+    for (size_t i = 0; i < archives.size(); ++i) {
         try {
-            opened.push_back(Sarc::parse(a));
+            opened.push_back(Sarc::parse(archives[i]));
+            isGame.push_back(firstIsGame && i == 0);
         } catch (const std::exception&) {
             // like BCML: an archive that can't be read is skipped
         }
     }
     if (opened.empty()) throw std::runtime_error("no readable archive to merge");
+    std::map<std::string, const SarcFile*> game;  // the game's files by name
+    if (isGame[0])
+        for (const auto& f : opened[0].files) game.emplace(f.name, &f);
 
-    // Keep the game's order of files; new files go at the end.
+    // The game's order of files, then new ones in the order mods add them.
     std::vector<std::string> order;
-    std::map<std::string, std::string> result;
-    std::map<std::string, std::vector<std::string>> nested;  // name -> versions, lowest first
+    std::map<std::string, std::vector<const std::string*>> versions;  // lowest priority first
     for (const auto& s : opened)
         for (const auto& f : s.files) {
-            if (!result.count(f.name) && !nested.count(f.name)) order.push_back(f.name);
-            if (isArchiveName(f.name) && !isSpecial(f.name) && isSarc(f.data))
-                nested[f.name].push_back(f.data);
-            else
-                result[f.name] = f.data;  // later (higher priority) wins
+            auto& v = versions[f.name];
+            if (v.empty()) order.push_back(f.name);
+            v.push_back(&f.data);
         }
-    for (auto& [name, versions] : nested) {
-        if (versions.size() == 1) {
-            result[name] = versions[0];  // nothing to merge: keep it as it was
-            continue;
-        }
-        auto merged = mergeSarcs(versions, compress);
-        bool yaz = extensionOf(name).rfind(".s", 0) == 0 && extensionOf(name) != ".sarc";
-        result[name] = yaz ? (compress ? yaz0Compress(merged) : yaz0Store(merged)) : merged;
-    }
+    auto unpacked = [](const std::string& d) { return isYaz0(d) ? yaz0Decompress(d) : d; };
+
     Sarc out;
     out.littleEndian = true;
-    for (const auto& name : order) out.files.push_back({name, result[name]});
+    for (const auto& name : order) {
+        const auto& vs = versions[name];
+        auto g = game.find(name);
+        const SarcFile* original = g == game.end() ? nullptr : g->second;
+        std::string originalPlain = original ? unpacked(original->data) : std::string();
+        // The highest-priority copy that differs from the game's (BCML's "is modded").
+        const std::string* chosen = nullptr;
+        for (auto it = vs.rbegin(); it != vs.rend() && !chosen; ++it) {
+            if (!original) {
+                chosen = *it;
+            } else if (*it != &original->data && **it != original->data && unpacked(**it) != originalPlain) {
+                chosen = *it;
+            }
+        }
+        bool modded = chosen != nullptr;
+        if (!chosen) chosen = vs.front();
+        auto ext = extensionOf(name);
+        if (modded && vs.size() > 1 && isSarc(*chosen) && ext != ".sbeventpack" && !isSpecial(name)) {
+            std::vector<std::string> nested;
+            for (const auto* v : vs)
+                if (isSarc(*v)) nested.push_back(*v);
+            auto merged = mergeSarcs(nested, compress, original != nullptr && isSarc(original->data));
+            // Compressed again when the game's (or the mod's) copy was.
+            bool yaz = isYaz0(original ? original->data : *chosen);
+            out.files.push_back({name, yaz ? (compress ? yaz0Compress(merged) : yaz0Store(merged)) : merged});
+        } else {
+            out.files.push_back({name, *chosen});
+        }
+    }
     return out.write();
 }
 
