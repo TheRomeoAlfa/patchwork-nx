@@ -80,9 +80,10 @@ Run these after any release build; they cover what the desktop build can't.
    "Got a mod's copy · hold L too" when a mod (e.g. the Randomizer) has its own table. If it
    says "Unreadable" or "Couldn't check", report it.
    Opening Patchwork from the Album afterwards keeps the saved copy.
-19. **BCML package that installs as-is:** in BOTW Browse, find Linkle Armor Stands (or enter
-   246556): its .bnp shows "BCML package · installs here". Install it, start the game and
-   look at an armor stand. Then turn it off: the stands are back to normal.
+19. **BCML package that installs as-is:** enter mod number 586246 (Unofficial Linkle 3.0
+   Armor Icons). Pick the **.bnp** file (not the UKMM zip): it shows "BCML package · installs
+   here". Install, start the game, open the inventory's Armor tab: the armor icons show
+   Linkle instead of Link. Turn the mod off: the icons are back to normal.
 20. **BCML package that needs merging** (e.g. FastSwim, 372295): not listed in Browse; the
    number says it needs BCML on a PC.
 21. **Size table merging with the Randomizer:** with your BOTW Randomizer files on the card,
