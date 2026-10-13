@@ -110,3 +110,20 @@ Run these after any release build; they cover what the desktop build can't.
    packages and shows timings and memory (also saved to switch/patchwork/bcml-test/report.txt).
    Then "Merged Linkle title screen" → Put in game, start BOTW normally: the title screen shows
    Linkle. Back in Patchwork, "Remove from game".
+28. **BCML package that needs merging (pack + parameters):** hold **L and R** while starting
+   BOTW, open Patchwork, enter mod number 423509 ([LINKLE] Title Screen NX) and install the
+   .bnp ("BCML package · installs here"). It says "Merging with the game's files…". Start BOTW
+   normally: the title screen shows Linkle. Turn it off: the normal title screen is back.
+29. **Game files kept:** after step 28, open Patchwork from the Album (no buttons held) and
+   install another merging package (e.g. 321704 Early Master Cycle): it installs without asking
+   for L and R if it only needs files already read; otherwise it says which files and to
+   relaunch with L and R.
+30. **Text, actor info, shops (armor mods):** install a Linkle armor package that changes
+   texts and shops (e.g. 340011 LL Upgradeable Armor Rebalance). In the game, check an armor
+   name/description and a shop that sells it. If the game crashes at load, report it with the
+   mod list.
+31. **Maps (DLC or not):** install a package with map changes (e.g. 358261 Crafting Project).
+   Check that the game loads into the overworld, and note whether you have the DLC.
+32. **Order and turning off:** with two merging packages on, move one up/down in My mods and
+   turn one off: each change re-merges (the progress screen shows it), and the game still loads.
+

@@ -548,3 +548,13 @@ TEST("bcml: main field static items by BCML's ids") {
     CHECK_EQ(start[1].dict.at("UnitConfigName").s, std::string("D"));
     CHECK_EQ(merged.dict.at("Other").array.size(), 1u);
 }
+
+#include "nlohmann/json.hpp"
+
+TEST("bcml: the Browse cache shipped with the app matches what can be merged") {
+    // If this fails, merge support changed: rebuild resources/bnp-cache.json (see the
+    // "rules" key) so mods it calls PC-only are judged by the current rules.
+    auto seed = nlohmann::json::parse(readFile(fs::path(MM_FIXTURES) / ".." / ".." / "resources" / "bnp-cache.json"));
+    CHECK_EQ(seed.value("rules", std::string()), bcml::mergeSupportKey());
+    CHECK(seed.contains("bnpLogs"));
+}

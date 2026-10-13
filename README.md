@@ -22,11 +22,14 @@ Mods belong to their authors.
 - **Save files** from GameBanana (100% saves, unlocked shrines…): pick the save, the user profile and the slot. Patchwork backs up that profile's whole save to `switch/patchwork/save-backups` first, and Settings → Save backups puts it back. A save's photo album is only copied if you turn that on.
 - **Hides NSFW mods** (uses GameBanana's own content ratings), including mods opened by link or number. The setting is kept out of sight for kids: hold **L + R + −** for 3 seconds on the Settings page to show it. It turns back on every time Patchwork starts.
 
-Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods' changes into the game's
-own files, with one exception: BOTW's resource size table, which it merges from the game's copy (read when
-Patchwork is opened by holding L and R while starting BOTW: R opens the Homebrew Menu, L turns mods off for that launch) and every enabled mod. That makes BCML packages (`.bnp`)
-that only list resource sizes installable. BCML packages that need real merging, and TKMM (`.tkcl`) packages,
-are hidden from Browse and flagged as needing those PC tools.
+Patchwork copies files into Atmosphère's LayeredFS folders. For BOTW it also does what BCML does on a PC:
+**BCML packages (`.bnp`) are merged with the game's own files on the console**: archives (packs), parameter
+files, game data and save flags, actor info, events, text, drops, shops, animation lists, map units and the
+resource size table, in load order, every time a BCML package is turned on, off or moved. The game's files
+are read once when Patchwork is opened by holding **L and R** while starting BOTW (R opens the Homebrew Menu,
+L turns mods off for that launch) and kept in `switch/patchwork/original/botw-files`. That covers 376 of the
+383 BCML packages on GameBanana; the rest (BCML 2's old format) and TKMM (`.tkcl`) packages are flagged as
+needing those PC tools.
 
 ## Install
 
