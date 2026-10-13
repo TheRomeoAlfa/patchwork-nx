@@ -74,9 +74,11 @@ Run these after any release build; they cover what the desktop build can't.
    FastSwim, 372295). The first visit to a page takes a moment longer; later visits are
    instant (switch/patchwork/pc-only-cache.json). Entering 372295 as a mod number explains
    that it needs BCML on a PC.
-18. **BOTW size table (needed for BCML packages):** open Patchwork by holding **R** while
-   starting Breath of the Wild. Settings → Storage → "BOTW size table" should say
-   "Read from game 1.6.0". If it says "Got the SD card's copy" or "Unreadable", report it.
+18. **BOTW size table (needed for BCML packages):** hold **L and R** while starting Breath of
+   the Wild, then start Patchwork from the Homebrew Menu. Settings → Storage → "BOTW size
+   table" should say "Read from game 1.6.0" (a bar shows while it reads). Holding only R gives
+   "Got a mod's copy · hold L too" when a mod (e.g. the Randomizer) has its own table. If it
+   says "Unreadable" or "Couldn't check", report it.
    Opening Patchwork from the Album afterwards keeps the saved copy.
 19. **BCML package that installs as-is:** in BOTW Browse, find Linkle Armor Stands (or enter
    246556): its .bnp shows "BCML package · installs here". Install it, start the game and

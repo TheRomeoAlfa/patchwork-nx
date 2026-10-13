@@ -181,7 +181,7 @@ std::string AppState::captureOriginalSizeTable(const mm::fs::path& path, const s
     // If Atmosphère handed us the SD card's (modded) copy instead, it's not the original.
     auto onCard = platform::sdRoot() / mm::kBotwSizeTable;
     if (mm::fs::exists(onCard, ec) && mm::readFile(onCard) == data)
-        return "Got the SD card's copy";
+        return "Got a mod's copy · hold L too";
     mm::writeFileAtomic(path, data);
     mm::writeFileAtomic(versionFile, version);
     return "Read from game " + version;
