@@ -1,5 +1,6 @@
 #include "installer.hpp"
 
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 

@@ -1250,9 +1250,10 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
             if (has("gamedata.yml") || has("savedata.yml") || has("eventinfo.yml") || has("mainstatic.yml")) out.insert(kBootup);
             if (has("mainstatic.yml")) out.insert(std::string(kDlc) + "Map/MainField/Static.smubin");
             try {
-                if (has("drops.json"))
-                    for (const auto& [path, t] : nlohmann::json::parse(readFile(d / "drops.json")).items())
-                        out.insert(splitNested(slashes(path))[0]);
+                if (has("drops.json")) {
+                    auto drops = nlohmann::json::parse(readFile(d / "drops.json"));  // kept alive while iterating
+                    for (const auto& [path, t] : drops.items()) out.insert(splitNested(slashes(path))[0]);
+                }
                 for (const char* log : {"shop.aamp", "aslist.aamp", "deepmerge.aamp"}) {
                     if (!has(log)) continue;
                     auto pio = aamp::parse(readFile(d / log));
