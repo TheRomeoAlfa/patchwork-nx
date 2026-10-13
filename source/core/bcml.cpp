@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <deque>
 #include <memory>
+#include <unordered_map>
 #include <stdexcept>
 
 #include "aamp.hpp"
@@ -63,7 +65,6 @@ struct Context {
         std::map<std::string, std::unique_ptr<Pack>> nested;  // opened archives inside, by name
     };
     std::map<std::string, std::unique_ptr<Pack>> packs;
-    std::map<std::string, Sarc> gameSarcs;  // parsed game archives, for "is this file changed?"
 
     const std::optional<std::string>& gameFileOpt(const std::string& path) {
         auto it = gameCache.find(path);
@@ -149,21 +150,41 @@ struct Context {
     }
 
     // The game's copy of a file inside archives, if there is one.
+    // Parsed game archives along the path last looked up, one per depth (lookups come in
+    // file order, so neighbours share their archives), with an index by name.
+    struct IndexedSarc {
+        std::string key;
+        Sarc sarc;
+        std::unordered_map<std::string, size_t> index;
+    };
+    std::deque<IndexedSarc> gameChain;  // a deque: growing it keeps the parents' data in place
+
+    const IndexedSarc* gameArchive(size_t depth, const std::string& key, const std::string& data) {
+        if (gameChain.size() > depth && gameChain[depth].key == key) return &gameChain[depth];
+        gameChain.resize(depth + 1);
+        auto& slot = gameChain[depth];
+        slot.key = key;
+        slot.sarc = Sarc::parse(data);
+        slot.index.clear();
+        for (size_t i = 0; i < slot.sarc.files.size(); ++i) slot.index.emplace(slot.sarc.files[i].name, i);
+        return &slot;
+    }
+
+    // The game's copy of a file inside archives, if there is one.
     std::optional<std::string> gameNested(const std::vector<std::string>& path) {
         const auto& top = gameFileOpt(path[0]);
         if (!top) return std::nullopt;
         if (path.size() == 1) return *top;
-        auto it = gameSarcs.find(path[0]);
-        if (it == gameSarcs.end()) it = gameSarcs.emplace(path[0], Sarc::parse(*top)).first;
-        const Sarc* s = &it->second;
-        Sarc inner;
+        std::string key = path[0];
+        const IndexedSarc* s = gameArchive(0, key, *top);
         for (size_t i = 1; i < path.size(); ++i) {
-            const auto* f = s->find(path[i]);
-            if (!f) return std::nullopt;
-            if (i + 1 == path.size()) return f->data;
-            if (!isSarc(f->data)) return std::nullopt;
-            inner = Sarc::parse(f->data);
-            s = &inner;
+            auto it = s->index.find(path[i]);
+            if (it == s->index.end()) return std::nullopt;
+            const auto& data = s->sarc.files[it->second].data;
+            if (i + 1 == path.size()) return data;
+            if (!isSarc(data)) return std::nullopt;
+            key += "//" + path[i];
+            s = gameArchive(i, key, data);
         }
         return std::nullopt;
     }
