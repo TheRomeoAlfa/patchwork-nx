@@ -27,6 +27,7 @@ private:
 
     std::vector<brls::View*> nsfwViews_;  // hidden until L + R + minus is held
     brls::RepeatingTimer holdTimer_;
+    brls::RepeatingTimer sizeTimer_;  // follows the size table check started at launch
     int heldMs_ = 0;
 };
 

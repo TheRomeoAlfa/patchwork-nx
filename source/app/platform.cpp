@@ -7,6 +7,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <memory>
+#include <vector>
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -67,7 +68,31 @@ std::string caBundle() {
 #endif
 }
 
-bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why) {
+namespace {
+// Read a whole file in pieces, reporting progress.
+std::string readWithProgress(const mm::fs::path& p, const std::function<void(uint64_t, uint64_t)>& progress) {
+    std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(p.c_str(), "rb"), &std::fclose);
+    if (!f) throw std::runtime_error("cannot open " + p.string());
+    std::fseek(f.get(), 0, SEEK_END);
+    long size = std::ftell(f.get());
+    std::fseek(f.get(), 0, SEEK_SET);
+    uint64_t total = size > 0 ? static_cast<uint64_t>(size) : 0;
+    std::string out;
+    out.reserve(total);
+    std::vector<char> buf(256 * 1024);
+    for (;;) {
+        size_t n = std::fread(buf.data(), 1, buf.size(), f.get());
+        out.append(buf.data(), n);
+        if (progress) progress(out.size(), total);
+        if (n < buf.size()) break;
+    }
+    if (std::ferror(f.get())) throw std::runtime_error("read error in " + p.string());
+    return out;
+}
+}  // namespace
+
+bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
+                  const std::function<void(uint64_t, uint64_t)>& progress) {
 #ifdef __SWITCH__
     u64 current = 0;
     u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
@@ -81,7 +106,7 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
-        out = mm::readFile("gamefs:/" + romfsPath);
+        out = readWithProgress("gamefs:/" + romfsPath, progress);
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
@@ -94,7 +119,7 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
-        out = mm::readFile(mm::fs::path(env) / romfsPath);
+        out = readWithProgress(mm::fs::path(env) / romfsPath, progress);
         return true;
     } catch (const std::exception& e) {
         why = e.what();

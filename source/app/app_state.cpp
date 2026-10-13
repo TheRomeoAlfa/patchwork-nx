@@ -111,12 +111,27 @@ void AppState::init() {
     auto staleWork = workDir();
     auto originalTable = dataDir_ / "original" / "botw" / "ResourceSizeTable.product.srsizetable";
     runFileJob([this, staleWork, originalTable](mm::Library& lib) {
+        // Whatever happens, the size table status must stop saying "Checking…".
+        struct Finish {
+            AppState* st;
+            std::string status = "Couldn't check";
+            ~Finish() {
+                std::lock_guard lock(st->statusMutex_);
+                st->sizeTableStatus_ = status;
+                st->sizeTableProgress_ = -1;
+            }
+        } finish{this};
         mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
+        setSizeTableProgress(0.1f);
         lib.load();
-        auto status = captureOriginalSizeTable(originalTable);
+        setSizeTableProgress(0.2f);
+        try {
+            finish.status = captureOriginalSizeTable(originalTable, [this](float p) { setSizeTableProgress(0.2f + 0.8f * p); });
+        } catch (const std::exception& e) {
+            brls::Logger::error("size table check failed: {}", e.what());
+            finish.status = "Couldn't check";
+        }
         lib.setOriginalSizeTable(originalTable);
-        std::lock_guard lock(statusMutex_);
-        sizeTableStatus_ = status;
     }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });
@@ -129,9 +144,19 @@ std::string AppState::sizeTableStatus() const {
     return sizeTableStatus_;
 }
 
+float AppState::sizeTableProgress() const {
+    std::lock_guard lock(statusMutex_);
+    return sizeTableProgress_;
+}
+
+void AppState::setSizeTableProgress(float p) {
+    std::lock_guard lock(statusMutex_);
+    sizeTableProgress_ = p;
+}
+
 // BOTW's own resource size table, the base BCML packages' sizes are merged into. Read from
 // the game when Patchwork runs in place of it, and again after a game update.
-std::string AppState::captureOriginalSizeTable(const mm::fs::path& path) {
+std::string AppState::captureOriginalSizeTable(const mm::fs::path& path, const std::function<void(float)>& progress) {
     const auto& version = gameVersions_[mm::Game::Botw];
     auto versionFile = path.parent_path() / "version.txt";
     std::error_code ec;
@@ -141,7 +166,10 @@ std::string AppState::captureOriginalSizeTable(const mm::fs::path& path) {
     if (have && (savedVersion == version || version.empty())) return "Read from game " + savedVersion;
 
     std::string data, why;
-    if (!platform::readGameFile(mm::Game::Botw, "System/Resource/ResourceSizeTable.product.srsizetable", data, why)) {
+    if (!platform::readGameFile(mm::Game::Botw, "System/Resource/ResourceSizeTable.product.srsizetable", data, why,
+                                [&](uint64_t done, uint64_t total) {
+                                    if (total) progress(0.9f * static_cast<float>(done) / total);
+                                })) {
         if (have) return "Needs update for " + version;
         return "Not read yet";
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -39,7 +40,8 @@ mm::fs::path resourcePath(const std::string& name);
 // while starting it); Atmosphère then passes the game's original files through, update
 // included. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
-bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why);
+bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
+                  const std::function<void(uint64_t done, uint64_t total)>& progress = {});
 
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.

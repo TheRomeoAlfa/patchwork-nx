@@ -116,6 +116,8 @@ public:
     std::vector<bool> needsPcTool(const std::vector<mm::gb::ModSummary>& mods);
     // Whether Patchwork has BOTW's original size table (needed for BCML packages), for Settings.
     std::string sizeTableStatus() const;
+    // How far the check at startup is (0..1), or -1 once it's done.
+    float sizeTableProgress() const;
     // Fill in which BCML packages among a mod's files install as-is. Network thread only.
     void checkBcmlFiles(std::vector<mm::gb::ModFile>& files);
     // Turn a pasted link into something installable: a GameBanana or Waikuteru mod page, or
@@ -172,7 +174,10 @@ private:
     std::mutex pcMutex_;
     mutable std::mutex statusMutex_;
     std::string sizeTableStatus_ = "Checking…";
-    std::string captureOriginalSizeTable(const mm::fs::path& path);  // file thread
+    float sizeTableProgress_ = 0;
+    void setSizeTableProgress(float p);
+    // File thread. `progress` gets 0..1 while the game's file is read.
+    std::string captureOriginalSizeTable(const mm::fs::path& path, const std::function<void(float)>& progress);
     bool pcLoaded_ = false;
     std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
     std::map<int64_t, bool> bnpInstallable_;               // file id -> needs no merging
