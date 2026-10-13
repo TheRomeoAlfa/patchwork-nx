@@ -238,6 +238,16 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     if (enable) {
         try {
             apply(progress);
+            const auto* added = find(id);
+            if (added && !added->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
+        } catch (const BcmlMergeError& e) {
+            findMut(id)->enabled = false;
+            try {
+                apply();
+            } catch (...) {
+            }
+            save();
+            throw;
         } catch (const std::exception& e) {
             findMut(id)->enabled = false;
             try {
@@ -257,8 +267,10 @@ void Library::setEnabled(const std::string& id, bool enabled, const ProgressFn& 
     if (!m) throw std::invalid_argument("unknown mod " + id);
     if (m->enabled == enabled) return;
     m->enabled = enabled;
+    bool bcml = !m->bcmlLogs.empty();
     save();
     apply(progress);
+    if (bcml && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
 void Library::remove(const std::string& id, const ProgressFn& progress) {
@@ -334,6 +346,7 @@ void Library::move(const std::string& id, int delta, const ProgressFn& progress)
     renumber(ordered);
     save();
     apply(progress);
+    if (!target->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
 std::map<std::string, std::string> Library::desiredDeployment() const {
@@ -345,6 +358,7 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     std::map<std::string, Owner> owners;  // key -> winner
     for (const auto& m : mods_) {
         if (!m.enabled) continue;
+        if (!m.bcmlLogs.empty() && !bcmlMerged(m)) continue;  // its partial packs mustn't reach the game
         for (const auto& t : m.files) {
             auto key = targetKey(t);
             auto it = owners.find(key);
@@ -415,7 +429,8 @@ std::string Library::sizeTableOwner() const {
 }
 
 bool Library::canMergeSizes(const ModRecord& mod) const {
-    if (mod.resourceSizes.empty()) return true;
+    // Packages that need merging get size entries for their merged files too.
+    if (mod.resourceSizes.empty() && mod.bcmlLogs.empty()) return true;
     std::error_code ec;
     if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec)) return true;
     if (hasOriginalSizeTableOnCard()) return true;
@@ -469,6 +484,10 @@ private:
 };
 
 }  // namespace
+
+bool Library::bcmlMerged(const ModRecord& m) const {
+    return bcmlKey_.find(m.id + "@" + std::to_string(m.installedAt) + ";") != std::string::npos;
+}
 
 std::string Library::bcmlKey() const {
     std::vector<const ModRecord*> pkgs;
@@ -566,7 +585,14 @@ void replaceFile(const fs::path& from, const fs::path& to) {
 //   was already restored.
 // State is saved every 50 files and at the end.
 void Library::apply(const ProgressFn& progress) {
-    refreshBcml();
+    // A merge that can't run (game files missing) doesn't stop the rest: the packages it
+    // concerns just stay off the SD card for now.
+    try {
+        refreshBcml();
+        bcmlError_.clear();
+    } catch (const std::exception& e) {
+        bcmlError_ = e.what();
+    }
     auto desired = desiredDeployment();
 
     std::map<std::string, std::string> desiredByKey, deployedByKey;  // key -> actual target

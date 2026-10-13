@@ -65,6 +65,48 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         holdTimer_.start(100);
     }
 
+    // BCML packages: the one-time setup (reading the game's files) and its state.
+    section("BCML packages · Breath of the Wild");
+    auto* files = new brls::DetailCell();
+    files->setText("Game files");
+    {
+        auto& st = AppState::get();
+        using A = AppState::GameAccess;
+        auto kept = st.keptGameFiles();
+        auto access = st.botwAccess();
+        files->setDetailText(access == A::Ready    ? (kept ? "Can read now · " + std::to_string(kept) + " kept" : "Can read now")
+                             : access == A::ModsOn ? "Mods were on: hold L too"
+                             : kept                ? std::to_string(kept) + " kept on the SD card"
+                                                   : "Not read yet");
+    }
+    content->addView(files);
+    auto* sizes = new brls::DetailCell();
+    sizes->setText("Size table");
+    sizes->setDetailText(AppState::get().sizeTableStatus());
+    content->addView(sizes);
+    auto* sizesBar = new ui::ProgressBar(300);
+    sizesBar->setMargins(10, 4, 0, 4);
+    content->addView(sizesBar);
+    auto showSizes = [sizes, sizesBar] {
+        float p = AppState::get().sizeTableProgress();
+        sizes->setDetailText(AppState::get().sizeTableStatus());
+        sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+        if (p >= 0) sizesBar->setProgress(p);
+        return p >= 0;
+    };
+    if (showSizes()) {
+        sizeTimer_.setCallback([this, showSizes] {
+            if (!showSizes()) sizeTimer_.stop();
+        });
+        sizeTimer_.start(150);
+    }
+    auto* bcmlHow = ui::label("Most BCML packages (.bnp) are merged with the game's own files, which Patchwork reads from the game "
+                              "itself. Before installing your first one (and after a game update):\n" +
+                                  AppState::bcmlSetupSteps(false) + "\nThen install BCML packages as usual. Copies of the files are kept on the SD card.",
+                              14, ui::muted(), false);
+    bcmlHow->setMargins(10, 4, 4, 4);
+    content->addView(bcmlHow);
+
     section("Background add-ons");
     auto modules = mm::listSysmodules(platform::sdRoot());
     if (modules.empty()) {
@@ -145,40 +187,13 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     });
     content->addView(repair);
 
-    auto* sizes = new brls::DetailCell();
-    sizes->setText("BOTW size table");
-    sizes->setDetailText(AppState::get().sizeTableStatus());
-    content->addView(sizes);
-    auto* sizesBar = new ui::ProgressBar(300);
-    sizesBar->setMargins(10, 4, 0, 4);
-    content->addView(sizesBar);
-    auto showSizes = [sizes, sizesBar] {
-        float p = AppState::get().sizeTableProgress();
-        sizes->setDetailText(AppState::get().sizeTableStatus());
-        sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-        if (p >= 0) sizesBar->setProgress(p);
-        return p >= 0;
-    };
-    if (showSizes()) {
-        sizeTimer_.setCallback([this, showSizes] {
-            if (!showSizes()) sizeTimer_.stop();
-        });
-        sizeTimer_.start(150);
-    }
-    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp), along with the game files they're merged with. To read "
-                                "them, hold L and R while starting Breath of the Wild: R opens the Homebrew Menu (start Patchwork "
-                                "from there) and L turns mods off for that launch, so Patchwork sees the game's own files rather "
-                                "than a mod's. It keeps copies, so this is needed once per package (and after a game update).",
-                                14, ui::muted(), false);
-    sizesNote->setMargins(10, 4, 4, 4);
-    content->addView(sizesNote);
 
     auto* where = new brls::DetailCell();
     where->setText("Mod library folder");
     where->setDetailText("SD:/switch/patchwork");
     content->addView(where);
 
-    section("Testing");
+    section("For testing");
     auto* bcml = new brls::DetailCell();
     bcml->setText("BCML merge test");
     bcml->setDetailText("Run");
@@ -188,9 +203,8 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     });
     content->addView(bcml);
     bcmlRun_ = bcml;
-    auto* bcmlNote = ui::label("Measures how fast this Switch can merge BCML packages into the game's own files (for full BCML "
-                               "support). Open Patchwork by holding L and R while starting Breath of the Wild first. Downloads "
-                               "two small packages; installs nothing. Takes a minute or two.",
+    auto* bcmlNote = ui::label("Only needed when testing Patchwork: measures how fast this Switch merges BCML packages. Open "
+                               "Patchwork by holding L and R while starting Breath of the Wild first. Installs nothing.",
                                14, ui::muted(), false);
     bcmlNote->setMargins(10, 4, 4, 4);
     content->addView(bcmlNote);

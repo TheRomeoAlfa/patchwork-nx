@@ -558,3 +558,78 @@ TEST("bcml: the Browse cache shipped with the app matches what can be merged") {
     CHECK_EQ(seed.value("rules", std::string()), bcml::mergeSupportKey());
     CHECK(seed.contains("bnpLogs"));
 }
+
+TEST("bcml: a package waiting for game files stays off the card and doesn't block other changes") {
+    t::TempDir d;
+    auto sd = d.path / "sd", data = d.path / "sd/switch/patchwork", game = d.path / "game";
+    std::string titleLayout = sarcOf({{"timg/__Combined.bntx", "game textures"}});
+    put(game / "01007EF00011E000/romfs/Pack/Title.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(titleLayout)}}));
+    // No ActorInfo in the "game": package B can't be merged yet (as if not read).
+    SizeTable table;
+    put(data / "original/botw/ResourceSizeTable.product.srsizetable", yaz0Store(table.write()));
+    Library lib(sd, data);
+    lib.load();
+    lib.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
+    bcml::FolderGameFiles files(game);
+    lib.setGameFileReader([&](const std::string& p) {
+        auto f = files.read(p);
+        if (f) return Library::GameFile{Library::GameFile::State::Found, *f};
+        return Library::GameFile{};  // unavailable, not absent
+    });
+    auto a = d.path / "a";
+    put(a / "Title.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{"timg/__Combined.bntx", "linkle"}}))}}));
+    put(a / "logs/packs.json", R"({"Pack/Title.pack": "01007EF00011E000/romfs/Pack/Title.pack"})");
+    ModRecord ra;
+    ra.id = "a";
+    ra.game = Game::Botw;
+    ra.bcmlLogs = {"0"};
+    const std::string title = "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
+    lib.add(ra, {{a / "Title.pack", title}}, true, {}, {{a / "logs/packs.json", "bcml/0/packs.json"}});
+    CHECK(fs::exists(sd / title));
+
+    auto b = d.path / "b";
+    put(b / "Thing.sbactorpack", "partial pack");
+    put(b / "logs/actorinfo.yml", "'1': {instSize: 5}\n");
+    ModRecord rb;
+    rb.id = "b";
+    rb.game = Game::Botw;
+    rb.bcmlLogs = {"0"};
+    const std::string thing = "atmosphere/contents/01007EF00011E000/romfs/Actor/Pack/Thing.sbactorpack";
+    bool waited = false;
+    try {
+        lib.add(rb, {{b / "Thing.sbactorpack", thing}}, true, {}, {{b / "logs/actorinfo.yml", "bcml/0/actorinfo.yml"}});
+    } catch (const BcmlMergeError& e) {
+        waited = std::string(e.what()).find("ActorInfo") != std::string::npos;
+    }
+    CHECK(waited);
+    CHECK(!lib.find("b")->enabled);     // installed, turned off
+    CHECK(!fs::exists(sd / thing));     // its partial pack never reached the card
+    CHECK(fs::exists(sd / title));      // the other package is untouched
+
+    // Turning it on again waits too, without its files on the card…
+    bool threw = false;
+    try {
+        lib.setEnabled("b", true);
+    } catch (const BcmlMergeError&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(lib.bcmlPending());
+    CHECK(!fs::exists(sd / thing));
+    // …and an ordinary mod still installs meanwhile.
+    put(d.path / "plain.txt", "plain");
+    ModRecord rp;
+    rp.id = "plain";
+    rp.game = Game::Botw;
+    lib.add(rp, {{d.path / "plain.txt", "atmosphere/contents/01007EF00011E000/romfs/plain.txt"}}, true);
+    CHECK(fs::exists(sd / "atmosphere/contents/01007EF00011E000/romfs/plain.txt"));
+    // Once the file can be read, the next change merges it.
+    Node info = Node::makeDict();
+    info.dict["Actors"] = Node::makeArray();
+    info.dict["Hashes"] = Node::makeArray();
+    put(game / "01007EF00011E000/romfs/Actor/ActorInfo.product.sbyml", yaz0Compress(bymlOf(info)));
+    lib.apply();
+    CHECK(!lib.bcmlPending());
+    CHECK(fs::exists(sd / "atmosphere/contents/01007EF00011E000/romfs/Actor/ActorInfo.product.sbyml"));
+    CHECK(fs::exists(sd / thing));
+}

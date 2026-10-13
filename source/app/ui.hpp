@@ -39,6 +39,7 @@ inline constexpr const char* boxOff = "\uE835";    // check_box_outline_blank
 inline constexpr const char* image = "\uE3F4";     // image
 inline constexpr const char* folder = "\uE2C7";    // folder
 inline constexpr const char* add = "\uE2C4";       // file_download
+inline constexpr const char* info = "\uE88E";      // info
 }  // namespace icon
 
 // Borealis keeps pointing at the focused view after it's deleted, and crashes drawing its

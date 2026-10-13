@@ -197,6 +197,16 @@ bool idToUid(const std::string& id, AccountUid& uid) {
 #endif
 }  // namespace
 
+bool runningAsGame(mm::Game game) {
+#ifdef __SWITCH__
+    u64 current = 0;
+    u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
+    return R_SUCCEEDED(svcGetInfo(&current, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) && current == wanted;
+#else
+    return std::getenv(game == mm::Game::Botw ? "MM_GAME_ROMFS_BOTW" : "MM_GAME_ROMFS_TOTK") != nullptr;
+#endif
+}
+
 std::string gameTextLanguage() {
 #ifdef __SWITCH__
     std::string lang = "USen";
