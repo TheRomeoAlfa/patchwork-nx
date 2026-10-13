@@ -1,6 +1,8 @@
 #include "bcml.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <deque>
 #include <memory>
@@ -1030,6 +1032,68 @@ void mergeMaps(Context& c) {
     if (dlc) c.result.files[aocPack] = "";  // empty: the game then reads the loose DLC maps
 }
 
+// ---------------------------------------------------------------- main field static
+
+// BCML's id for a Static.smubin item: rounded-up coordinates, then its first "...name" value.
+std::string staticItemId(const Node& item) {
+    std::string id;
+    if (const auto* t = item.find("Translate"))
+        for (const char* axis : {"X", "Y", "Z"}) {
+            const auto* v = t->find(axis);
+            double d = !v ? 0 : v->type == T::Float ? double(v->f) : v->type == T::Double ? v->d : double(v->i);
+            id += std::to_string(int64_t(std::ceil(d)));
+        }
+    for (const auto& [k, v] : item.dict) {  // sorted keys, as BCML iterates them
+        std::string lower = k;
+        for (auto& ch : lower) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        if (lower.find("name") != std::string::npos) {
+            if (v.type == T::String) id += v.s;
+            break;
+        }
+    }
+    return id;
+}
+
+void mergeMainStatic(Context& c) {
+    auto diffs = c.yamlLogs("mainstatic.yml", false);
+    if (diffs.empty()) return;
+    Node diff = Node::makeDict();
+    for (const auto& d : diffs) dictMerge(diff, d, true);
+    const std::string dlcStatic = std::string(kDlc) + "Map/MainField/Static.smubin";
+    const std::string rel = "Map/MainField/Static.smubin";
+    auto dlcData = c.gameFileOpt(dlcStatic);
+    std::string data = dlcData ? *dlcData : c.gameInner(kBootup, rel);
+    auto stock = byml::parse(data);
+    for (auto& [cat, items] : stock.root.dict) {
+        const auto* changes = diff.find(cat);
+        if (!changes || items.type != T::Array) continue;
+        std::vector<std::pair<std::string, Node>> ordered;
+        std::map<std::string, size_t> index;
+        for (const auto& item : items.array) {
+            auto id = staticItemId(item);
+            if (index.count(id)) ordered[index[id]].second = item;  // BCML: a duplicate id replaces
+            else index[id] = ordered.size(), ordered.emplace_back(id, item);
+        }
+        for (const auto& [id, item] : changes->dict) {
+            if (index.count(id)) {
+                if (ordered[index[id]].second.type == T::Dict && item.type == T::Dict) dictMerge(ordered[index[id]].second, item, false);
+                else ordered[index[id]].second = item;
+            } else {
+                index[id] = ordered.size();
+                ordered.emplace_back(id, item);
+            }
+        }
+        items.array.clear();
+        for (const auto& [id, item] : ordered)
+            if (!item.find("remove")) items.array.push_back(item);
+    }
+    auto bytes = yaz0Compress(byml::write(stock));
+    if (dlcData)
+        c.result.files[dlcStatic] = std::move(bytes);
+    else
+        *c.edit({kBootup, rel}, true) = std::move(bytes);
+}
+
 // ---------------------------------------------------------------- size table
 
 const std::set<std::string>& sizeExcludedExts() {
@@ -1105,7 +1169,7 @@ std::vector<std::string> splitNested(const std::string& path) {
 
 namespace {
 const std::set<std::string>& mergedLogs() {
-    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp", "texts.json", "map.yml",
+    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp", "texts.json", "map.yml", "mainstatic.yml",
                                                  "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
     return merged;
 }
@@ -1183,7 +1247,8 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
                 } catch (const std::exception&) {
                 }
             }
-            if (has("gamedata.yml") || has("savedata.yml") || has("eventinfo.yml")) out.insert(kBootup);
+            if (has("gamedata.yml") || has("savedata.yml") || has("eventinfo.yml") || has("mainstatic.yml")) out.insert(kBootup);
+            if (has("mainstatic.yml")) out.insert(std::string(kDlc) + "Map/MainField/Static.smubin");
             try {
                 if (has("drops.json"))
                     for (const auto& [path, t] : nlohmann::json::parse(readFile(d / "drops.json")).items())
@@ -1229,6 +1294,7 @@ Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Opt
     mergeTexts(c);
     mergeActorInfo(c);
     mergeMaps(c);
+    mergeMainStatic(c);
     mergeGameData(c);
     mergeSaveData(c);
     mergeEventInfo(c);
