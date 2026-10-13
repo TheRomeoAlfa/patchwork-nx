@@ -46,7 +46,8 @@ void File::set(const std::string& label, Message m) {
         *old = std::move(m);
         return;
     }
-    if (m.attribute.size() != attrSize) m.attribute.resize(attrSize, '\0');
+    if (!attrStrings && m.attribute.size() != attrSize) m.attribute.resize(attrSize, '\0');
+    if (attrStrings && m.attribute.empty()) m.attribute = std::string(2, '\0');
     messages.emplace_back(label, std::move(m));
 }
 
@@ -84,9 +85,25 @@ File parse(const std::string& d) {
             f.hasAttributes = true;
             uint32_t count = rd32(block, 0);
             f.attrSize = rd32(block, 4);
-            for (uint32_t k = 0; k < count; ++k) attrs.push_back(block.substr(8 + size_t(k) * f.attrSize, f.attrSize));
             size_t end = 8 + size_t(count) * f.attrSize;
-            if (end < block.size()) f.attrExtra = block.substr(end);
+            // BOTW: each row is the offset of a UTF-16 string stored after the rows.
+            bool strings = f.attrSize == 4 && count > 0 && end < block.size();
+            for (uint32_t k = 0; strings && k < count; ++k) {
+                uint32_t off = rd32(block, 8 + 4 * k);
+                if (off < end || off > block.size()) strings = false;
+            }
+            f.attrStrings = strings;
+            for (uint32_t k = 0; k < count; ++k) {
+                if (strings) {
+                    uint32_t off = rd32(block, 8 + 4 * k);
+                    uint32_t next = k + 1 < count ? rd32(block, 8 + 4 * (k + 1)) : uint32_t(block.size());
+                    if (next < off) next = off;
+                    attrs.push_back(block.substr(off, next - off));
+                } else {
+                    attrs.push_back(block.substr(8 + size_t(k) * f.attrSize, f.attrSize));
+                }
+            }
+            if (!strings && end < block.size()) f.attrExtra = block.substr(end);
         } else if (magic == "TSY1") {
             f.hasStyles = true;
             for (size_t k = 0; k + 4 <= block.size(); k += 4) styles.push_back(rd32(block, k));
@@ -145,12 +162,22 @@ std::string write(const File& f) {
         std::string b;
         put32(b, uint32_t(f.messages.size()));
         put32(b, f.attrSize);
-        for (const auto& [l, m] : f.messages) {
-            std::string row = m.attribute;
-            row.resize(f.attrSize, '\0');
-            b += row;
+        if (f.attrStrings) {
+            uint32_t off = 8 + 4 * uint32_t(f.messages.size());
+            std::string pool;
+            for (const auto& [l, m] : f.messages) {
+                put32(b, off + uint32_t(pool.size()));
+                pool += m.attribute.empty() ? std::string(2, '\0') : m.attribute;
+            }
+            b += pool;
+        } else {
+            for (const auto& [l, m] : f.messages) {
+                std::string row = m.attribute;
+                row.resize(f.attrSize, '\0');
+                b += row;
+            }
+            b += f.attrExtra;
         }
-        b += f.attrExtra;
         blocks.emplace_back("ATR1", b);
     }
     if (f.hasStyles) {

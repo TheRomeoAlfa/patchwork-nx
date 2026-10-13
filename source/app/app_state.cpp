@@ -126,6 +126,7 @@ void AppState::init() {
             }
         }
     }
+    library_->setTextLanguage(platform::gameTextLanguage());
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
         std::error_code ec;

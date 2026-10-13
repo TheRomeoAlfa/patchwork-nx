@@ -11,14 +11,17 @@ namespace mm::msbt {
 // control tags included, so files round-trip exactly; edits replace whole messages.
 struct Message {
     std::string text;       // UTF-16LE code units, without the terminating 0x0000
-    std::string attribute;  // this message's ATR1 row (attrSize bytes)
+    // This message's ATR1 data: in files whose ATR1 holds strings (BOTW's: 4-byte offsets
+    // into a string pool) the UTF-16 string, terminator included; otherwise its raw row.
+    std::string attribute;
     uint32_t style = 0;     // TSY1
 };
 
 struct File {
     uint32_t buckets = 101;
     uint32_t attrSize = 0;
-    std::string attrExtra;  // ATR1 bytes after the rows, kept as is
+    bool attrStrings = false;  // ATR1 rows are offsets of UTF-16 strings
+    std::string attrExtra;     // ATR1 bytes after the rows, kept as is (not with attrStrings)
     bool hasAttributes = false, hasStyles = false;
     std::vector<std::pair<std::string, Message>> messages;  // label -> message, in TXT2 order
     std::vector<std::pair<std::string, std::string>> otherBlocks;  // magic -> data, kept as is
