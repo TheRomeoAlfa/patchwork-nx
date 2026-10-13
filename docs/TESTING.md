@@ -105,3 +105,8 @@ Run these after any release build; they cover what the desktop build can't.
    dates and highlights the latest. A BOTW Master Mode save (e.g. 582966's master mode file)
    only offers Master Mode slots; check it loads in Master Mode.
 
+27. **BCML merge test (for full BCML support):** hold **L and R** while starting Breath of the
+   Wild, open Patchwork, Settings → Testing → "BCML merge test" → Run. It downloads two small
+   packages and shows timings and memory (also saved to switch/patchwork/bcml-test/report.txt).
+   Then "Merged Linkle title screen" → Put in game, start BOTW normally: the title screen shows
+   Linkle. Back in Patchwork, "Remove from game".

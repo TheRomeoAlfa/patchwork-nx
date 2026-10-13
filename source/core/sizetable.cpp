@@ -2,6 +2,7 @@
 
 #include <zlib.h>
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
@@ -71,6 +72,71 @@ std::string yaz0Store(const std::string& data) {
     for (size_t i = 0; i < data.size(); i += 8) {
         out += char(0xff);  // eight literal bytes follow
         out.append(data, i, 8);
+    }
+    return out;
+}
+
+std::string yaz0Compress(const std::string& data) {
+    std::string out = "Yaz0";
+    putBe32(out, uint32_t(data.size()));
+    out.append(8, '\0');
+    out.reserve(16 + data.size() / 2);
+    constexpr size_t kWindow = 0x1000, kMaxLen = 0x111, kMinLen = 3, kChain = 16;
+    constexpr size_t kHashBits = 15;
+    std::vector<int64_t> head(size_t(1) << kHashBits, -1);
+    std::vector<int64_t> prev(data.size(), -1);
+    auto hashAt = [&](size_t i) {
+        uint32_t v = (uint32_t(uint8_t(data[i])) << 16) | (uint32_t(uint8_t(data[i + 1])) << 8) | uint8_t(data[i + 2]);
+        return (v * 2654435761u) >> (32 - kHashBits);
+    };
+    auto insert = [&](size_t i) {
+        if (i + 2 >= data.size()) return;
+        auto h = hashAt(i);
+        prev[i] = head[h];
+        head[h] = int64_t(i);
+    };
+    size_t pos = 0;
+    while (pos < data.size()) {
+        size_t flagAt = out.size();
+        out += '\0';
+        uint8_t flags = 0;
+        for (int bit = 7; bit >= 0 && pos < data.size(); --bit) {
+            size_t bestLen = 0, bestDist = 0;
+            if (pos + kMinLen <= data.size()) {
+                size_t limit = std::min(kMaxLen, data.size() - pos);
+                int64_t cand = head[hashAt(pos)];
+                for (size_t n = 0; cand >= 0 && n < kChain; ++n, cand = prev[size_t(cand)]) {
+                    size_t c = size_t(cand), dist = pos - c;
+                    if (dist > kWindow) break;
+                    size_t len = 0;
+                    while (len < limit && data[c + len] == data[pos + len]) ++len;
+                    if (len > bestLen) {
+                        bestLen = len;
+                        bestDist = dist;
+                        if (len == limit) break;
+                    }
+                }
+            }
+            if (bestLen >= kMinLen) {
+                size_t d = bestDist - 1;
+                if (bestLen < 0x12) {
+                    out += char(((bestLen - 2) << 4) | (d >> 8));
+                    out += char(d & 0xff);
+                } else {
+                    out += char(d >> 8);
+                    out += char(d & 0xff);
+                    out += char(bestLen - 0x12);
+                }
+                for (size_t k = 0; k < bestLen; ++k) insert(pos + k);
+                pos += bestLen;
+            } else {
+                flags |= uint8_t(1 << bit);
+                out += data[pos];
+                insert(pos);
+                ++pos;
+            }
+        }
+        out[flagAt] = char(flags);
     }
     return out;
 }

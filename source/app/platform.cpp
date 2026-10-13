@@ -1,5 +1,6 @@
 #include "platform.hpp"
 
+#include <sys/resource.h>
 #include <sys/statvfs.h>
 
 #include <cstdio>
@@ -56,6 +57,30 @@ uint64_t freeSpaceBytes() {
     auto root = sdRoot().string();
     if (statvfs(root.c_str(), &st) != 0) return 0;
     return static_cast<uint64_t>(st.f_bavail) * st.f_frsize;
+}
+
+uint64_t memoryUsedBytes() {
+#ifdef __SWITCH__
+    u64 v = 0;
+    return R_SUCCEEDED(svcGetInfo(&v, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
+#else
+    struct rusage ru {};
+    getrusage(RUSAGE_SELF, &ru);
+#ifdef __APPLE__
+    return static_cast<uint64_t>(ru.ru_maxrss);  // bytes on macOS
+#else
+    return static_cast<uint64_t>(ru.ru_maxrss) * 1024;
+#endif
+#endif
+}
+
+uint64_t memoryTotalBytes() {
+#ifdef __SWITCH__
+    u64 v = 0;
+    return R_SUCCEEDED(svcGetInfo(&v, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
+#else
+    return 0;
+#endif
 }
 
 std::string caBundle() {
