@@ -513,3 +513,38 @@ A-1_Dynamic:
         CHECK(r.sizes.count(dlc ? "Aoc/0010/Map/MainField/A-1/A-1_Static.mubin" : "Map/MainField/A-1/A-1_Static.mubin"));
     }
 }
+
+TEST("bcml: main field static items by BCML's ids") {
+    t::TempDir d;
+    auto game = d.path / "game";
+    auto item = [](float x, const std::string& name) {
+        Node i = Node::makeDict();
+        Node t = Node::makeDict();
+        t.dict["X"] = Node::real(x);
+        t.dict["Y"] = Node::real(0.5f);
+        t.dict["Z"] = Node::real(-2.5f);
+        i.dict["Translate"] = t;
+        i.dict["UnitConfigName"] = Node::str(name);
+        return i;
+    };
+    Node root = Node::makeDict();
+    root.dict["StartPos"] = arrayOf({item(1.2f, "A"), item(5.0f, "B")});
+    root.dict["Other"] = arrayOf({item(9, "C")});
+    put(game / "01007EF00011E000/romfs/Pack/Bootup.pack", sarcOf({{"Map/MainField/Static.smubin", yaz0Compress(bymlOf(root))}}));
+    auto p = d.path / "p";
+    // Ids: ceil(1.2)=2, ceil(0.5)=1, ceil(-2.5)=-2 -> "21-2A"; B is "51-2B".
+    put(p / "logs/mainstatic.yml", R"(StartPos:
+  21-2A: {UnitConfigName: A, Translate: {X: 1.2, Y: 0.5, Z: -2.5}, Extra: 7}
+  51-2B: {remove: true}
+  91-2D: {UnitConfigName: D, Translate: {X: 9.0, Y: 0.5, Z: -2.5}}
+)");
+    bcml::FolderGameFiles files(game);
+    auto r = bcml::merge({{"p", p, {p / "logs"}}}, files);
+    auto bootup = Sarc::parse(r.files.at("01007EF00011E000/romfs/Pack/Bootup.pack"));
+    auto merged = byml::parse(bootup.find("Map/MainField/Static.smubin")->data).root;
+    const auto& start = merged.dict.at("StartPos").array;
+    CHECK_EQ(start.size(), 2u);  // B removed, D added
+    CHECK_EQ(start[0].dict.at("Extra").i, int64_t(7));
+    CHECK_EQ(start[1].dict.at("UnitConfigName").s, std::string("D"));
+    CHECK_EQ(merged.dict.at("Other").array.size(), 1u);
+}
