@@ -111,11 +111,15 @@ public:
     // The game's own size table, read from the console; the base for BCML packages' sizes.
     void setOriginalSizeTable(fs::path path) { originalSizeTable_ = std::move(path); }
     // Reads the game's own files ("01007EF00011E000/romfs/Pack/Bootup.pack"), for merging BCML
-    // packages; nullopt when it can't (Patchwork wasn't opened from the game, say).
-    using GameFileReader = std::function<std::optional<std::string>(const std::string& path)>;
+    // packages.
+    struct GameFile {
+        enum class State { Found, Absent, Unavailable } state = State::Unavailable;  // Absent: the game has no such file
+        std::string data;
+    };
+    using GameFileReader = std::function<GameFile(const std::string& path)>;
     void setGameFileReader(GameFileReader reader) { gameFiles_ = std::move(reader); }
     // Game files merging would need for a package with these log folders, that can't be read
-    // now (package-style paths).
+    // now (package-style paths). Files the game doesn't have don't count.
     std::vector<std::string> missingGameFiles(const std::vector<fs::path>& logDirs) const;
     // False if enabling this mod would need a size table to build on and there's none: not the
     // game's original, not one already on the SD card, and no enabled mod ships one.

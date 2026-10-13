@@ -457,7 +457,12 @@ namespace {
 class ReaderGameFiles : public bcml::GameFiles {
 public:
     explicit ReaderGameFiles(const Library::GameFileReader& r) : r_(r) {}
-    std::optional<std::string> read(const std::string& path) override { return r_ ? r_(path) : std::nullopt; }
+    std::optional<std::string> read(const std::string& path) override {
+        if (!r_) return std::nullopt;
+        auto f = r_(path);
+        if (f.state != Library::GameFile::State::Found) return std::nullopt;
+        return std::move(f.data);
+    }
 
 private:
     const Library::GameFileReader& r_;
@@ -515,7 +520,7 @@ std::vector<std::string> Library::missingGameFiles(const std::vector<fs::path>& 
     std::vector<std::string> out;
     for (const auto& path : bcml::gameFilesNeeded({{"new", {}, logDirs}})) {
         // A new pack the game doesn't have is fine; everything else must be readable.
-        if (gameFiles_ && gameFiles_(path)) continue;
+        if (gameFiles_ && gameFiles_(path).state != GameFile::State::Unavailable) continue;
         out.push_back(path);
     }
     return out;

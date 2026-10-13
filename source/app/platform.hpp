@@ -45,8 +45,9 @@ mm::fs::path resourcePath(const std::string& name);
 // while starting it). The files come with mods applied unless L was held too, which turns
 // Atmosphère's LayeredFS off for that launch; update included either way. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
+// `notInGame` is set when the game's files could be opened but this one isn't among them.
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
-                  const std::function<void(uint64_t done, uint64_t total)>& progress = {});
+                  const std::function<void(uint64_t done, uint64_t total)>& progress = {}, bool* notInGame = nullptr);
 
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.
