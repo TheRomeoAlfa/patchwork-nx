@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <sstream>
 
+#include "bcml.hpp"
 #include "nlohmann/json.hpp"
 
 namespace mm {
@@ -36,6 +37,20 @@ void readSizeLogs(const fs::path& logs, std::map<std::string, uint32_t>& out) {
 
 }  // namespace
 
+bool BnpCheck::installable() const { return bnpInstallable(summary()); }
+
+std::vector<std::string> BnpCheck::summary() const {
+    auto out = mergeLogs;
+    if (!forSwitch) out.push_back("!wiiu");
+    return out;
+}
+
+bool bnpInstallable(const std::vector<std::string>& summary) {
+    for (const auto& l : summary)
+        if (l == "!wiiu" || !bcml::canMerge(l)) return false;
+    return true;
+}
+
 BnpCheck checkBnp(const std::vector<std::string>& archivePaths) {
     BnpCheck c;
     bool switchDirs = false, wiiuDirs = false;
@@ -67,8 +82,11 @@ std::map<std::string, uint32_t> readBnpSizes(const fs::path& root, const std::ve
 
 std::string bnpProblem(const BnpCheck& check) {
     if (!check.forSwitch) return "This BCML package is for the Wii U version of the game.";
-    return "This BCML package changes parts of the game's own files, which BCML merges on a PC. Patchwork can only "
-           "install BCML packages that don't need merging.";
+    std::string what;
+    for (const auto& l : check.mergeLogs)
+        if (!bcml::canMerge(l)) what += (what.empty() ? "" : ", ") + l;
+    return "This BCML package changes parts of the game that Patchwork can't merge yet (" + what +
+           "). Install it with BCML on a PC instead.";
 }
 
 }  // namespace mm

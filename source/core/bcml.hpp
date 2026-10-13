@@ -59,6 +59,8 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages);
 
 // Log files Patchwork can merge. Size logs (rstb.json/.log) are handled separately.
 bool canMerge(const std::string& logName);
+// Changes whenever canMerge() learns something new (for caches of "needs a PC").
+std::string mergeSupportKey();
 
 // Conversions between BCML's YAML logs and BYML (oead's "byml text": !u = UInt, !l = Int64,
 // !ul = UInt64, !f64 = Double; plain numbers are Int or Float).

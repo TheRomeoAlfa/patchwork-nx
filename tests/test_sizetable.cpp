@@ -91,8 +91,10 @@ TEST("bnp: which BCML packages can be installed") {
     CHECK(simple.installable());
     CHECK(checkBnp({"01007EF00011E000/romfs/Model/A.sbfres", "info.json"}).installable());
     auto merge = checkBnp({"01007EF00011E000/romfs/Pack/TitleBG.pack", "logs/packs.json", "logs/rstb.json", "logs/deepmerge.aamp"});
-    CHECK(!merge.installable());
+    CHECK(merge.installable());  // both merged on the console
     CHECK_EQ(merge.mergeLogs.size(), 2u);
+    CHECK(!checkBnp({"logs/packs.json", "logs/packs.log"}).installable());  // BCML 2 format
+    CHECK(!bnpInstallable({"packs.json", "!wiiu"}));
     CHECK(!checkBnp({"content/Model/A.sbfres", "logs/rstb.json"}).forSwitch);
     CHECK(!checkBnp({"01007EF00011E000/romfs/A", "options/Extra/01007EF00011E000/romfs/B", "options/Extra/logs/texts.json"}).installable());
     CHECK(checkBnp({"01007EF00011E000/romfs/A", "options/Extra/logs/rstb.log"}).installable());
@@ -121,8 +123,19 @@ TEST("bnp: prepare a simple package with an option") {
     auto merge = d.path / "merge.bnp";
     makeArchive(merge, {{"01007EF00011E000/romfs/Pack/TitleBG.pack", "x"}, {"logs/packs.json", "{}"}});
     auto q = prepareArchive(merge, d.path / "work2", Game::Botw, "m");
-    CHECK(q.layout.kind == PackageKind::Bcml);
-    CHECK(!q.layout.problem.empty());
+    CHECK(q.layout.kind == PackageKind::Installable);
+    if (!q.layout.variants.empty()) {
+        CHECK(!q.layout.variants[0].bcmlLogs.empty());
+        std::vector<std::string> folders;
+        auto logs = variantLogFiles(q.layout, {0}, folders);
+        CHECK_EQ(folders.size(), 1u);
+        CHECK(logs.size() == 1 && logs[0].target == "bcml/0/packs.json");
+    }
+    auto unsupported = d.path / "unsupported.bnp";
+    makeArchive(unsupported, {{"01007EF00011E000/romfs/Pack/TitleBG.pack", "x"}, {"logs/packs.json", "{}"}, {"logs/packs.log", "x"}});
+    auto u = prepareArchive(unsupported, d.path / "work3", Game::Botw, "m");
+    CHECK(u.layout.kind == PackageKind::Bcml);
+    CHECK(u.layout.problem.find("packs.log") != std::string::npos);
 }
 
 TEST("library: BOTW size table is merged from all enabled mods") {

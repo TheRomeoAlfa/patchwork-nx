@@ -29,6 +29,8 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
             // "Main" is the package itself; options are "options/<name>".
             auto root = v.name.rfind("options/", 0) == 0 ? workDir / fs::path(v.name) : workDir;
             v.resourceSizes = readBnpSizes(root);
+            std::error_code ec;
+            if (!check.mergeLogs.empty() && fs::is_directory(root / "logs", ec)) v.bcmlLogs = root / "logs";
         }
         return p;
     }
@@ -47,6 +49,29 @@ std::map<std::string, uint32_t> mergeVariantSizes(const LayoutResult& layout, co
     for (auto idx : selected)
         if (idx < layout.variants.size())
             for (const auto& [name, size] : layout.variants[idx].resourceSizes) out[name] = size;
+    return out;
+}
+
+std::vector<FileMapping> variantLogFiles(const LayoutResult& layout, const std::vector<size_t>& selected,
+                                         std::vector<std::string>& folders) {
+    std::vector<FileMapping> out;
+    folders.clear();
+    std::vector<size_t> order = selected;
+    // The main package's logs first (its variant isn't under options/), then the options'.
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        bool ao = layout.variants.at(a).name.rfind("options/", 0) == 0, bo = layout.variants.at(b).name.rfind("options/", 0) == 0;
+        return !ao && bo;
+    });
+    for (auto idx : order) {
+        const auto& logs = layout.variants.at(idx).bcmlLogs;
+        if (logs.empty()) continue;
+        auto folder = std::to_string(folders.size());
+        folders.push_back(folder);
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(logs, ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_regular_file(ec))
+                out.push_back({it->path(), "bcml/" + folder + "/" + it->path().lexically_relative(logs).generic_string()});
+    }
     return out;
 }
 
