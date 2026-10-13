@@ -18,7 +18,7 @@
 namespace app {
 
 namespace {
-// Nothing in the mod can be installed here: TKMM packages, and BCML packages that need merging.
+// Nothing in the mod can be installed here: TKMM packages, and BCML packages Patchwork can't merge.
 bool onlyPcPackages(const std::vector<mm::gb::ModFile>& files) {
     if (files.empty()) return false;
     for (const auto& f : files) {

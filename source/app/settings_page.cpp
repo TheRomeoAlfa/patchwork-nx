@@ -165,9 +165,10 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         });
         sizeTimer_.start(150);
     }
-    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp). To read it, hold L and R while starting Breath of the "
-                                "Wild: R opens the Homebrew Menu (start Patchwork from there) and L turns mods off for that "
-                                "launch, so Patchwork sees the game's own copy rather than a mod's.",
+    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp), along with the game files they're merged with. To read "
+                                "them, hold L and R while starting Breath of the Wild: R opens the Homebrew Menu (start Patchwork "
+                                "from there) and L turns mods off for that launch, so Patchwork sees the game's own files rather "
+                                "than a mod's. It keeps copies, so this is needed once per package (and after a game update).",
                                 14, ui::muted(), false);
     sizesNote->setMargins(10, 4, 4, 4);
     content->addView(sizesNote);
@@ -228,7 +229,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         std::string(APP_TITLE) + " " + APP_VERSION + ", a mod manager for Breath of the Wild and Tears of the Kingdom." +
             "\nMods are downloaded from GameBanana and belong to their authors. Installed mods go into "
             "atmosphere/contents and are only active while running Atmosphère.\n"
-            "BCML packages that need merging and TKMM packages (PC tools) can't be installed here.",
+            "BCML packages (.bnp) are merged with Breath of the Wild's own files right here; TKMM packages (.tkcl) need a PC.",
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
