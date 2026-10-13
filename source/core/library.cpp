@@ -477,6 +477,7 @@ std::string Library::bcmlKey() const {
     std::sort(pkgs.begin(), pkgs.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
     std::string key;
     for (const auto* m : pkgs) key += m->id + "@" + std::to_string(m->installedAt) + ";";
+    if (!key.empty()) key += "lang=" + textLanguage_;
     return key;
 }
 
@@ -502,7 +503,9 @@ void Library::refreshBcml() {
         pkgs.push_back(std::move(p));
     }
     ReaderGameFiles game(gameFiles_);
-    auto result = bcml::merge(pkgs, game);
+    bcml::Options options;
+    options.language = textLanguage_;
+    auto result = bcml::merge(pkgs, game, options);
     std::string err;
     if (!removeTree(staging, &err)) throw std::runtime_error(err);
     std::vector<std::string> outputs;
@@ -518,7 +521,9 @@ void Library::refreshBcml() {
 
 std::vector<std::string> Library::missingGameFiles(const std::vector<fs::path>& logDirs) const {
     std::vector<std::string> out;
-    for (const auto& path : bcml::gameFilesNeeded({{"new", {}, logDirs}})) {
+    bcml::Options options;
+    options.language = textLanguage_;
+    for (const auto& path : bcml::gameFilesNeeded({{"new", {}, logDirs}}, options)) {
         // A new pack the game doesn't have is fine; everything else must be readable.
         if (gameFiles_ && gameFiles_(path).state != GameFile::State::Unavailable) continue;
         out.push_back(path);

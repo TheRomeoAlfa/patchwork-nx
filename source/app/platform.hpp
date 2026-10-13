@@ -49,6 +49,10 @@ mm::fs::path resourcePath(const std::string& name);
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
                   const std::function<void(uint64_t done, uint64_t total)>& progress = {}, bool* notInGame = nullptr);
 
+// The language BOTW shows its text in, as its message packs name it ("USen", "EUfr"…), from
+// the console's language. On desktop: $MM_GAME_LANG, default "USen".
+std::string gameTextLanguage();
+
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.
 std::tm localTime(int64_t unixSeconds);

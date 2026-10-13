@@ -197,6 +197,46 @@ bool idToUid(const std::string& id, AccountUid& uid) {
 #endif
 }  // namespace
 
+std::string gameTextLanguage() {
+#ifdef __SWITCH__
+    std::string lang = "USen";
+    if (R_SUCCEEDED(setInitialize())) {
+        u64 code = 0;
+        SetLanguage l;
+        if (R_SUCCEEDED(setGetSystemLanguage(&code)) && R_SUCCEEDED(setMakeLanguage(code, &l))) {
+            switch (l) {
+                case SetLanguage_JA: lang = "JPja"; break;
+                case SetLanguage_ENUS: lang = "USen"; break;
+                case SetLanguage_ENGB: lang = "EUen"; break;
+                case SetLanguage_FR: lang = "EUfr"; break;
+                case SetLanguage_FRCA: lang = "USfr"; break;
+                case SetLanguage_DE: lang = "EUde"; break;
+                case SetLanguage_IT: lang = "EUit"; break;
+                case SetLanguage_ES: lang = "EUes"; break;
+                case SetLanguage_ES419: lang = "USes"; break;
+                case SetLanguage_NL: lang = "EUnl"; break;
+                case SetLanguage_RU: lang = "EUru"; break;
+                case SetLanguage_KO: lang = "KRko"; break;
+                case SetLanguage_ZHCN:
+                case SetLanguage_ZHHANS: lang = "CNzh"; break;
+                case SetLanguage_ZHTW:
+                case SetLanguage_ZHHANT: lang = "TWzh"; break;
+                default: {
+                    // BOTW has no Portuguese: it falls back to English for the region.
+                    SetRegion region;
+                    lang = R_SUCCEEDED(setGetRegionCode(&region)) && region == SetRegion_USA ? "USen" : "EUen";
+                }
+            }
+        }
+        setExit();
+    }
+    return lang;
+#else
+    const char* env = std::getenv("MM_GAME_LANG");
+    return env ? env : "USen";
+#endif
+}
+
 std::tm localTime(int64_t unixSeconds) {
     std::tm tm{};
     std::time_t t = static_cast<std::time_t>(unixSeconds);

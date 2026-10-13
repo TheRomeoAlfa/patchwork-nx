@@ -6,6 +6,8 @@
 #include <stdexcept>
 
 #include "aamp.hpp"
+#include "msbt.hpp"
+#include "msyt.hpp"
 #include "nlohmann/json.hpp"
 #include "sarc.hpp"
 #include "rstbcalc.hpp"
@@ -51,6 +53,7 @@ struct Context {
     const std::vector<Package>& packages;
     GameFiles& game;
     Result& result;
+    Options options;
     std::map<std::string, std::optional<std::string>> gameCache;
     // Archives being edited (the merged pack if there is one, else the game's), by path.
     struct Pack {
@@ -807,6 +810,81 @@ void mergeAsLists(Context& c) {
     }
 }
 
+// ---------------------------------------------------------------- texts
+
+// BCML's map_languages: the same code, else the same language, else English, else any.
+std::string pickLanguage(const std::string& target, const nlohmann::json& available) {
+    if (available.contains(target)) return target;
+    auto lang = target.substr(2);
+    for (const auto& [code, v] : available.items())
+        if (code.size() == 4 && code.substr(2) == lang) return code;
+    for (const auto& [code, v] : available.items())
+        if (code.size() == 4 && code.substr(2) == "en") return code;
+    return available.empty() ? std::string() : available.begin().key();
+}
+
+void mergeTexts(Context& c) {
+    const auto& lang = c.options.language;
+    // file (.msbt) -> label -> entry; higher packages replace whole entries.
+    std::map<std::string, std::map<std::string, nlohmann::json>> changes;
+    std::error_code ec;
+    for (const auto& p : c.packages) {
+        nlohmann::json pkg = nlohmann::json::object();
+        for (const auto& d : p.logDirs) {
+            if (!fs::exists(d / "texts.json", ec)) continue;
+            auto j = nlohmann::json::parse(readFile(d / "texts.json"));
+            for (const auto& [l, files] : j.items())
+                for (const auto& [file, entries] : files.items())
+                    for (const auto& [label, e] : entries.items()) pkg[l][file][label] = e;
+        }
+        auto src = pickLanguage(lang, pkg);
+        if (src.empty()) continue;
+        for (const auto& [file, entries] : pkg[src].items()) {
+            std::string msbtName = file;
+            for (size_t at; (at = msbtName.find("msyt")) != std::string::npos;) msbtName.replace(at, 4, "msbt");
+            for (const auto& [label, e] : entries.items()) changes[msbtName][label] = e;
+        }
+    }
+    if (changes.empty()) return;
+    const std::string pack = std::string(kContent) + "Pack/Bootup_" + lang + ".pack";
+    const std::string inner = "Message/Msg_" + lang + ".product.ssarc";
+    if (!c.result.files.count(pack) && !c.gameFileOpt(pack)) {
+        c.result.notes.push_back("the game has no " + lang + " text, so text changes were skipped");
+        return;
+    }
+    auto* msgs = c.edit({pack, inner});
+    if (!msgs) throw std::runtime_error("the game's Bootup_" + lang + ".pack has no " + inner);
+    auto sarc = Sarc::parse(*msgs);
+    for (const auto& [file, entries] : changes) {
+        msbt::File f;
+        SarcFile* existing = nullptr;
+        for (auto& sf : sarc.files)
+            if (sf.name == file) existing = &sf;
+        if (existing) {
+            f = msbt::parse(existing->data);
+        } else {
+            f.hasAttributes = true;
+            f.attrSize = file.find("EventFlowMsg") != std::string::npos ? 0 : 4;
+            f.attrStrings = f.attrSize == 4;
+        }
+        for (const auto& [label, e] : entries) {
+            msbt::Message m;
+            const auto* old = f.find(label);
+            if (old) m = *old;
+            m.text = msyt::encodeContents(e.value("contents", nlohmann::json::array()));
+            if (f.attrStrings && e.contains("attributes") && e["attributes"].is_string())
+                m.attribute = msyt::encodeAttributes(e["attributes"].get<std::string>());
+            f.set(label, std::move(m));
+        }
+        auto bytes = msbt::write(f);
+        if (existing)
+            existing->data = std::move(bytes);
+        else
+            sarc.files.push_back({file, std::move(bytes)});
+    }
+    *msgs = yaz0Compress(sarc.write());
+}
+
 // ---------------------------------------------------------------- size table
 
 const std::set<std::string>& sizeExcludedExts() {
@@ -882,7 +960,7 @@ std::vector<std::string> splitNested(const std::string& path) {
 
 namespace {
 const std::set<std::string>& mergedLogs() {
-    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp",
+    static const std::set<std::string> merged = {"packs.json", "deepmerge.aamp", "drops.json", "shop.aamp", "aslist.aamp", "texts.json",
                                                  "gamedata.yml", "savedata.yml", "actorinfo.yml", "eventinfo.yml"};
     return merged;
 }
@@ -946,7 +1024,7 @@ byml::Node toByml(const yaml::Node& n) {
     return out;
 }
 
-std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages) {
+std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, const Options& options) {
     std::set<std::string> out;
     std::error_code ec;
     for (const auto& p : packages)
@@ -976,24 +1054,29 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages) {
             } catch (const std::exception&) {
             }
             if (has("actorinfo.yml")) out.insert(kActorInfo);
+            if (has("texts.json")) out.insert(std::string(kContent) + "Pack/Bootup_" + options.language + ".pack");
         }
     return out;
 }
 
-Result merge(const std::vector<Package>& lowestFirst, GameFiles& game) {
+Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options) {
     Result result;
-    Context c{lowestFirst, game, result, {}, {}, {}};
+    Context c{lowestFirst, game, result, options, {}, {}, {}};
     mergePacks(c);
     deepMerge(c);
     mergeDrops(c);
     mergeShops(c);
     mergeAsLists(c);
+    mergeTexts(c);
     mergeActorInfo(c);
     mergeGameData(c);
     mergeSaveData(c);
     mergeEventInfo(c);
     c.closeAll();
     computeSizes(c);
+    // BCML drops the merged messages' entry: the game then sizes them from the file itself.
+    if (result.files.count(std::string(kContent) + "Pack/Bootup_" + options.language + ".pack"))
+        result.sizes["Message/Msg_" + options.language + ".product.sarc"] = 0;
     return result;
 }
 

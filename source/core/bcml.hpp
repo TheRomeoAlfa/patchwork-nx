@@ -50,12 +50,16 @@ struct Result {
     std::vector<std::string> notes;             // things worth logging
 };
 
+struct Options {
+    std::string language = "USen";  // the game's text language (Bootup_<language>.pack)
+};
+
 // Packages lowest priority first. Throws if a game file it needs can't be read (the message
 // names it).
-Result merge(const std::vector<Package>& lowestFirst, GameFiles& game);
+Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options = {});
 
 // The game files merging these packages reads (to copy them while they can be read).
-std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages);
+std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, const Options& options = {});
 
 // Log files Patchwork can merge. Size logs (rstb.json/.log) are handled separately.
 bool canMerge(const std::string& logName);

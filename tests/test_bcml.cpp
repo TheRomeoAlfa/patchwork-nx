@@ -403,3 +403,51 @@ TEST("bcml: drop tables, shops and animation lists") {
     CHECK_EQ(res->objects.size(), 2u);  // Npc_Base kept, Linkle_Anim added
     CHECK(r.sizes.count("Actor/ShopData/Npc_Shop.bshop"));
 }
+
+#include "msbt.hpp"
+
+TEST("bcml: text changes go into the game's language, controls encoded") {
+    t::TempDir d;
+    auto game = d.path / "game";
+    msbt::File item;
+    item.hasAttributes = true;
+    item.attrSize = 4;
+    item.attrStrings = true;
+    msbt::Message apple;
+    apple.text = msbt::toUtf16("Apple");
+    apple.attribute = msbt::toUtf16("Item") + std::string(2, '\0');
+    item.set("Item_Apple_Name", apple);
+    msbt::Message ore;
+    ore.text = msbt::toUtf16("Ore");
+    ore.attribute = msbt::toUtf16("Item") + std::string(2, '\0');
+    item.set("Item_Ore_Name", ore);
+    std::string msgs = sarcOf({{"ActorType/Item.msbt", msbt::write(item)}});
+    put(game / "01007EF00011E000/romfs/Pack/Bootup_EUen.pack", sarcOf({{"Message/Msg_EUen.product.ssarc", yaz0Compress(msgs)}}));
+
+    auto p = d.path / "p";
+    put(p / "logs/texts.json", R"({"USen": {
+      "ActorType/Item.msyt": {
+        "Item_Apple_Name": {"attributes": "Item", "contents": [{"text": "Linkle's "}, {"control": {"kind": "set_colour", "colour": "red"}}, {"text": "Apple"}]},
+        "Item_New_Name": {"attributes": "Item", "contents": [{"text": "Gem"}]}
+      },
+      "EventFlowMsg/Npc_New.msyt": {"Talk00": {"contents": [{"text": "Hi!"}, {"control": {"kind": "pause", "length": "long"}}]}}
+    }})");
+    bcml::FolderGameFiles files(game);
+    bcml::Options opt;
+    opt.language = "EUen";  // a UK console: the package's US English is used
+    std::vector<bcml::Package> pkgs = {{"p", p, {p / "logs"}}};
+    CHECK(bcml::gameFilesNeeded(pkgs, opt).count("01007EF00011E000/romfs/Pack/Bootup_EUen.pack"));
+    auto r = bcml::merge(pkgs, files, opt);
+    auto pack = Sarc::parse(r.files.at("01007EF00011E000/romfs/Pack/Bootup_EUen.pack"));
+    auto msgSarc = Sarc::parse(pack.find("Message/Msg_EUen.product.ssarc")->data);
+    auto merged = msbt::parse(msgSarc.find("ActorType/Item.msbt")->data);
+    CHECK_EQ(merged.messages.size(), 3u);
+    CHECK_EQ(merged.messages[0].first, std::string("Item_Apple_Name"));  // stays in place
+    CHECK(merged.find("Item_Apple_Name")->text.find(std::string("\x0E\x00\x00\x00\x03\x00", 6)) != std::string::npos);
+    CHECK_EQ(msbt::toUtf8(merged.find("Item_Ore_Name")->text), std::string("Ore"));  // untouched
+    CHECK_EQ(msbt::toUtf8(merged.find("Item_New_Name")->attribute.substr(0, 8)), std::string("Item"));
+    auto talk = msbt::parse(msgSarc.find("EventFlowMsg/Npc_New.msbt")->data);
+    CHECK_EQ(talk.messages.size(), 1u);
+    CHECK_EQ(talk.attrSize, 0u);
+    CHECK_EQ(r.sizes.at("Message/Msg_EUen.product.sarc"), 0u);  // dropped from the size table
+}
