@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <functional>
 #include "debug_script.hpp"
 
 #ifndef __SWITCH__
@@ -82,6 +84,31 @@ void runNext() {
                 heldButtons.clear();
                 runNext();
             });
+            return;
+        }
+        if (op == 'f') {
+            // Focus the first focusable view holding a label that starts with arg ('_' = space).
+            std::string want = arg;
+            std::replace(want.begin(), want.end(), '_', ' ');
+            auto stack = brls::Application::getActivitiesStack();
+            std::function<brls::View*(brls::View*)> find = [&](brls::View* v) -> brls::View* {
+                if (auto* l = dynamic_cast<brls::Label*>(v); l && l->getFullText().rfind(want, 0) == 0) {
+                    for (auto* p = v; p; p = p->getParent())
+                        if (p->isFocusable()) return p;
+                }
+                if (auto* b = dynamic_cast<brls::Box*>(v))
+                    for (auto* c : b->getChildren())
+                        if (auto* r = find(c)) return r;
+                return nullptr;
+            };
+            if (!stack.empty())
+                if (auto* v = find(stack.back()->getContentView())) {
+                    brls::Application::giveFocus(v);
+                    brls::Logger::info("focus {}: {}", arg, v->describe());
+                } else {
+                    brls::Logger::info("focus {}: not found", arg);
+                }
+            brls::delay(300, runNext);
             return;
         }
         if (op == 't') {

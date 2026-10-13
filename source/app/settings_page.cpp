@@ -3,6 +3,7 @@
 #include <ctime>
 
 #include "app_state.hpp"
+#include "bcml_test.hpp"
 #include "debug_script.hpp"
 #include "platform.hpp"
 #include "sysmodules.hpp"
@@ -28,6 +29,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     content->setPadding(24, 60, 24, 40);
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
+    scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);  // follow focus row by row, like the other lists
     scroll->setContentView(content);
     addView(scroll);
     scroll_ = scroll;
@@ -175,6 +177,52 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     where->setDetailText("SD:/switch/patchwork");
     content->addView(where);
 
+    section("Testing");
+    auto* bcml = new brls::DetailCell();
+    bcml->setText("BCML merge test");
+    bcml->setDetailText("Run");
+    bcml->registerClickAction([this](brls::View*) {
+        runBcmlTestNow();
+        return true;
+    });
+    content->addView(bcml);
+    bcmlRun_ = bcml;
+    auto* bcmlNote = ui::label("Measures how fast this Switch can merge BCML packages into the game's own files (for full BCML "
+                               "support). Open Patchwork by holding L and R while starting Breath of the Wild first. Downloads "
+                               "two small packages; installs nothing. Takes a minute or two.",
+                               14, ui::muted(), false);
+    bcmlNote->setMargins(10, 4, 4, 4);
+    content->addView(bcmlNote);
+    bcmlReport_ = ui::label("", 14, ui::text(), false);
+    bcmlReport_->setMargins(6, 4, 4, 4);
+    content->addView(bcmlReport_);
+    try {
+        auto saved = AppState::get().dataDir() / "bcml-test" / "report.txt";
+        std::error_code ec;
+        if (mm::fs::exists(saved, ec)) bcmlReport_->setText("Last run:\n" + mm::readFile(saved));
+    } catch (...) {
+    }
+    if (bcmlReport_->getFullText().empty()) bcmlReport_->setVisibility(brls::Visibility::GONE);
+    bcmlTitle_ = new brls::DetailCell();
+    bcmlTitle_->setText("Merged Linkle title screen");
+    bcmlTitle_->registerClickAction([this](brls::View*) {
+        try {
+            if (bcmlTitleInGame()) {
+                removeBcmlTitleFromGame();
+                brls::Application::notify("Title screen test removed");
+            } else {
+                putBcmlTitleInGame();
+                brls::Application::notify("Start Breath of the Wild normally to see the title screen");
+            }
+        } catch (const std::exception& e) {
+            brls::Application::notify(e.what());
+        }
+        showBcmlTitleCell();
+        return true;
+    });
+    content->addView(bcmlTitle_);
+    showBcmlTitleCell();
+
     section("About");
     auto* about = ui::label(
         std::string(APP_TITLE) + " " + APP_VERSION + ", a mod manager for Breath of the Wild and Tears of the Kingdom." +
@@ -297,6 +345,50 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
                 dialog->addButton("OK", [] {});
                 dialog->open();
             }
+        });
+}
+
+void SettingsPage::showBcmlTitleCell() {
+    bool ready = bcmlTitleReady();
+    if (!ready && ui::focusInside(bcmlTitle_)) brls::Application::giveFocus(bcmlRun_);
+    bcmlTitle_->setVisibility(ready ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+    bcmlTitle_->setDetailText(bcmlTitleInGame() ? "Remove from game" : "Put in game");
+}
+
+void SettingsPage::runBcmlTestNow() {
+    auto& st = AppState::get();
+    if (st.installBusy()) {
+        brls::Application::notify("Wait for the current change to finish");
+        return;
+    }
+    st.setInstallBusy(true);
+    auto busy = ui::busyBox("Starting…", "Measuring. This takes a minute or two.", "Please wait until the test finishes");
+    scroll_->setVisibility(brls::Visibility::GONE);
+    addView(busy.box);
+    brls::Application::giveFocus(busy.box);
+    auto alive = alive_;
+    auto report = std::make_shared<std::string>();
+    st.runFileJob(
+        [busy, alive, report](mm::Library&) {
+            *report = runBcmlTest([busy, alive](const std::string& step, float f) {
+                brls::sync([busy, alive, step, f] {
+                    if (!*alive) return;
+                    busy.status->setText(step);
+                    busy.bar->setVisibility(brls::Visibility::VISIBLE);
+                    busy.bar->setProgress(f);
+                });
+            });
+        },
+        [this, alive, box = busy.box, report](const std::string& error) {
+            AppState::get().setInstallBusy(false);
+            if (!*alive) return;
+            scroll_->setVisibility(brls::Visibility::VISIBLE);
+            brls::Application::giveFocus(bcmlRun_);
+            removeView(box);
+            bcmlReport_->setVisibility(brls::Visibility::VISIBLE);
+            bcmlReport_->setText(error.empty() ? *report : "The test stopped: " + error);
+            showBcmlTitleCell();
+            brls::Application::notify(error.empty() ? "Test finished" : "Test stopped");
         });
 }
 

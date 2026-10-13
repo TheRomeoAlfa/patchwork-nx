@@ -27,6 +27,11 @@ std::string gameVersion(mm::Game game);
 
 uint64_t freeSpaceBytes();
 
+// Memory this process uses now, and what it may use at most (0 when unknown). On desktop:
+// the peak resident size, and 0.
+uint64_t memoryUsedBytes();
+uint64_t memoryTotalBytes();
+
 std::string userAgent();
 
 // Certificate bundle shipped with the app ("" = system store).
