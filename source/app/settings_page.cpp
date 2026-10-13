@@ -163,8 +163,9 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         });
         sizeTimer_.start(150);
     }
-    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp): Patchwork reads it from Breath of the Wild when it's "
-                                "opened by holding R while starting the game.",
+    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp). To read it, hold L and R while starting Breath of the "
+                                "Wild: R opens the Homebrew Menu (start Patchwork from there) and L turns mods off for that "
+                                "launch, so Patchwork sees the game's own copy rather than a mod's.",
                                 14, ui::muted(), false);
     sizesNote->setMargins(10, 4, 4, 4);
     content->addView(sizesNote);

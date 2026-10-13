@@ -587,7 +587,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 if (!lib.canMergeSizes(r))
                     throw std::runtime_error(
                         "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
-                        "Close Patchwork, then open it by holding R while starting Breath of the Wild, and install again.");
+                        "Close Patchwork, then open it by holding L and R while starting Breath of the Wild, and install again.");
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;

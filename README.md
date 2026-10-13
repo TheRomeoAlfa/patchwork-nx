@@ -24,7 +24,7 @@ Mods belong to their authors.
 
 Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods' changes into the game's
 own files, with one exception: BOTW's resource size table, which it merges from the game's copy (read when
-Patchwork is opened by holding R while starting BOTW) and every enabled mod. That makes BCML packages (`.bnp`)
+Patchwork is opened by holding L and R while starting BOTW: R opens the Homebrew Menu, L turns mods off for that launch) and every enabled mod. That makes BCML packages (`.bnp`)
 that only list resource sizes installable. BCML packages that need real merging, and TKMM (`.tkcl`) packages,
 are hidden from Browse and flagged as needing those PC tools.
 

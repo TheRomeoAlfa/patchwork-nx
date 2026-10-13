@@ -37,8 +37,8 @@ mm::fs::path resourcePath(const std::string& name);
 
 // Read one of the game's own files (path inside its romfs, e.g. "System/Resource/x"). On the
 // Switch this only works while Patchwork runs in place of that game (opened by holding R
-// while starting it); Atmosphère then passes the game's original files through, update
-// included. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
+// while starting it). The files come with mods applied unless L was held too, which turns
+// Atmosphère's LayeredFS off for that launch; update included either way. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
                   const std::function<void(uint64_t done, uint64_t total)>& progress = {});
