@@ -19,7 +19,7 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     left->setLineRight(1);
     left->setLineColor(ui::line());
     auto* header = ui::hbox();
-    header->setMargins(0, 6, 10, 6);
+    header->setMargins(0, 28, 10, 6);  // right: lines up with the rows
     header->addView(ui::label("Load order", 22, ui::text()));
     header->addView(ui::grow());
     count_ = ui::label("top of the list wins", 15, ui::muted());
@@ -27,6 +27,7 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     left->addView(header);
 
     list_ = ui::vbox();
+    list_->setPaddingRight(28);  // keeps rows clear of the scroll bar
     scroll_ = new brls::ScrollingFrame();
     scroll_->setGrow(1);
     scroll_->setContentView(list_);
@@ -431,16 +432,38 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     brls::Application::giveFocus(box);
 
     auto shown = std::make_shared<int>(-1);
-    mm::ProgressFn progress = [this, alive, busy, shown](size_t done, size_t total, const std::string&) {
+    mm::ProgressFn progress = [this, alive, busy, shown, status](size_t done, size_t total, const std::string&) {
         if (!total) return;
         int step = static_cast<int>(done * 50 / total);  // ~2% steps
         if (step == *shown && done != total) return;
         *shown = step;
-        brls::sync([this, alive, busy, done, total]() mutable {
-            if (*alive && busy_) busy.update(done, total);
+        brls::sync([this, alive, busy, done, total, status]() mutable {
+            if (!*alive || !busy_) return;
+            busy.status->setText(status);  // after a merge's progress
+            busy.update(done, total);
         });
     };
-    AppState::get().runFileJob([job = std::move(job), progress](mm::Library& lib) { job(lib, progress); },
+    auto lastPct = std::make_shared<int>(-1);
+    auto mergeProgress = [this, alive, busy, lastPct](float f) {
+        int pct = static_cast<int>(f * 100);
+        if (pct == *lastPct) return;
+        *lastPct = pct;
+        brls::sync([this, alive, busy, pct, f] {
+            if (!*alive || !busy_) return;
+            busy.status->setText("Merging BCML packages with the game's files… " + std::to_string(pct) + "%");
+            busy.bar->setVisibility(brls::Visibility::VISIBLE);
+            busy.bar->setProgress(f);
+            busy.count->setText("");
+        });
+    };
+    AppState::get().runFileJob([job = std::move(job), progress, mergeProgress](mm::Library& lib) {
+        lib.setMergeProgress(mergeProgress);
+        struct StopProgress {
+            mm::Library& lib;
+            ~StopProgress() { lib.setMergeProgress({}); }
+        } stopProgress{lib};
+        job(lib, progress);
+    },
                                [this, alive](const std::string& error) {
         AppState::get().setInstallBusy(false);
         if (!*alive) return;

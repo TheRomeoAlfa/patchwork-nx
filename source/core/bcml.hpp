@@ -52,6 +52,7 @@ struct Result {
 
 struct Options {
     std::string language = "USen";  // the game's text language (Bootup_<language>.pack)
+    std::function<void(float)> progress;  // 0..1, called between steps (optional)
 };
 
 // Packages lowest priority first. Throws if a game file it needs can't be read (the message

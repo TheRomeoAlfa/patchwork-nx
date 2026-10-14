@@ -144,6 +144,9 @@ TEST("bnp: prepare a simple package with an option") {
         std::vector<std::string> folders;
         CHECK_EQ(variantLogFiles(lo.layout, {0}, folders).size(), 2u);
     }
+    auto forTotk = prepareArchive(logsOnly, d.path / "work5", Game::Totk, "m");
+    CHECK(forTotk.layout.kind == PackageKind::Empty);
+    CHECK(forTotk.layout.problem.find("Breath of the Wild") != std::string::npos);
     auto unsupported = d.path / "unsupported.bnp";
     makeArchive(unsupported, {{"01007EF00011E000/romfs/Pack/TitleBG.pack", "x"}, {"logs/packs.json", "{}"}, {"logs/packs.log", "x"}});
     auto u = prepareArchive(unsupported, d.path / "work3", Game::Botw, "m");

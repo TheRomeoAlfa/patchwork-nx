@@ -226,6 +226,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
     pane_->addView(sub);
 
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -457,6 +458,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         pane_->addView(note);
     }
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -620,10 +622,19 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     auto missing = lib.missingGameFiles(logDirs);
                     if (!missing.empty()) throw std::runtime_error(kSetupMarker + missing.front());
                 }
-                if (!logs.empty())
-                    brls::sync([this, alive] {
-                        if (*alive && workingLabel_) setWorking("Merging with the game's files…", -1);
+                auto lastPct = std::make_shared<int>(-1);
+                lib.setMergeProgress([this, alive, lastPct](float f) {
+                    int pct = static_cast<int>(f * 100);
+                    if (pct == *lastPct) return;
+                    *lastPct = pct;
+                    brls::sync([this, alive, pct, f] {
+                        if (*alive && workingLabel_) setWorking("Merging with the game's files… " + std::to_string(pct) + "%", f);
                     });
+                });
+                struct StopProgress {
+                    mm::Library& lib;
+                    ~StopProgress() { lib.setMergeProgress({}); }
+                } stopProgress{lib};
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;
@@ -771,6 +782,7 @@ void InstallFlow::showSaveList(const ModDetails& d, const ModFile& file, std::sh
     sub->setMargins(6, 0, 16, 0);
     pane_->addView(sub);
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -890,6 +902,7 @@ void InstallFlow::showSaveOptions(const ModDetails& d, const ModFile& file, std:
         pane_->addView(note);
     }
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setContentView(list);

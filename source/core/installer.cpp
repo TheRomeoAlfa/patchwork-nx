@@ -20,6 +20,11 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
         for (const auto& e : fs::recursive_directory_iterator(workDir))
             if (e.is_regular_file()) paths.push_back(e.path().lexically_relative(workDir).generic_string());
         auto check = checkBnp(paths);
+        if (game != Game::Botw) {
+            p.layout.kind = PackageKind::Empty;
+            p.layout.problem = "This is a BCML package, made for Breath of the Wild. Switch game with ZL/ZR, then install it again.";
+            return p;
+        }
         if (!check.installable()) {
             p.layout.kind = PackageKind::Bcml;
             p.layout.problem = bnpProblem(check);

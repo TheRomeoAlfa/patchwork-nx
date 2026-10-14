@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 
 #include "aamp.hpp"
@@ -371,7 +372,12 @@ TEST("bcml: drop tables, shops and animation lists") {
         put(p / "logs/aslist.aamp", aamp::write(log));
     }
     bcml::FolderGameFiles files(game);
-    auto r = bcml::merge({{"p", p, {p / "logs"}}}, files);
+    std::vector<float> steps;
+    bcml::Options opt;
+    opt.progress = [&](float f) { steps.push_back(f); };
+    auto r = bcml::merge({{"p", p, {p / "logs"}}}, files, opt);
+    CHECK(steps.size() > 10 && steps.front() == 0.0f && steps.back() == 1.0f);
+    CHECK(std::is_sorted(steps.begin(), steps.end()));
     auto out = Sarc::parse(r.files.at(pack));
 
     auto drops = aamp::parse(out.find("Actor/DropTable/Npc_Shop.bdrop")->data);
