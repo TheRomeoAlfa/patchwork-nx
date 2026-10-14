@@ -170,7 +170,7 @@ ModRecord* Library::findMut(const std::string& id) {
 const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& files, bool enable,
                               const ProgressFn& progress, const std::vector<FileMapping>& internal) {
     if (record.id.empty()) throw std::invalid_argument("mod id is empty");
-    if (files.empty()) throw std::invalid_argument("mod has no files");
+    if (files.empty() && internal.empty()) throw std::invalid_argument("mod has no files");
 
     // 1. Copy into a staging folder. Until this succeeds neither the library nor the SD
     //    card changes, so a failed copy (SD full, bad archive) leaves no trace.

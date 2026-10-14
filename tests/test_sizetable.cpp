@@ -131,6 +131,19 @@ TEST("bnp: prepare a simple package with an option") {
         CHECK_EQ(folders.size(), 1u);
         CHECK(logs.size() == 1 && logs[0].target == "bcml/0/packs.json");
     }
+    // Only merged data (like "99 slots for all weapons"): nothing to copy, still installable.
+    auto logsOnly = d.path / "logsonly.bnp";
+    makeArchive(logsOnly, {{"info.json", "{}"}, {"logs/gamedata.yml", "s32_data: {add: {}, del: []}\n"},
+                           {"logs/rstb.json", "{}"}, {"options/Off/logs/rstb.json", "{}"}});
+    auto lo = prepareArchive(logsOnly, d.path / "work4", Game::Botw, "m");
+    CHECK(lo.layout.kind == PackageKind::Installable);
+    CHECK_EQ(lo.layout.variants.size(), 1u);  // the option changes nothing
+    if (!lo.layout.variants.empty()) {
+        CHECK_EQ(lo.layout.variants[0].name, std::string("Main"));
+        CHECK(lo.layout.variants[0].files.empty());
+        std::vector<std::string> folders;
+        CHECK_EQ(variantLogFiles(lo.layout, {0}, folders).size(), 2u);
+    }
     auto unsupported = d.path / "unsupported.bnp";
     makeArchive(unsupported, {{"01007EF00011E000/romfs/Pack/TitleBG.pack", "x"}, {"logs/packs.json", "{}"}, {"logs/packs.log", "x"}});
     auto u = prepareArchive(unsupported, d.path / "work3", Game::Botw, "m");
