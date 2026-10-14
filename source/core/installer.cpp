@@ -26,6 +26,30 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
             return p;
         }
         p.layout = detectLayout(workDir, game, modSlug);
+        if (!check.mergeLogs.empty()) {
+            // Packages that only change merged data (gamedata.yml, texts.json…) have no files
+            // to copy, so the layout found nothing for them: they're still installable.
+            auto mergesSomething = [](const fs::path& logs) {
+                std::error_code ec;
+                for (fs::directory_iterator it(logs, ec), end; it != end; it.increment(ec))
+                    if (it->is_regular_file(ec) && !iequals(it->path().filename().string(), "rstb.json")) return true;
+                return false;
+            };
+            auto hasVariant = [&](const std::string& name) {
+                return std::any_of(p.layout.variants.begin(), p.layout.variants.end(),
+                                   [&](const Variant& v) { return v.name == name; });
+            };
+            std::vector<std::string> names{"Main"};
+            std::error_code ec;
+            for (fs::directory_iterator it(workDir / "options", ec), end; it != end; it.increment(ec))
+                if (it->is_directory(ec)) names.push_back("options/" + it->path().filename().string());
+            std::sort(names.begin() + 1, names.end());
+            for (const auto& name : names) {
+                auto root = name == "Main" ? workDir : workDir / fs::path(name);
+                if (!hasVariant(name) && mergesSomething(root / "logs")) p.layout.variants.push_back({name, {}, {}, {}});
+            }
+            if (!p.layout.variants.empty()) p.layout.kind = PackageKind::Installable;
+        }
         for (auto& v : p.layout.variants) {
             // "Main" is the package itself; options are "options/<name>".
             auto root = v.name.rfind("options/", 0) == 0 ? workDir / fs::path(v.name) : workDir;
