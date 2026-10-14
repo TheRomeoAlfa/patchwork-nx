@@ -27,6 +27,26 @@ bool onlyPcPackages(const std::vector<mm::gb::ModFile>& files) {
     }
     return true;
 }
+
+// Earlier test builds had a BCML merge test in Settings that could put a merged title screen
+// in the game. Take it out if it's still there, then the test's folder.
+void removeBcmlTestLeftovers(const mm::fs::path& dataDir) {
+    std::error_code ec;
+    auto dir = dataDir / "bcml-test";
+    if (!mm::fs::exists(dir, ec)) return;
+    try {
+        auto ours = dir / "out" / "Title.pack";
+        auto inGame = platform::sdRoot() / "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
+        if (mm::fs::exists(ours, ec) && mm::fs::exists(inGame, ec) &&
+            mm::fs::file_size(ours, ec) == mm::fs::file_size(inGame, ec) && mm::readFile(ours) == mm::readFile(inGame)) {
+            mm::fs::remove(inGame, ec);
+            mm::pruneEmptyDirs(inGame.parent_path(), platform::sdRoot() / "atmosphere" / "contents");
+        }
+        mm::removeTree(dir);
+    } catch (const std::exception& e) {
+        brls::Logger::warning("couldn't remove the BCML test's files: {}", e.what());
+    }
+}
 }  // namespace
 
 using json = nlohmann::json;
@@ -176,6 +196,7 @@ void AppState::init() {
             }
         } finish{this};
         mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
+        removeBcmlTestLeftovers(dataDir_);
         setSizeTableProgress(0.1f);
         lib.load();
         setSizeTableProgress(0.2f);
