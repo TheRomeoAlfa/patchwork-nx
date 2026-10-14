@@ -126,6 +126,8 @@ public:
     void setGameFileReader(GameFileReader reader) { gameFiles_ = std::move(reader); }
     // The game's text language, for merging BCML packages' text changes.
     void setTextLanguage(std::string language) { textLanguage_ = std::move(language); }
+    // Told 0..1 while BCML packages are merged (it can take a while); empty to stop.
+    void setMergeProgress(std::function<void(float)> progress) { mergeProgress_ = std::move(progress); }
     // Game files merging would need for a package with these log folders, that can't be read
     // now (package-style paths). Files the game doesn't have don't count.
     std::vector<std::string> missingGameFiles(const std::vector<fs::path>& logDirs) const;
@@ -162,6 +164,7 @@ private:
     fs::path sdRoot_, dataDir_, originalSizeTable_;
     GameFileReader gameFiles_;
     std::string textLanguage_ = "USen";
+    std::function<void(float)> mergeProgress_;
     // The last BCML merge: its inputs, the SD targets it produced (staged under
     // <dataDir>/bcml-merged) and their size table entries.
     std::string bcmlKey_;

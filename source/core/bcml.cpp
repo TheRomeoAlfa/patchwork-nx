@@ -145,9 +145,13 @@ struct Context {
         auto raw = p.sarc.write();
         return p.yaz ? yaz0Compress(raw) : raw;
     }
-    void closeAll() {
-        for (auto& [path, p] : packs)
+    // `progress` gets 0..1 as the archives are packed (and recompressed).
+    void closeAll(const std::function<void(float)>& progress = {}) {
+        size_t done = 0;
+        for (auto& [path, p] : packs) {
             if (p->dirty) result.files[path] = close(*p);
+            if (progress) progress(static_cast<float>(++done) / packs.size());
+        }
         packs.clear();
     }
 
@@ -1287,20 +1291,21 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
 Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options) {
     Result result;
     Context c{lowestFirst, game, result, options, {}, {}, {}};
-    mergePacks(c);
-    deepMerge(c);
-    mergeDrops(c);
-    mergeShops(c);
-    mergeAsLists(c);
-    mergeTexts(c);
-    mergeActorInfo(c);
-    mergeMaps(c);
-    mergeMainStatic(c);
-    mergeGameData(c);
-    mergeSaveData(c);
-    mergeEventInfo(c);
-    c.closeAll();
+    // Rough shares of the time: the merges read the game's files, packing recompresses the
+    // big archives, sizes parse every merged file.
+    auto report = [&](float f) {
+        if (options.progress) options.progress(f);
+    };
+    void (*const steps[])(Context&) = {mergePacks,   deepMerge, mergeDrops,      mergeShops,    mergeAsLists,  mergeTexts,
+                                       mergeActorInfo, mergeMaps, mergeMainStatic, mergeGameData, mergeSaveData, mergeEventInfo};
+    report(0);
+    for (size_t i = 0; i < std::size(steps); ++i) {
+        steps[i](c);
+        report(0.5f * (i + 1) / std::size(steps));
+    }
+    c.closeAll([&](float f) { report(0.5f + 0.35f * f); });
     computeSizes(c);
+    report(1);
     // BCML drops the merged messages' entry: the game then sizes them from the file itself.
     if (result.files.count(std::string(kContent) + "Pack/Bootup_" + options.language + ".pack"))
         result.sizes["Message/Msg_" + options.language + ".product.sarc"] = 0;

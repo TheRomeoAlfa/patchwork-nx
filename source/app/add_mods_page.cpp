@@ -77,6 +77,7 @@ AddModsPage::AddModsPage() : brls::Box(brls::Axis::ROW) {
     title->setMargins(0, 6, 10, 6);
     left->addView(title);
     list_ = ui::vbox();
+    list_->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
