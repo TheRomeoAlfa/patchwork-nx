@@ -15,7 +15,8 @@ class Sidebar : public brls::Box {
 public:
     Sidebar();
 
-    std::function<void(Page)> onNavigate;
+    std::function<void(Page)> onNavigate;  // moved onto an entry: show its page
+    std::function<void(Page)> onOpen;      // A on an entry: show its page and move into it
     std::function<void()> onSwitchGame;
 
     void setExpanded(bool expanded);

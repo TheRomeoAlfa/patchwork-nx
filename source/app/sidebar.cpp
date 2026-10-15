@@ -83,7 +83,7 @@ Sidebar::Sidebar() : brls::Box(brls::Axis::COLUMN) {
             if (page != active_ && onNavigate) onNavigate(page);
         });
         item.row->registerClickAction([this, page](brls::View*) {
-            if (onNavigate) onNavigate(page);
+            if (onOpen) onOpen(page);
             return true;
         });
         addView(item.row);
