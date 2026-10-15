@@ -26,6 +26,13 @@ brls::View* MainActivity::createContentView() {
 
     sidebar_ = new Sidebar();
     sidebar_->onNavigate = [this](Page p) { showPage(p); };
+    sidebar_->onOpen = [this](Page p) {
+        if (p != page_) showPage(p);
+        auto& views = content_->getChildren();
+        if (!views.empty() && ui::tryFocus(views.front())) return;
+        // Browse and Search load their list: they pick focus up from the sink once it's there.
+        if (p == Page::Browse || p == Page::Search) sink_->park();
+    };
     sidebar_->onSwitchGame = [this] { switchGame(); };
     root->addView(sidebar_);
 
