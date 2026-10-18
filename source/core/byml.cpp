@@ -14,9 +14,21 @@ namespace {
 using T = Node::Type;
 
 struct Reader {
+    explicit Reader(const std::string& data) : d(data) {}
     const std::string& d;
     bool le = true;
     std::vector<std::string> keys, strings;
+    // Limits against containers that point at the same children over and over (the tree
+    // would grow exponentially with the nesting). The writer shares identical values, so
+    // some sharing is normal; without it every node takes at least 4 bytes of the file.
+    mutable size_t nodesLeft = d.size() * 4 + 65536;
+    mutable size_t bytesLeft = d.size() * 64 + (1u << 20);  // strings and binary data copied out
+
+    void charge(size_t nodes, size_t bytes) const {
+        if (nodes > nodesLeft || bytes > bytesLeft) throw std::runtime_error("BYML: too many shared values");
+        nodesLeft -= nodes;
+        bytesLeft -= bytes;
+    }
 
     void need(size_t at, size_t n) const {
         if (at + n > d.size()) throw std::runtime_error("BYML: out of range");
@@ -47,6 +59,7 @@ struct Reader {
             size_t start = at + u32(at + 4 + 4 * k);
             size_t end = d.find('\0', start);
             if (end == std::string::npos) throw std::runtime_error("BYML: unterminated string");
+            charge(0, end - start);
             out.push_back(d.substr(start, end - start));
         }
         return out;
@@ -54,17 +67,20 @@ struct Reader {
 
     Node value(uint8_t type, size_t slot, int depth) const {
         if (depth > 256) throw std::runtime_error("BYML: too deep");
+        charge(1, 0);
         Node n;
         n.type = T(type);
         uint32_t raw = u32(slot);
         switch (n.type) {
             case T::String:
                 if (raw >= strings.size()) throw std::runtime_error("BYML: bad string index");
+                charge(0, strings[raw].size());
                 n.s = strings[raw];
                 break;
             case T::Binary: {
                 uint32_t size = u32(raw);
                 need(raw + 4, size);
+                charge(0, size);
                 n.s = d.substr(raw + 4, size);
                 break;
             }
@@ -93,10 +109,12 @@ struct Reader {
         if (type == 0xC0) {
             n.type = T::Array;
             size_t values = at + 4 + ((count + 3) & ~3u);
+            need(values, 4 * size_t(count));  // before reserving room for them
             n.array.reserve(count);
             for (uint32_t k = 0; k < count; ++k) n.array.push_back(value(uint8_t(u8(at + 4 + k)), values + 4 * k, depth));
         } else if (type == 0xC1) {
             n.type = T::Dict;
+            need(at + 4, 8 * size_t(count));
             for (uint32_t k = 0; k < count; ++k) {
                 size_t e = at + 4 + 8 * k;
                 uint32_t keyIndex = u24(e);
@@ -301,7 +319,7 @@ bool Node::operator==(const Node& o) const {
 Document parse(const std::string& raw) {
     std::string data = isYaz0(raw) ? yaz0Decompress(raw) : raw;
     if (data.size() < 0x10) throw std::runtime_error("BYML: too short");
-    Reader r{data};
+    Reader r(data);
     if (data.compare(0, 2, "YB") == 0)
         r.le = true;
     else if (data.compare(0, 2, "BY") == 0)

@@ -32,13 +32,11 @@ struct Parameter {
     static Parameter f32(float v);
     static Parameter s32(int32_t v);
     static Parameter u32(uint32_t v);
-    static Parameter floats(Type type, const std::vector<float>& v);  // Vec2/3/4, Color, Quat
     static Parameter string(Type type, std::string v);
 
     bool asBool() const;
     float asF32() const;
     int32_t asInt() const;
-    uint32_t asU32() const;
 };
 
 // Objects and parameters are deques: a reference to one stays valid while more are added.

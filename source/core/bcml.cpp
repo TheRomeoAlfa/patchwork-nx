@@ -29,6 +29,11 @@ const std::string kActorInfo = std::string(kContent) + "Actor/ActorInfo.product.
 
 std::string unpack(const std::string& d) { return isYaz0(d) ? yaz0Decompress(d) : d; }
 
+// A game file merging needs and couldn't read: the merge stops (unlike a bad log entry).
+struct MissingGameFile : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 std::string slashes(std::string p) {
     std::replace(p.begin(), p.end(), '\\', '/');
     return p;
@@ -68,12 +73,38 @@ struct Context {
         std::map<std::string, std::unique_ptr<Pack>> nested;  // opened archives inside, by name
     };
     std::map<std::string, std::unique_ptr<Pack>> packs;
+    std::set<std::string> rejected;  // unsafe paths already noted
+
+    // Paths from the logs end up as files on the SD card: only ones inside the game's or the
+    // DLC's romfs are allowed. Notes each rejected path once.
+    bool allowed(const std::string& path) {
+        if (isPackagePath(path)) return true;
+        if (rejected.insert(path).second) result.notes.push_back("skipped changes to " + path + ": not a path inside the game");
+        return false;
+    }
+
+    // Merge one entry of a log: a malformed one is skipped with a note instead of stopping
+    // everything. A game file that can't be read still stops the merge.
+    template <typename F>
+    void entry(const std::string& what, F f) {
+        try {
+            f();
+        } catch (const MissingGameFile&) {
+            throw;
+        } catch (const std::exception& e) {
+            result.notes.push_back("couldn't merge " + what + ": " + e.what());
+        }
+    }
 
     const std::optional<std::string>& gameFileOpt(const std::string& path) {
         auto it = gameCache.find(path);
         if (it == gameCache.end()) {
-            if (onRead) onRead(path);
-            it = gameCache.emplace(path, game.read(path)).first;
+            std::optional<std::string> data;
+            if (allowed(path)) {
+                if (onRead) onRead(path);
+                data = game.read(path);
+            }
+            it = gameCache.emplace(path, std::move(data)).first;
         }
         return it->second;
     }
@@ -81,38 +112,36 @@ struct Context {
     // a missing last file is added (the archives must exist). nullptr when it can't be reached.
     // Marks the archives on the way as changed.
     std::string* edit(const std::vector<std::string>& path, bool create = false) {
-        if (path.size() < 2) return nullptr;
-        auto& top = packs[path[0]];
-        if (!top) {
+        if (path.size() < 2 || !allowed(path[0])) return nullptr;
+        // Archives are parsed before they're added, so one that can't be read (it throws)
+        // leaves nothing half-opened behind.
+        auto open = [](const std::string& data) {
+            auto p = std::make_unique<Pack>();
+            p->yaz = isYaz0(data);
+            p->sarc = Sarc::parse(data);
+            return p;
+        };
+        auto top = packs.find(path[0]);
+        if (top == packs.end()) {
             auto it = result.files.find(path[0]);
             const std::string* base = it != result.files.end() ? &it->second : nullptr;
             if (!base) {
                 const auto& g = gameFileOpt(path[0]);
-                if (!g) {
-                    packs.erase(path[0]);
-                    return nullptr;
-                }
+                if (!g) return nullptr;
                 base = &*g;
             }
-            top = std::make_unique<Pack>();
-            top->yaz = isYaz0(*base);
-            top->sarc = Sarc::parse(*base);
+            top = packs.emplace(path[0], open(*base)).first;
         }
-        Pack* pack = top.get();
+        Pack* pack = top->second.get();
         std::vector<Pack*> chain{pack};
         for (size_t i = 1; i + 1 < path.size(); ++i) {
-            auto& child = pack->nested[path[i]];
-            if (!child) {
+            auto child = pack->nested.find(path[i]);
+            if (child == pack->nested.end()) {
                 const SarcFile* f = pack->sarc.find(path[i]);
-                if (!f || !isSarc(f->data)) {
-                    pack->nested.erase(path[i]);
-                    return nullptr;
-                }
-                child = std::make_unique<Pack>();
-                child->yaz = isYaz0(f->data);
-                child->sarc = Sarc::parse(f->data);
+                if (!f || !isSarc(f->data)) return nullptr;
+                child = pack->nested.emplace(path[i], open(f->data)).first;
             }
-            pack = child.get();
+            pack = child->second.get();
             chain.push_back(pack);
         }
         SarcFile* target = nullptr;
@@ -159,7 +188,6 @@ struct Context {
         packs.clear();
     }
 
-    // The game's copy of a file inside archives, if there is one.
     // Parsed game archives along the path last looked up, one per depth (lookups come in
     // file order, so neighbours share their archives), with an index by name.
     struct IndexedSarc {
@@ -201,13 +229,13 @@ struct Context {
 
     const std::string& gameFile(const std::string& path) {
         const auto& f = gameFileOpt(path);
-        if (!f) throw std::runtime_error("needs the game's " + path.substr(path.find("romfs/") + 6) + ", which Patchwork hasn't read yet");
+        if (!f) throw MissingGameFile("needs the game's " + path + ", which Patchwork hasn't read yet");
         return *f;
     }
     std::string gameInner(const std::string& pack, const std::string& inner) {
         auto s = Sarc::parse(gameFile(pack));
         const auto* f = s.find(inner);
-        if (!f) throw std::runtime_error("the game's " + pack + " has no " + inner);
+        if (!f) throw MissingGameFile("the game's " + pack + " has no " + inner);
         return f->data;
     }
 
@@ -220,8 +248,9 @@ struct Context {
                 if (fs::exists(d / name, ec)) out.push_back(d / name);
         return out;
     }
-    // Per package: its logs merged (options over main), lowest priority first.
-    std::vector<Node> yamlLogs(const std::string& name, bool overwriteLists) const {
+    // Per package: its logs merged (options over main), lowest priority first. A log that
+    // can't be read is skipped with a note.
+    std::vector<Node> yamlLogs(const std::string& name, bool overwriteLists) {
         std::vector<Node> out;
         std::error_code ec;
         for (const auto& p : packages) {
@@ -229,12 +258,14 @@ struct Context {
             bool any = false;
             for (const auto& d : p.logDirs) {
                 if (!fs::exists(d / name, ec)) continue;
-                auto n = toByml(yaml::parse(readFile(d / name)));
+                std::optional<Node> n;
+                entry(p.id + "'s " + name, [&] { n = toByml(yaml::parse(readFile(d / name))); });
+                if (!n) continue;
                 if (!any) {
-                    merged = std::move(n);
+                    merged = std::move(*n);
                     any = true;
                 } else {
-                    dictMerge(merged, n, overwriteLists);
+                    dictMerge(merged, *n, overwriteLists);
                 }
             }
             if (any) out.push_back(std::move(merged));
@@ -251,25 +282,31 @@ void mergePacks(Context& c) {
     for (const auto& p : c.packages)
         for (const auto& d : p.logDirs) {
             if (!fs::exists(d / "packs.json", ec)) continue;
-            auto j = nlohmann::json::parse(readFile(d / "packs.json"));
-            for (const auto& [canon, path] : j.items()) {
-                if (!path.is_string()) continue;
-                auto rel = slashes(path.get<std::string>());
-                if (rel.find("AocMainField.pack") != std::string::npos) continue;  // BCML leaves it out too
-                auto file = p.filesRoot / fs::path(rel);
-                if (!fs::exists(file, ec)) continue;
-                auto& list = sources[rel];
-                if (std::find(list.begin(), list.end(), file) == list.end()) list.push_back(file);
-            }
+            c.entry(p.id + "'s packs.json", [&] {
+                auto j = nlohmann::json::parse(readFile(d / "packs.json"));
+                if (!j.is_object()) throw std::runtime_error("not a list of packs");
+                for (const auto& [canon, path] : j.items()) {
+                    if (!path.is_string()) continue;
+                    auto rel = slashes(path.get<std::string>());
+                    if (rel.find("AocMainField.pack") != std::string::npos) continue;  // BCML leaves it out too
+                    if (!c.allowed(rel)) continue;  // also keeps the read inside the package
+                    auto file = p.filesRoot / fs::path(rel);
+                    if (!fs::exists(file, ec)) continue;
+                    auto& list = sources[rel];
+                    if (std::find(list.begin(), list.end(), file) == list.end()) list.push_back(file);
+                }
+            });
         }
     for (const auto& [out, files] : sources) {
-        std::vector<std::string> archives;
-        const auto& game = c.gameFileOpt(out);
-        if (game) archives.push_back(*game);
-        for (const auto& f : files) archives.push_back(readFile(f));
-        auto merged = mergeSarcs(archives, true, game.has_value());
-        bool yaz = isYaz0(game ? *game : archives.back());
-        c.result.files[out] = yaz ? yaz0Compress(merged) : merged;
+        c.entry(out, [&] {
+            std::vector<std::string> archives;
+            const auto& game = c.gameFileOpt(out);
+            if (game) archives.push_back(*game);
+            for (const auto& f : files) archives.push_back(readFile(f));
+            auto merged = mergeSarcs(archives, true, game.has_value());
+            bool yaz = isYaz0(game ? *game : archives.back());
+            c.result.files[out] = yaz ? yaz0Compress(merged) : merged;
+        });
     }
 }
 
@@ -410,7 +447,13 @@ void mergeActorInfo(Context& c) {
         for (const auto& a : list->array)
             if (const auto* name = a.find("name")) actors[aamp::hash(name->s)] = a;
     for (const auto& [key, actor] : diff.dict) {
-        uint32_t h = uint32_t(std::stoull(key));
+        uint32_t h = 0;
+        try {
+            h = uint32_t(std::stoull(key));
+        } catch (const std::exception&) {
+            c.result.notes.push_back("skipped actor info for \"" + key + "\": not an actor hash");
+            continue;
+        }
         auto it = actors.find(h);
         if (it != actors.end() && it->second.type == T::Dict && actor.type == T::Dict)
             dictMerge(it->second, actor, true);
@@ -459,27 +502,27 @@ void deepMerge(Context& c) {
     const uint32_t fileTable = aamp::hash("FileTable");
     std::map<std::string, aamp::ParameterList> diffs;  // path -> combined changes
     for (const auto& log : c.logs("deepmerge.aamp")) {
-        auto pio = aamp::parse(readFile(log));
-        const auto* files = pio.root.object(fileTable);
-        if (!files) continue;
-        for (const auto& [k, p] : files->params) {
-            if (!p.isString()) continue;
-            const auto* diff = pio.root.list(aamp::hash(p.data));
-            if (diff) mergeLists(diffs[p.data], *diff);
-        }
+        c.entry(log.generic_string(), [&] {
+            auto pio = aamp::parse(readFile(log));
+            const auto* files = pio.root.object(fileTable);
+            if (!files) return;
+            for (const auto& [k, p] : files->params) {
+                if (!p.isString()) continue;
+                const auto* diff = pio.root.list(aamp::hash(p.data));
+                if (diff) mergeLists(diffs[p.data], *diff);
+            }
+        });
     }
     for (const auto& [path, diff] : diffs) {
         auto parts = splitNested(slashes(path));
         if (parts.size() < 2 || !c.gameFileOpt(parts[0])) continue;  // BCML: only files the game has
-        auto* data = c.edit(parts);
-        if (!data) continue;
-        try {
+        c.entry(path, [&] {
+            auto* data = c.edit(parts);
+            if (!data) return;
             auto pio = aamp::parse(*data);
             mergeLists(pio.root, diff);
             *data = aamp::write(pio);
-        } catch (const std::exception& e) {
-            c.result.notes.push_back("couldn't merge " + path + ": " + e.what());
-        }
+        });
     }
 }
 
@@ -504,13 +547,15 @@ std::map<std::string, aamp::ParameterList> fileTableLogs(Context& c, const char*
     std::map<std::string, aamp::ParameterList> out;
     const uint32_t table = aamp::hash(tableName);
     for (const auto& log : c.logs(logName)) {
-        auto pio = aamp::parse(readFile(log));
-        const auto* files = pio.root.object(table);
-        if (!files) continue;
-        for (const auto& [k, p] : files->params) {
-            if (!p.isString() || p.data.empty()) continue;
-            if (const auto* diff = pio.root.list(aamp::hash(p.data))) merge(out[slashes(p.data)], *diff);
-        }
+        c.entry(log.generic_string(), [&] {
+            auto pio = aamp::parse(readFile(log));
+            const auto* files = pio.root.object(table);
+            if (!files) return;
+            for (const auto& [k, p] : files->params) {
+                if (!p.isString() || p.data.empty()) continue;
+                if (const auto* diff = pio.root.list(aamp::hash(p.data))) merge(out[slashes(p.data)], *diff);
+            }
+        });
     }
     return out;
 }
@@ -583,49 +628,58 @@ void mergeDrops(Context& c) {
     // Per file, the highest priority package's tables replace whole tables.
     std::map<std::string, nlohmann::json> files;
     for (const auto& log : c.logs("drops.json")) {
-        auto j = nlohmann::json::parse(readFile(log));
-        for (const auto& [path, tables] : j.items())
-            for (const auto& [name, table] : tables.items()) files[slashes(path)][name] = table;
+        c.entry(log.generic_string(), [&] {
+            auto j = nlohmann::json::parse(readFile(log));
+            if (!j.is_object()) throw std::runtime_error("not a list of drop tables");
+            for (const auto& [path, tables] : j.items()) {
+                if (!tables.is_object()) continue;
+                for (const auto& [name, table] : tables.items())
+                    if (table.is_object()) files[slashes(path)][name] = table;
+            }
+        });
     }
     for (const auto& [path, tables] : files) {
         auto parts = splitNested(path);
-        std::vector<DropTable> stock;
-        if (auto g = c.gameNested(parts)) {
-            try {
-                stock = readDrops(aamp::parse(*g));
-            } catch (const std::exception&) {
-            }
-        }
-        // The mod's tables, in the game's order where the game has them.
-        std::vector<DropTable> out;
-        auto fromJson = [&](const std::string& name, const nlohmann::json& j, const DropTable* base) {
-            DropTable t;
-            t.name = name;
-            t.repeatMin = j.value("repeat_num_min", base ? base->repeatMin : 0);
-            t.repeatMax = j.value("repeat_num_max", base ? base->repeatMax : 0);
-            t.approach = j.value("approach_type", base ? base->approach : 0);
-            t.speed = j.value("occurrence_speed_type", base ? base->speed : 0);
-            std::map<std::string, float> probs;
-            std::vector<std::string> order;
-            if (base)
-                for (const auto& [n, p] : base->items)
-                    if (j.contains("items") && j["items"].contains(n)) order.push_back(n), probs[n] = p;
-            if (j.contains("items"))
-                for (const auto& [n, p] : j["items"].items()) {
-                    if (!probs.count(n)) order.push_back(n);
-                    probs[n] = p.is_number() ? p.get<float>() : probs[n];  // "UNDERRIDE_CONST" keeps the game's
+        if (parts.size() < 2 || !c.allowed(parts[0])) continue;
+        c.entry(path, [&] {
+            std::vector<DropTable> stock;
+            if (auto g = c.gameNested(parts)) {
+                try {
+                    stock = readDrops(aamp::parse(*g));
+                } catch (const std::exception&) {
                 }
-            for (const auto& n : order) t.items.emplace_back(n, probs[n]);
-            return t;
-        };
-        for (const auto& s : stock)
-            if (tables.contains(s.name)) out.push_back(fromJson(s.name, tables[s.name], &s));
-        for (const auto& [name, j] : tables.items()) {
-            bool known = std::any_of(stock.begin(), stock.end(), [&](const DropTable& s) { return s.name == name; });
-            if (!known) out.push_back(fromJson(name, j, nullptr));
-        }
-        if (auto* data = c.edit(parts, true)) *data = aamp::write(writeDrops(out));
-        else c.result.notes.push_back("couldn't place " + path);
+            }
+            // The mod's tables, in the game's order where the game has them.
+            std::vector<DropTable> out;
+            auto fromJson = [&](const std::string& name, const nlohmann::json& j, const DropTable* base) {
+                DropTable t;
+                t.name = name;
+                t.repeatMin = j.value("repeat_num_min", base ? base->repeatMin : 0);
+                t.repeatMax = j.value("repeat_num_max", base ? base->repeatMax : 0);
+                t.approach = j.value("approach_type", base ? base->approach : 0);
+                t.speed = j.value("occurrence_speed_type", base ? base->speed : 0);
+                std::map<std::string, float> probs;
+                std::vector<std::string> order;
+                if (base)
+                    for (const auto& [n, p] : base->items)
+                        if (j.contains("items") && j["items"].contains(n)) order.push_back(n), probs[n] = p;
+                if (j.contains("items"))
+                    for (const auto& [n, p] : j["items"].items()) {
+                        if (!probs.count(n)) order.push_back(n);
+                        probs[n] = p.is_number() ? p.get<float>() : probs[n];  // "UNDERRIDE_CONST" keeps the game's
+                    }
+                for (const auto& n : order) t.items.emplace_back(n, probs[n]);
+                return t;
+            };
+            for (const auto& s : stock)
+                if (tables.contains(s.name)) out.push_back(fromJson(s.name, tables[s.name], &s));
+            for (const auto& [name, j] : tables.items()) {
+                bool known = std::any_of(stock.begin(), stock.end(), [&](const DropTable& s) { return s.name == name; });
+                if (!known) out.push_back(fromJson(name, j, nullptr));
+            }
+            if (auto* data = c.edit(parts, true)) *data = aamp::write(writeDrops(out));
+            else c.result.notes.push_back("couldn't place " + path);
+        });
     }
 }
 
@@ -695,9 +749,9 @@ void mergeShops(Context& c) {
     for (const auto& [path, diff] : diffs) {
         auto parts = splitNested(path);
         if (!c.gameFileOpt(parts[0])) continue;  // BCML: only files the game has
-        auto* data = c.edit(parts);
-        if (!data) continue;
-        try {
+        c.entry(path, [&] {
+            auto* data = c.edit(parts);
+            if (!data) return;
             auto pio = aamp::parse(*data);
             auto shop = shopData(pio);
             if (const auto* rem = diff.list(aamp::hash("Removals")))
@@ -708,9 +762,7 @@ void mergeShops(Context& c) {
                     }
             if (const auto* add = diff.list(aamp::hash("Additions"))) mergeLists(shop, *add);
             *data = aamp::write(writeShop(shop, pio));
-        } catch (const std::exception& e) {
-            c.result.notes.push_back("couldn't merge " + path + ": " + e.what());
-        }
+        });
     }
 }
 
@@ -786,9 +838,9 @@ void mergeAsList(aamp::ParameterList& dst, const aamp::ParameterList& src) {
             for (size_t i = 0; i < anims.size(); ++i)
                 mine.objectOrAdd(aamp::hash("AddRes_" + std::to_string(i))).set(aamp::hash("Anim"), aamp::Parameter::string(aamp::Type::String64, anims[i]));
         } else if (key == asDefines) {
-            std::map<std::string, size_t> listing;
-            for (size_t i = 0; i < mine.objects.size(); ++i)
-                if (const auto* n = mine.objects[i].second.find("Name")) listing[n->data] = i;
+            std::map<std::string, uint32_t> listing;  // name -> its object's key
+            for (const auto& [k, o] : mine.objects)
+                if (const auto* n = o.find("Name")) listing[n->data] = k;
             std::vector<std::pair<std::string, std::string>> defs;
             for (const auto& [k, o] : sub.objects) {
                 const auto* n = o.find("Name");
@@ -798,32 +850,37 @@ void mergeAsList(aamp::ParameterList& dst, const aamp::ParameterList& src) {
                 if (it == defs.end()) defs.emplace_back(n->data, f->data);
                 else it->second = f->data;
             }
-            size_t next = listing.size();
+            size_t next = mine.objects.size();
             for (const auto& [name, file] : defs) {
-                std::string objKey;
+                uint32_t objKey;
                 if (listing.count(name)) {
-                    objKey = "ASDefine_" + std::to_string(listing[name]);
+                    objKey = listing[name];
                 } else {
-                    objKey = "ASDefine_" + std::to_string(next++);
-                    mine.objectOrAdd(aamp::hash(objKey)).set(aamp::hash("Name"), aamp::Parameter::string(aamp::Type::String64, name));
+                    // The next ASDefine_<n> not taken (a file may skip numbers or have unnamed ones).
+                    while (mine.object(aamp::hash("ASDefine_" + std::to_string(next)))) ++next;
+                    objKey = aamp::hash("ASDefine_" + std::to_string(next++));
+                    mine.objectOrAdd(objKey).set(aamp::hash("Name"), aamp::Parameter::string(aamp::Type::String64, name));
+                    listing[name] = objKey;
                 }
-                mine.objectOrAdd(aamp::hash(objKey)).set(aamp::hash("Filename"), aamp::Parameter::string(aamp::Type::String64, file));
+                mine.objectOrAdd(objKey).set(aamp::hash("Filename"), aamp::Parameter::string(aamp::Type::String64, file));
             }
         } else if (key == cfDefines) {
-            std::map<std::string, size_t> listing;
-            for (size_t i = 0; i < mine.lists.size(); ++i) listing[CFDefine(mine.lists[i].second).name] = i;
-            size_t next = listing.size();
+            std::map<std::string, uint32_t> listing;  // name -> its list's key
+            for (const auto& [k, l] : mine.lists) listing[CFDefine(l).name] = k;
+            size_t next = mine.lists.size();
             for (const auto& [k, l] : sub.lists) {
                 CFDefine def(l);
                 if (listing.count(def.name)) {
-                    auto defKey = aamp::hash("CFDefine_" + std::to_string(listing[def.name]));
-                    auto* existing = mine.list(defKey);
+                    auto* existing = mine.list(listing[def.name]);
                     if (!existing) continue;
                     CFDefine merged(*existing);
                     merged.updateFrom(def);
                     *existing = merged.toList();
                 } else {
-                    mine.lists.emplace_back(aamp::hash("CFDefine_" + std::to_string(next++)), def.toList());
+                    while (mine.list(aamp::hash("CFDefine_" + std::to_string(next)))) ++next;
+                    uint32_t defKey = aamp::hash("CFDefine_" + std::to_string(next++));
+                    mine.lists.emplace_back(defKey, def.toList());
+                    listing[def.name] = defKey;
                 }
             }
         } else {
@@ -840,15 +897,13 @@ void mergeAsLists(Context& c) {
     auto diffs = fileTableLogs(c, "aslist.aamp", "FileTable", [](aamp::ParameterList& dst, const aamp::ParameterList& src) { mergeAsList(dst, src); });
     for (const auto& [path, diff] : diffs) {
         auto parts = splitNested(path);
-        auto* data = c.edit(parts);
-        if (!data) continue;
-        try {
+        c.entry(path, [&] {
+            auto* data = c.edit(parts);
+            if (!data) return;
             auto pio = aamp::parse(*data);
             mergeAsList(pio.root, diff);
             *data = aamp::write(pio);
-        } catch (const std::exception& e) {
-            c.result.notes.push_back("couldn't merge " + path + ": " + e.what());
-        }
+        });
     }
 }
 
@@ -874,10 +929,18 @@ void mergeTexts(Context& c) {
         nlohmann::json pkg = nlohmann::json::object();
         for (const auto& d : p.logDirs) {
             if (!fs::exists(d / "texts.json", ec)) continue;
-            auto j = nlohmann::json::parse(readFile(d / "texts.json"));
-            for (const auto& [l, files] : j.items())
-                for (const auto& [file, entries] : files.items())
-                    for (const auto& [label, e] : entries.items()) pkg[l][file][label] = e;
+            c.entry(p.id + "'s texts.json", [&] {
+                auto j = nlohmann::json::parse(readFile(d / "texts.json"));
+                if (!j.is_object()) throw std::runtime_error("not a list of languages");
+                for (const auto& [l, files] : j.items()) {
+                    if (!files.is_object()) continue;
+                    for (const auto& [file, entries] : files.items()) {
+                        if (!entries.is_object()) continue;
+                        for (const auto& [label, e] : entries.items())
+                            if (e.is_object()) pkg[l][file][label] = e;
+                    }
+                }
+            });
         }
         auto src = pickLanguage(lang, pkg);
         if (src.empty()) continue;
@@ -898,31 +961,34 @@ void mergeTexts(Context& c) {
     if (!msgs) throw std::runtime_error("the game's Bootup_" + lang + ".pack has no " + inner);
     auto sarc = Sarc::parse(*msgs);
     for (const auto& [file, entries] : changes) {
-        msbt::File f;
-        SarcFile* existing = nullptr;
-        for (auto& sf : sarc.files)
-            if (sf.name == file) existing = &sf;
-        if (existing) {
-            f = msbt::parse(existing->data);
-        } else {
-            f.hasAttributes = true;
-            f.attrSize = file.find("EventFlowMsg") != std::string::npos ? 0 : 4;
-            f.attrStrings = f.attrSize == 4;
-        }
-        for (const auto& [label, e] : entries) {
-            msbt::Message m;
-            const auto* old = f.find(label);
-            if (old) m = *old;
-            m.text = msyt::encodeContents(e.value("contents", nlohmann::json::array()));
-            if (f.attrStrings && e.contains("attributes") && e["attributes"].is_string())
-                m.attribute = msyt::encodeAttributes(e["attributes"].get<std::string>());
-            f.set(label, std::move(m));
-        }
-        auto bytes = msbt::write(f);
-        if (existing)
-            existing->data = std::move(bytes);
-        else
-            sarc.files.push_back({file, std::move(bytes)});
+        c.entry(file, [&] {
+            msbt::File f;
+            SarcFile* existing = nullptr;
+            for (auto& sf : sarc.files)
+                if (sf.name == file) existing = &sf;
+            if (existing) {
+                f = msbt::parse(existing->data);
+            } else {
+                f.hasAttributes = true;
+                f.attrSize = file.find("EventFlowMsg") != std::string::npos ? 0 : 4;
+                f.attrStrings = f.attrSize == 4;
+            }
+            for (const auto& [label, e] : entries)
+                c.entry(file + " " + label, [&] {
+                    msbt::Message m;
+                    const auto* old = f.find(label);
+                    if (old) m = *old;
+                    m.text = msyt::encodeContents(e.value("contents", nlohmann::json::array()));
+                    if (f.attrStrings && e.contains("attributes") && e["attributes"].is_string())
+                        m.attribute = msyt::encodeAttributes(e["attributes"].get<std::string>());
+                    f.set(label, std::move(m));
+                });
+            auto bytes = msbt::write(f);
+            if (existing)
+                existing->data = std::move(bytes);
+            else
+                sarc.files.push_back({file, std::move(bytes)});
+        });
     }
     *msgs = yaz0Compress(sarc.write());
 }
@@ -972,7 +1038,8 @@ void mergeMaps(Context& c) {
     for (const auto& p : c.packages) {
         std::vector<Node> logs;
         for (const auto& d : p.logDirs)
-            if (fs::exists(d / "map.yml", ec)) logs.push_back(toByml(yaml::parse(readFile(d / "map.yml"))));
+            if (fs::exists(d / "map.yml", ec))
+                c.entry(p.id + "'s map.yml", [&] { logs.push_back(toByml(yaml::parse(readFile(d / "map.yml")))); });
         if (!logs.empty()) perPackage.push_back(std::move(logs));
     }
     if (perPackage.empty()) return;
@@ -1018,24 +1085,27 @@ void mergeMaps(Context& c) {
         if (sep == std::string::npos) continue;
         std::string area = unit.substr(0, sep), type = unit.substr(sep + 1);
         std::string rel = "Map/MainField/" + area + "/" + unit + ".smubin";
-        std::optional<std::string> base;
-        if (type == "Static") {
-            base = dlc ? c.gameNested({aocPack, rel}) : c.gameNested({titleBg, rel});
-            if (!base) base = c.gameNested({titleBg, rel});
-        } else {
-            base = c.gameFileOpt((dlc ? kDlc : kContent) + rel);
-            if (!base) base = c.gameFileOpt(kContent + rel);
-        }
-        if (!base) {
-            c.result.notes.push_back("no map " + unit + " in the game; its changes were skipped");
-            continue;
-        }
-        auto doc = byml::parse(*base);
-        for (const auto& [section, ch] : sections)
-            if (auto it = doc.root.dict.find(section); it != doc.root.dict.end()) mergeMapEntries(it->second, ch);
-        c.result.files[(dlc ? kDlc : kContent) + rel] = yaz0Compress(byml::write(doc));
-        // The game prefers the copy in TitleBG.pack: take it out so the merged one is used.
-        if (type == "Static") c.removeInner({titleBg, rel});
+        if (!c.allowed(kContent + rel)) continue;
+        c.entry("map " + unit, [&] {
+            std::optional<std::string> base;
+            if (type == "Static") {
+                base = dlc ? c.gameNested({aocPack, rel}) : c.gameNested({titleBg, rel});
+                if (!base) base = c.gameNested({titleBg, rel});
+            } else {
+                base = c.gameFileOpt((dlc ? kDlc : kContent) + rel);
+                if (!base) base = c.gameFileOpt(kContent + rel);
+            }
+            if (!base) {
+                c.result.notes.push_back("no map " + unit + " in the game; its changes were skipped");
+                return;
+            }
+            auto doc = byml::parse(*base);
+            for (const auto& [section, ch] : sections)
+                if (auto it = doc.root.dict.find(section); it != doc.root.dict.end()) mergeMapEntries(it->second, ch);
+            c.result.files[(dlc ? kDlc : kContent) + rel] = yaz0Compress(byml::write(doc));
+            // The game prefers the copy in TitleBG.pack: take it out so the merged one is used.
+            if (type == "Static") c.removeInner({titleBg, rel});
+        });
     }
     if (dlc) c.result.files[aocPack] = "";  // empty: the game then reads the loose DLC maps
 }
@@ -1156,7 +1226,17 @@ void computeSizes(Context& c) {
 
 }  // namespace
 
+bool isPackagePath(const std::string& path) {
+    if (path.find('\0') != std::string::npos || !isSafeRelativePath(path)) return false;
+    for (const char* root : {kContent, kDlc}) {
+        size_t n = std::char_traits<char>::length(root);
+        if (path.size() > n && path.compare(0, n, root) == 0) return true;
+    }
+    return false;
+}
+
 std::optional<std::string> FolderGameFiles::read(const std::string& path) {
+    if (!isPackagePath(path)) return std::nullopt;
     std::error_code ec;
     auto p = root_ / fs::path(path);
     if (!fs::exists(p, ec)) return std::nullopt;
@@ -1289,12 +1369,14 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
                 }
             }
         }
+    // Paths outside the game are never read (merge() skips them too).
+    for (auto it = out.begin(); it != out.end();) it = isPackagePath(*it) ? std::next(it) : out.erase(it);
     return out;
 }
 
 Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options) {
     Result result;
-    Context c{lowestFirst, game, result, options, {}, {}, {}, {}};
+    Context c{lowestFirst, game, result, options, {}, {}, {}, {}, {}};
     // Rough shares of the time: the merges read the game's files (most of the first half),
     // packing recompresses the big archives, sizes parse every merged file.
     float last = 0;
@@ -1320,6 +1402,15 @@ Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Opt
     }
     what = "Packing the merged files";
     c.closeAll([&](float f) { report(0.5f + 0.35f * f); });
+    // Every output was checked where it came from; this keeps it that way.
+    for (auto it = result.files.begin(); it != result.files.end();) {
+        if (isPackagePath(it->first)) {
+            ++it;
+            continue;
+        }
+        result.notes.push_back("dropped merged file outside the game: " + it->first);
+        it = result.files.erase(it);
+    }
     what = "Working out file sizes";
     report(0.85f);
     computeSizes(c);

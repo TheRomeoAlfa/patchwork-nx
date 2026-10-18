@@ -334,7 +334,8 @@ LayoutResult detectLayout(const fs::path& extractedRoot, Game game, const std::s
         outside += mapper.skippedOutside;
         pchtxt += mapper.skippedPchtxt;
         if (mapper.files.empty()) continue;
-        Variant v{name, {}};
+        Variant v;
+        v.name = name;
         for (auto& [target, source] : mapper.files) v.files.push_back({source, target});
         result.variants.push_back(std::move(v));
     }

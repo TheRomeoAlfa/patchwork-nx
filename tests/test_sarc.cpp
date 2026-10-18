@@ -130,3 +130,153 @@ TEST("sarc: an unchanged copy in a higher mod doesn't undo a lower mod's change"
     auto noGame = Sarc::parse(mergeSarcs({low.write(), high.write()}, true, false));
     CHECK(noGame.find("a.txt")->data == "game a");
 }
+
+// ---------------------------------------------------------------- malformed files
+
+#include <chrono>
+#include <cstring>
+
+#include "aamp.hpp"
+#include "byml.hpp"
+
+namespace {
+
+void le32(std::string& s, size_t at, uint32_t v) {
+    for (int i = 0; i < 4; ++i) s[at + i] = char(v >> (8 * i));
+}
+void le16(std::string& s, size_t at, uint16_t v) {
+    s[at] = char(v);
+    s[at + 1] = char(v >> 8);
+}
+// True if `f` throws, and does so quickly (no exponential work before giving up).
+template <typename F>
+bool rejectsQuickly(F f) {
+    auto start = std::chrono::steady_clock::now();
+    bool threw = false;
+    try {
+        f();
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    return threw && std::chrono::steady_clock::now() - start < std::chrono::seconds(2);
+}
+
+}  // namespace
+
+TEST("parsers: a SARC whose tables run past the end is rejected") {
+    std::string d(0x24, '\0');
+    std::memcpy(&d[0], "SARC", 4);
+    d[6] = char(0xFF);
+    d[7] = char(0xFE);
+    le16(d, 4, 0x20);  // SFAT in the last 4 bytes: its header doesn't fit
+    std::memcpy(&d[0x20], "SFAT", 4);
+    CHECK(rejectsQuickly([&] { Sarc::parse(d); }));
+    // 2000 entries that all cover the same 1 MB.
+    std::string many(0x20, '\0');
+    std::memcpy(&many[0], "SARC", 4);
+    le16(many, 4, 0x14);
+    many[6] = char(0xFF);
+    many[7] = char(0xFE);
+    std::memcpy(&many[0x14], "SFAT", 4);
+    le16(many, 0x18, 0xC);
+    le16(many, 0x1A, 2000);
+    for (int i = 0; i < 2000; ++i) {
+        std::string node(16, '\0');
+        le32(node, 12, 1u << 20);
+        many += node;
+    }
+    many += std::string("SFNT\x08\0\0\0", 8);
+    le32(many, 0xC, uint32_t(many.size()));
+    many += std::string(1 << 20, 'x');
+    CHECK(rejectsQuickly([&] { Sarc::parse(many); }));
+}
+
+TEST("parsers: BYML and AAMP with shared children don't blow up") {
+    // BYML: each array holds the next one twice, 40 deep (2^40 nodes if expanded).
+    const int levels = 40;
+    std::string b(0x10 + 16 * (levels + 1), '\0');
+    std::memcpy(&b[0], "YB", 2);
+    b[2] = 2;
+    le32(b, 12, 0x10);
+    for (int i = 0; i <= levels; ++i) {
+        size_t a = 0x10 + 16 * size_t(i);
+        b[a] = char(0xC0);
+        if (i < levels) {
+            b[a + 1] = 2;
+            b[a + 4] = b[a + 5] = char(0xC0);
+            le32(b, a + 8, uint32_t(a + 16));
+            le32(b, a + 12, uint32_t(a + 16));
+        }
+    }
+    CHECK(rejectsQuickly([&] { byml::parse(b); }));
+    // An array claiming 16 million entries in a tiny file.
+    std::string big(0x20, '\0');
+    std::memcpy(&big[0], "YB", 2);
+    big[2] = 2;
+    le32(big, 12, 0x10);
+    big[0x10] = char(0xC0);
+    big[0x11] = big[0x12] = big[0x13] = char(0xFF);
+    CHECK(rejectsQuickly([&] { byml::parse(big); }));
+    // The writer shares identical values; those files still read back.
+    byml::Document doc;
+    doc.root = byml::Node::makeArray();
+    auto inner = byml::Node::makeDict();
+    inner.dict["x"] = byml::Node::str(std::string(100, 's'));
+    for (int i = 0; i < 2000; ++i) doc.root.array.push_back(inner);
+    CHECK(byml::parse(byml::write(doc)).root.array.size() == 2000u);
+
+    // AAMP: each list holds the next level's two lists, which are the same two structs.
+    size_t root = 0x34;
+    std::string a(root + 12 + 24 * (levels + 1), '\0');
+    std::memcpy(&a[0], "AAMP", 4);
+    le32(a, 4, 2);
+    le32(a, 8, 3);
+    le32(a, 0x14, 4);
+    auto base = [&](int i) { return root + 12 + 24 * size_t(i); };
+    le32(a, root, 0xA4F6CB6C);
+    le16(a, root + 4, uint16_t((base(0) - root) / 4));
+    le16(a, root + 6, 2);
+    for (int i = 0; i < levels; ++i)
+        for (int k = 0; k < 2; ++k) {
+            size_t s = base(i) + 12 * size_t(k);
+            le16(a, s + 4, uint16_t((base(i + 1) - s) / 4));
+            le16(a, s + 6, 2);
+        }
+    CHECK(rejectsQuickly([&] { aamp::parse(a); }));
+}
+
+TEST("parsers: an MSBT attribute table bigger than its block is rejected") {
+    std::string d(0x20, '\0');
+    std::memcpy(&d[0], "MsgStdBn", 8);
+    d[8] = char(0xFF);
+    d[9] = char(0xFE);
+    d[0xC] = 1;
+    le16(d, 0xE, 1);
+    std::string blk(0x18, '\0');
+    std::memcpy(&blk[0], "ATR1", 4);
+    le32(blk, 4, 8);
+    le32(blk, 0x10, 0x10000000);  // 268 million rows of size 0
+    d += blk;
+    CHECK(rejectsQuickly([&] { msbt::parse(d); }));
+    // A Yaz0 header claiming 4 GB doesn't reserve it up front.
+    std::string y(17, '\0');
+    std::memcpy(&y[0], "Yaz0", 4);
+    y[4] = char(0xFF);
+    y[5] = char(0xFF);
+    y[6] = char(0xFF);
+    y[7] = char(0xF0);
+    CHECK(rejectsQuickly([&] { yaz0Decompress(y); }));
+}
+
+TEST("parsers: the AAMP writer refuses counts that don't fit in 16 bits") {
+    aamp::ParameterIO pio;
+    auto& o = pio.root.objectOrAdd(1);
+    for (uint32_t i = 0; i < 70000; ++i) o.params.emplace_back(i + 2, aamp::Parameter::s32(1));
+    bool threw = false;
+    try {
+        aamp::write(pio);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
