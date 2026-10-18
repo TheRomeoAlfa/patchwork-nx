@@ -12,10 +12,12 @@ namespace mm {
 namespace {
 
 uint16_t rd16(const std::string& d, size_t at, bool le) {
+    if (at + 2 > d.size()) throw std::runtime_error("bad SARC (out of range)");
     uint8_t a = uint8_t(d[at]), b = uint8_t(d[at + 1]);
     return le ? uint16_t(a | (b << 8)) : uint16_t((a << 8) | b);
 }
 uint32_t rd32(const std::string& d, size_t at, bool le) {
+    if (at + 4 > d.size()) throw std::runtime_error("bad SARC (out of range)");
     uint32_t v = 0;
     for (int i = 0; i < 4; ++i) v |= uint32_t(uint8_t(d[at + i])) << (le ? 8 * i : 8 * (3 - i));
     return v;
@@ -86,16 +88,20 @@ Sarc Sarc::parse(const std::string& raw) {
     uint16_t headerSize = rd16(data, 4, le);
     uint32_t dataOffset = rd32(data, 0xC, le);
     size_t sfat = headerSize;
-    if (data.compare(sfat, 4, "SFAT") != 0) throw std::runtime_error("bad SARC (no SFAT)");
+    if (sfat + 0xC > data.size() || data.compare(sfat, 4, "SFAT") != 0) throw std::runtime_error("bad SARC (no SFAT)");
     uint16_t count = rd16(data, sfat + 6, le);
     size_t nodes = sfat + rd16(data, sfat + 4, le);
     size_t sfnt = nodes + size_t(count) * 16;
     if (sfnt + 8 > data.size() || data.compare(sfnt, 4, "SFNT") != 0) throw std::runtime_error("bad SARC (no SFNT)");
     size_t names = sfnt + rd16(data, sfnt + 4, le);
+    // Files may share data, but not so much that copying them out would explode.
+    size_t budget = data.size() * 16 + (16u << 20);
     for (uint16_t i = 0; i < count; ++i) {
         size_t n = nodes + size_t(i) * 16;
         uint32_t attr = rd32(data, n + 4, le), start = rd32(data, n + 8, le), end = rd32(data, n + 12, le);
         if (dataOffset + size_t(end) > data.size() || start > end) throw std::runtime_error("bad SARC (file out of range)");
+        if (end - start > budget) throw std::runtime_error("bad SARC (overlapping files)");
+        budget -= end - start;
         SarcFile f;
         if (attr & 0x01000000) {
             size_t at = names + size_t(attr & 0xffff) * 4;

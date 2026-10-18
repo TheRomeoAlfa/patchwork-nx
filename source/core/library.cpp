@@ -80,6 +80,9 @@ const std::string kSizeTableKey = toLower(kBotwSizeTable);
 constexpr const char* kMergedPrefix = "*merged:";
 constexpr const char* kBcmlPrefix = "*bcml:";
 const std::string kContentsPrefix = "atmosphere/contents/";
+// Owner of a target recorded before its file is written (see apply()).
+constexpr const char* kWriting = "*writing";
+constexpr size_t kBatch = 50;  // files written between state saves
 
 }  // namespace
 
@@ -182,6 +185,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     std::string err;
     if (!removeTree(staging, &err) || !removeTree(old, &err)) throw std::runtime_error(err);
     record.files.clear();
+    bool replacedWasOn = false;  // replacing an enabled copy: it's turned off during the swap
     try {
         size_t done = 0;
         for (const auto& f : files) {
@@ -201,6 +205,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
         std::optional<int> keepPriority;
         if (auto* existing = findMut(record.id)) {
             keepPriority = existing->priority;
+            replacedWasOn = existing->enabled;
             existing->enabled = false;
             apply(progress);
         }
@@ -225,6 +230,18 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
         }
     } catch (...) {
         removeTree(staging);
+        // The old copy is still the library's (the swap didn't happen): turn it back on.
+        if (auto* existing = findMut(record.id); existing && replacedWasOn && !existing->enabled) {
+            existing->enabled = true;
+            try {
+                apply();
+            } catch (...) {
+                try {
+                    save();
+                } catch (...) {
+                }
+            }
+        }
         throw;
     }
     if (!record.installedAt) record.installedAt = static_cast<int64_t>(std::time(nullptr));
@@ -485,8 +502,27 @@ private:
 
 }  // namespace
 
+namespace {
+
+// The packages in a merge key ("id@installedAt;…;lang=USen"), without the language.
+std::set<std::string> keyPackages(const std::string& key) {
+    std::set<std::string> out;
+    size_t start = 0;
+    for (size_t end; (end = key.find(';', start)) != std::string::npos; start = end + 1) out.insert(key.substr(start, end - start));
+    return out;  // the trailing "lang=…" has no ';' after it
+}
+
+}  // namespace
+
 bool Library::bcmlMerged(const ModRecord& m) const {
-    return bcmlKey_.find(m.id + "@" + std::to_string(m.installedAt) + ";") != std::string::npos;
+    return keyPackages(bcmlKey_).count(m.id + "@" + std::to_string(m.installedAt)) > 0;
+}
+
+bool Library::bcmlStillUsable() const {
+    auto wanted = keyPackages(bcmlKey());
+    for (const auto& p : keyPackages(bcmlKey_))
+        if (!wanted.count(p)) return false;
+    return true;
 }
 
 std::string Library::bcmlKey() const {
@@ -509,6 +545,8 @@ void Library::refreshBcml() {
         bcmlOutputs_.clear();
         bcmlSizes_.clear();
         removeTree(staging);
+        removeTree(fs::path(staging) += ".new");
+        removeTree(fs::path(staging) += ".old");
         return;
     }
     std::vector<bcml::Package> pkgs;
@@ -526,14 +564,29 @@ void Library::refreshBcml() {
     options.language = textLanguage_;
     if (mergeProgress_) options.progress = [this](float f, const std::string& what) { mergeProgress_(0.9f * f, what); };
     auto result = bcml::merge(pkgs, game, options);
+    // Written next to the last merge's files and swapped in once all are there, so a failed
+    // write leaves the last merge as it was.
+    auto incoming = staging, previous = staging;
+    incoming += ".new";
+    previous += ".old";
     std::string err;
-    if (!removeTree(staging, &err)) throw std::runtime_error(err);
+    if (!removeTree(incoming, &err) || !removeTree(previous, &err)) throw std::runtime_error(err);
     std::vector<std::string> outputs;
     for (const auto& [path, data] : result.files) {
-        writeFileAtomic(staging / fs::path(path), data);
+        // merge() only produces these; they become paths on the SD card.
+        if (!bcml::isPackagePath(path)) throw std::logic_error("BCML merge produced a path outside the game: " + path);
+        writeFileAtomic(incoming / fs::path(path), data);
         outputs.push_back(kContentsPrefix + path);
         if (mergeProgress_) mergeProgress_(0.9f + 0.1f * outputs.size() / result.files.size(), "Saving the merged files");
     }
+    // Forget the last merge before its files go: if this is interrupted the next apply()
+    // merges again instead of deploying files that don't match the state.
+    bcmlKey_.clear();
+    save();
+    if (fs::exists(staging)) fs::rename(staging, previous);
+    if (!result.files.empty()) fs::rename(incoming, staging);
+    removeTree(previous);
+    removeTree(incoming);
     bcmlKey_ = key;
     bcmlOutputs_ = std::move(outputs);
     bcmlSizes_ = std::move(result.sizes);
@@ -579,13 +632,15 @@ void replaceFile(const fs::path& from, const fs::path& to) {
 
 // Make the SD card match the enabled mods. Written so an interruption at any point (power
 // loss, crash, full card) leaves something a later apply() can finish:
-// - a target is recorded as deployed *before* its file is written, so a failed write is
-//   cleaned up by the next apply;
-// - an original is backed up before being overwritten, and an existing backup is never
-//   overwritten (it's the real original from an earlier, interrupted run);
+// - files are written in batches; before each, the originals they cover are backed up and
+//   the targets are recorded and saved as ours (owner kWriting), so after an interrupted
+//   write the next apply rewrites or removes them, and never backs up our own file as the
+//   user's;
+// - an existing backup is never overwritten (it's the real original from an earlier,
+//   interrupted run);
 // - a backup is only deleted after it has been copied back, and a missing backup means it
 //   was already restored.
-// State is saved every 50 files and at the end.
+// State is also saved every kBatch removals and at the end.
 void Library::apply(const ProgressFn& progress) {
     // A merge that can't run (game files missing) doesn't stop the rest: the packages it
     // concerns just stay off the SD card for now.
@@ -594,6 +649,14 @@ void Library::apply(const ProgressFn& progress) {
         bcmlError_.clear();
     } catch (const std::exception& e) {
         bcmlError_ = e.what();
+        // The last merge stays on the card while it only lacks packages turned on since (they
+        // wait). If it includes one that's now off, removed or reinstalled, it would keep that
+        // package's changes in the game: take every merged file off until a merge succeeds.
+        if (!bcmlStillUsable()) {
+            bcmlKey_.clear();
+            bcmlOutputs_.clear();
+            bcmlSizes_.clear();
+        }
     }
     auto desired = desiredDeployment();
 
@@ -612,7 +675,7 @@ void Library::apply(const ProgressFn& progress) {
 
     size_t total = toRemove.size() + toWrite.size(), done = 0, sinceSave = 0;
     auto checkpoint = [&] {
-        if (++sinceSave >= 50) {
+        if (++sinceSave >= kBatch) {
             save();
             sinceSave = 0;
         }
@@ -636,30 +699,41 @@ void Library::apply(const ProgressFn& progress) {
             ++done;
             checkpoint();
         }
-        for (const auto& t : toWrite) {
-            if (progress) progress(done, total, t);
-            const auto& id = desired.at(t);
-            const auto* m = find(id);
-            auto sdPath = sdRoot_ / fs::path(t);
-            auto key = targetKey(t);
-            auto existing = deployedByKey.find(key);
-            std::error_code ec;
-            if (existing == deployedByKey.end() && fs::exists(sdPath, ec) && !backedUp_.count(key)) {
-                // A file we didn't put there: keep it so disabling the mod restores it.
-                auto bkPath = backupPath(t);
-                if (!fs::exists(bkPath, ec)) copyFileCreatingDirs(sdPath, bkPath);
-                backedUp_[key] = t;
+        for (size_t batch = 0; batch < toWrite.size(); batch += kBatch) {
+            size_t end = std::min(toWrite.size(), batch + kBatch);
+            // Before writing a batch: back up the user's originals, then record the targets as
+            // ours with no owner yet (kWriting), and save. If writing is interrupted, the next
+            // apply() rewrites or removes them and never mistakes our file for an original.
+            for (size_t i = batch; i < end; ++i) {
+                const auto& t = toWrite[i];
+                auto sdPath = sdRoot_ / fs::path(t);
+                auto key = targetKey(t);
+                auto existing = deployedByKey.find(key);
+                std::error_code ec;
+                if (existing == deployedByKey.end() && fs::exists(sdPath, ec) && !backedUp_.count(key)) {
+                    // A file we didn't put there: keep it so disabling the mod restores it.
+                    auto bkPath = backupPath(t);
+                    if (!fs::exists(bkPath, ec)) copyFileCreatingDirs(sdPath, bkPath);
+                    backedUp_[key] = t;
+                }
+                if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
+                deployed_[t] = kWriting;
             }
-            if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
-            if (id.rfind(kMergedPrefix, 0) == 0)
-                writeMergedSizeTable(sdPath);
-            else if (id.rfind(kBcmlPrefix, 0) == 0)
-                replaceFile(dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size())), sdPath);
-            else
-                replaceFile(modDir(*m) / fs::path(t), sdPath);
-            deployed_[t] = id;
-            ++done;
-            checkpoint();
+            save();
+            for (size_t i = batch; i < end; ++i) {
+                const auto& t = toWrite[i];
+                if (progress) progress(done, total, t);
+                const auto& id = desired.at(t);
+                auto sdPath = sdRoot_ / fs::path(t);
+                if (id.rfind(kMergedPrefix, 0) == 0)
+                    writeMergedSizeTable(sdPath);
+                else if (id.rfind(kBcmlPrefix, 0) == 0)
+                    replaceFile(dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size())), sdPath);
+                else
+                    replaceFile(modDir(*find(id)) / fs::path(t), sdPath);
+                deployed_[t] = id;
+                ++done;
+            }
         }
     } catch (...) {
         save();  // record what actually got done so a retry continues from here
