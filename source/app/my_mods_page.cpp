@@ -462,17 +462,18 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     };
     auto lastPct = std::make_shared<int>(-1);
     auto lastWhat = std::make_shared<std::string>();
-    auto mergeProgress = [this, alive, busy, lastPct, lastWhat](float f, const std::string& what) {
+    auto mergeProgress = [this, alive, busy, lastPct, lastWhat, status](float f, const std::string& what) {
         int pct = static_cast<int>(f * 100);
         if (pct == *lastPct && what == *lastWhat) return;
         *lastPct = pct;
         *lastWhat = what;
-        brls::sync([this, alive, busy, pct, f, what] {
+        brls::sync([this, alive, busy, pct, f, what, status] {
             if (!*alive || !busy_) return;
-            busy.status->setText("Merging BCML packages with the game's files… " + std::to_string(pct) + "%");
+            // The BCML packages that are on are merged again (on, off or moved alike).
+            busy.status->setText(status);
             busy.bar->setVisibility(brls::Visibility::VISIBLE);
             busy.bar->setProgress(f);
-            busy.count->setText(what);
+            busy.count->setText("Updating merged files… " + std::to_string(pct) + "% · " + what);
         });
     };
     AppState::get().runFileJob([job = std::move(job), progress, mergeProgress](mm::Library& lib) {
