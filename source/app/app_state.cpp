@@ -146,6 +146,20 @@ void AppState::init() {
             }
         }
     }
+    // Earlier versions couldn't always open the DLC and remembered it as missing: look again,
+    // and merge again with its maps if it's there.
+    bool dlcFound = false;
+    {
+        auto dlcCache = gameCache / mm::fs::path(mm::bcml::kDlc);
+        std::error_code ec;
+        if (mm::fs::exists(dlcCache / "Pack" / "AocMainField.pack.absent", ec) && platform::botwDlcInstalled() == 1) {
+            std::vector<mm::fs::path> markers;
+            for (mm::fs::recursive_directory_iterator it(dlcCache, ec), end; it != end; it.increment(ec))
+                if (it->path().extension() == ".absent") markers.push_back(it->path());
+            for (const auto& m : markers) mm::fs::remove(m, ec);
+            dlcFound = true;
+        }
+    }
     library_->setTextLanguage(platform::gameTextLanguage());
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
@@ -184,7 +198,7 @@ void AppState::init() {
 
     auto staleWork = workDir();
     auto originalTable = dataDir_ / "original" / "botw" / "ResourceSizeTable.product.srsizetable";
-    runFileJob([this, staleWork, originalTable](mm::Library& lib) {
+    runFileJob([this, staleWork, originalTable, dlcFound](mm::Library& lib) {
         // Whatever happens, the size table status must stop saying "Checking…".
         struct Finish {
             AppState* st;
@@ -208,7 +222,8 @@ void AppState::init() {
         }
         lib.setOriginalSizeTable(originalTable);
         // BCML packages waiting for game files: merge them now if the files can be read.
-        if (lib.bcmlPending()) {
+        if (dlcFound) lib.invalidateBcml();
+        if (dlcFound || lib.bcmlPending()) {
             try {
                 lib.apply();
             } catch (const std::exception& e) {

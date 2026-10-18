@@ -374,23 +374,104 @@ void SaveData::commit() {
 #endif
 }
 
+#ifdef __SWITCH__
+namespace {
+constexpr u64 kBotwDlc = 0x01007EF00011F001ull;
+
+// The DLC's data content, through the content database (works whether or not the DLC is
+// registered for this process). Returns the storage holding it.
+Result findDlcContent(NcmStorageId& storageOut, char* path, size_t pathSize) {
+    Result rc = ncmInitialize();
+    if (R_FAILED(rc)) return rc;
+    Result last = rc;
+    for (auto storage : {NcmStorageId_SdCard, NcmStorageId_BuiltInUser}) {
+        NcmContentMetaDatabase db;
+        if (R_FAILED(last = ncmOpenContentMetaDatabase(&db, storage))) continue;
+        NcmContentMetaKey key;
+        NcmContentId content;
+        last = ncmContentMetaDatabaseGetLatestContentMetaKey(&db, &key, kBotwDlc);
+        if (R_SUCCEEDED(last)) last = ncmContentMetaDatabaseGetContentIdByType(&db, &content, &key, NcmContentType_Data);
+        ncmContentMetaDatabaseClose(&db);
+        if (R_FAILED(last)) continue;
+        NcmContentStorage cs;
+        if (R_FAILED(last = ncmOpenContentStorage(&cs, storage))) continue;
+        last = ncmContentStorageGetPath(&cs, path, pathSize, &content);
+        ncmContentStorageClose(&cs);
+        if (R_SUCCEEDED(last)) {
+            storageOut = storage;
+            break;
+        }
+    }
+    ncmExit();
+    return last;
+}
+}  // namespace
+#endif
+
+int botwDlcInstalled() {
+#ifdef __SWITCH__
+    static int known = -2;
+    if (known != -2) return known;
+    if (R_FAILED(ncmInitialize())) return known = -1;
+    int found = 0;
+    bool unsure = false;
+    for (auto storage : {NcmStorageId_SdCard, NcmStorageId_BuiltInUser}) {
+        NcmContentMetaDatabase db;
+        if (R_FAILED(ncmOpenContentMetaDatabase(&db, storage))) {
+            unsure = true;  // e.g. no SD card database: can't say it's not there
+            continue;
+        }
+        NcmContentMetaKey key;
+        if (R_SUCCEEDED(ncmContentMetaDatabaseGetLatestContentMetaKey(&db, &key, kBotwDlc))) found = 1;
+        ncmContentMetaDatabaseClose(&db);
+    }
+    ncmExit();
+    return known = found ? 1 : unsure ? -1 : 0;
+#else
+    return std::getenv("MM_GAME_ROMFS_BOTW_DLC") ? 1 : 0;
+#endif
+}
+
 bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame) {
     if (notInGame) *notInGame = false;
 #ifdef __SWITCH__
-    constexpr u64 kBotwDlc = 0x01007EF00011F001ull;
+    // Mounted the way the game itself does first; else straight from the installed content.
+    bool mounted = false;
+    std::string errors;
     FsStorage storage;
     Result rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_SdCard);
     if (R_FAILED(rc)) rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_BuiltInUser);
-    if (R_FAILED(rc)) {
-        // Not installed (or not readable this way): treat as no DLC.
-        if (notInGame) *notInGame = true;
-        why = "The Breath of the Wild DLC isn't installed (error " + resultCode(rc) + ").";
-        return false;
+    if (R_SUCCEEDED(rc)) {
+        rc = romfsMountFromStorage(storage, 0, "dlcfs");
+        if (R_SUCCEEDED(rc)) mounted = true;
+        else fsStorageClose(&storage);
     }
-    rc = romfsMountFromStorage(storage, 0, "dlcfs");
-    if (R_FAILED(rc)) {
-        fsStorageClose(&storage);
-        why = "Couldn't open the DLC's files (error " + resultCode(rc) + ").";
+    if (!mounted) errors = resultCode(rc);
+    bool fsdev = false;
+    if (!mounted) {
+        char path[FS_MAX_PATH] = {};
+        NcmStorageId where{};
+        rc = findDlcContent(where, path, sizeof(path));
+        if (R_SUCCEEDED(rc)) {
+            FsFileSystem fs;
+            rc = fsOpenFileSystemWithId(&fs, kBotwDlc, FsFileSystemType_ContentData, path, FsContentAttributes_All);
+            if (R_SUCCEEDED(rc)) {
+                if (fsdevMountDevice("dlcfs", fs) >= 0) {
+                    mounted = fsdev = true;
+                } else {
+                    fsFsClose(&fs);
+                }
+            }
+        }
+        if (!mounted) errors += ", " + resultCode(rc);
+    }
+    if (!mounted) {
+        if (botwDlcInstalled() == 0) {
+            if (notInGame) *notInGame = true;
+            why = "The Breath of the Wild DLC isn't installed.";
+        } else {
+            why = "Couldn't open the Breath of the Wild DLC (error " + errors + ").";
+        }
         return false;
     }
     try {
@@ -404,7 +485,8 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
-    romfsUnmount("dlcfs");
+    if (fsdev) fsdevUnmountDevice("dlcfs");
+    else romfsUnmount("dlcfs");
     return why.empty();
 #else
     const char* env = std::getenv("MM_GAME_ROMFS_BOTW_DLC");

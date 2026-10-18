@@ -79,6 +79,11 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
                                                    : "Not read yet");
     }
     content->addView(files);
+    auto* dlc = new brls::DetailCell();
+    dlc->setText("Expansion Pass (DLC)");
+    int dlcInstalled = platform::botwDlcInstalled();
+    dlc->setDetailText(dlcInstalled == 1 ? "Installed" : dlcInstalled == 0 ? "Not installed" : "Couldn't tell");
+    content->addView(dlc);
     auto* sizes = new brls::DetailCell();
     sizes->setText("Size table");
     sizes->setDetailText(AppState::get().sizeTableStatus());
