@@ -71,6 +71,7 @@ private:
     brls::Box* list_ = nullptr;
     brls::Box* pane_ = nullptr;  // right side: preview or the install flow
     brls::Box* listEmpty_ = nullptr;
+    brls::Box* newSearch_ = nullptr;  // search results: a row to search again
     std::unique_ptr<InstallFlow> flow_;
     ui::FocusSink* sink_ = nullptr;
     std::shared_ptr<bool> previewToken_ = std::make_shared<bool>(false);  // the preview on screen
