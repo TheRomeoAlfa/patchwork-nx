@@ -65,6 +65,9 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
         if (!isUnsupportedPackage(f)) score += 4;
         if (mm::isRestoreOriginalsFile(f.filename, f.description)) score -= 20;  // only if it's all there is
         if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
+        // The author's own advice ("Standalone Version (Not Recommended)").
+        auto desc = mm::toLower(f.description + " " + f.filename);
+        if (desc.find("not recommend") != std::string::npos || desc.find("not-recommend") != std::string::npos) score -= 2;
         // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
         bool isVariantOfAnother = false;
         for (size_t j = 0; j < d.files.size(); ++j)

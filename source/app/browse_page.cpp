@@ -250,6 +250,7 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
 void BrowsePage::setSource(Source s) {
     if (s == source_) return;
     source_ = s;
+    setActionAvailable(brls::BUTTON_Y, s == Source::GameBanana);  // Waikuteru's list has one order
     updateTabs();
     reload();
 }
