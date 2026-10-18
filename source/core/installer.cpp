@@ -14,7 +14,7 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
     if (!removeTree(workDir, &err)) throw std::runtime_error("couldn't clear the unpack folder: " + err);
     PreparedArchive p{workDir, {}, {}};
     if (endsWithI(archive.filename().string(), ".bnp")) {
-        // A BCML package: installable when it only needs its resource sizes merged.
+        // A BCML package: installable when Patchwork can merge every log it ships.
         extractArchive(archive, workDir, {}, progress);
         std::vector<std::string> paths;
         for (const auto& e : fs::recursive_directory_iterator(workDir))
