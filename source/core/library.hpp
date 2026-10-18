@@ -156,6 +156,8 @@ public:
     // Enabled BCML packages that haven't been merged yet (a game file was missing). Their files
     // stay off the SD card until they are; bcmlError() says why.
     bool bcmlPending() const { return bcmlKey() != bcmlKey_; }
+    // Merge BCML packages again on the next apply() (the game files they read changed).
+    void invalidateBcml() { bcmlKey_.clear(); }
     const std::string& bcmlError() const { return bcmlError_; }
 private:
     void writeMergedSizeTable(const fs::path& sdPath) const;
