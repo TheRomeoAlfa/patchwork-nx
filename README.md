@@ -21,8 +21,11 @@ Mods belong to their authors.
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
 - **Hides NSFW mods** (uses GameBanana's own content ratings), including mods opened by link or number. The setting is kept out of sight for kids: hold **L + R + −** for 3 seconds on the Settings page to show it. It turns back on every time Patchwork starts.
 
-Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods: packages made for
-BCML (`.bnp`) or TKMM (`.tkcl`) are detected and flagged as needing those PC tools.
+Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods' changes into the game's
+own files, with one exception: BOTW's resource size table, which it merges from the game's copy (read when
+Patchwork is opened by holding R while starting BOTW) and every enabled mod. That makes BCML packages (`.bnp`)
+that only list resource sizes installable. BCML packages that need real merging, and TKMM (`.tkcl`) packages,
+are hidden from Browse and flagged as needing those PC tools.
 
 ## Install
 

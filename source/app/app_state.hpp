@@ -114,6 +114,10 @@ public:
     // lists. Asks GameBanana for uncached mods (several at once); remembered on the SD card.
     // Network thread only. A mod that can't be checked counts as installable.
     std::vector<bool> needsPcTool(const std::vector<mm::gb::ModSummary>& mods);
+    // Whether Patchwork has BOTW's original size table (needed for BCML packages), for Settings.
+    std::string sizeTableStatus() const;
+    // Fill in which BCML packages among a mod's files install as-is. Network thread only.
+    void checkBcmlFiles(std::vector<mm::gb::ModFile>& files);
     // Turn a pasted link into something installable: a GameBanana or Waikuteru mod page, or
     // a direct link to an archive. Throws with a message for the user (e.g. wrong game).
     mm::gb::ModDetails resolveLink(const std::string& url, mm::Game game);
@@ -165,8 +169,15 @@ private:
     std::map<std::string, mm::gb::ModDetails> details_;
     std::mutex wkMutex_;
     std::mutex pcMutex_;
+    mutable std::mutex statusMutex_;
+    std::string sizeTableStatus_ = "Checking…";
+    std::string captureOriginalSizeTable(const mm::fs::path& path);  // file thread
     bool pcLoaded_ = false;
     std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
+    std::map<int64_t, bool> bnpInstallable_;               // file id -> needs no merging
+    void loadPcCacheLocked();
+    void savePcCacheLocked();
+    bool bnpInstallable(const mm::gb::ModFile& f);  // cached; false if it can't be checked
     std::vector<mm::wk::ListEntry> wkList_;
     // Small LRU of downloaded image bytes keyed by URL.
     std::list<std::pair<std::string, std::shared_ptr<std::string>>> images_;

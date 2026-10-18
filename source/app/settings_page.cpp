@@ -130,6 +130,16 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     });
     content->addView(repair);
 
+    auto* sizes = new brls::DetailCell();
+    sizes->setText("BOTW size table");
+    sizes->setDetailText(AppState::get().sizeTableStatus());
+    content->addView(sizes);
+    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp): Patchwork reads it from Breath of the Wild when it's "
+                                "opened by holding R while starting the game.",
+                                14, ui::muted(), false);
+    sizesNote->setMargins(2, 4, 4, 4);
+    content->addView(sizesNote);
+
     auto* where = new brls::DetailCell();
     where->setText("Mod library folder");
     where->setDetailText("SD:/switch/patchwork");
@@ -140,7 +150,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         std::string(APP_TITLE) + " " + APP_VERSION + ", a mod manager for Breath of the Wild and Tears of the Kingdom." +
             "\nMods are downloaded from GameBanana and belong to their authors. Installed mods go into "
             "atmosphere/contents and are only active while running Atmosphère.\n"
-            "Mods that need BCML or TKMM (PC merging tools) can't be installed here.",
+            "BCML packages that need merging and TKMM packages (PC tools) can't be installed here.",
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
