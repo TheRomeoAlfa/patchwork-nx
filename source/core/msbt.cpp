@@ -78,6 +78,8 @@ File parse(const std::string& d) {
                     uint8_t len = uint8_t(block[off]);
                     std::string name = block.substr(off + 1, len);
                     labels.emplace_back(name, rd32(block, off + 1 + len));
+                    // Each label takes at least 5 bytes; more means buckets point at the same ones.
+                    if (labels.size() > block.size() / 5) throw std::runtime_error("MSBT: bad label table");
                     off += 1 + len + 4;
                 }
             }
@@ -85,6 +87,10 @@ File parse(const std::string& d) {
             f.hasAttributes = true;
             uint32_t count = rd32(block, 0);
             f.attrSize = rd32(block, 4);
+            // Rows must fit in the block; attribute-less rows (size 0) still need a message each,
+            // and every message takes at least a 4-byte text offset.
+            if (f.attrSize ? uint64_t(count) * f.attrSize > block.size() : count > d.size() / 4)
+                throw std::runtime_error("MSBT: bad attribute table");
             size_t end = 8 + size_t(count) * f.attrSize;
             // BOTW: each row is the offset of a UTF-16 string stored after the rows.
             bool strings = f.attrSize == 4 && count > 0 && end < block.size();
@@ -93,11 +99,13 @@ File parse(const std::string& d) {
                 if (off < end || off > block.size()) strings = false;
             }
             f.attrStrings = strings;
+            size_t attrBytes = 0;
             for (uint32_t k = 0; k < count; ++k) {
                 if (strings) {
                     uint32_t off = rd32(block, 8 + 4 * k);
                     uint32_t next = k + 1 < count ? rd32(block, 8 + 4 * (k + 1)) : uint32_t(block.size());
                     if (next < off) next = off;
+                    if ((attrBytes += next - off) > block.size()) throw std::runtime_error("MSBT: bad attribute strings");
                     attrs.push_back(block.substr(off, next - off));
                 } else {
                     attrs.push_back(block.substr(8 + size_t(k) * f.attrSize, f.attrSize));
