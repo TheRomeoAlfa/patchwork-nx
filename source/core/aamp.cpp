@@ -69,9 +69,24 @@ size_t stringCapacity(Type t) {
 struct Reader {
     const std::string& d;
     int depth = 0;
+    // Limits against structures that point at the same children over and over (the tree
+    // would grow exponentially with the nesting). Without sharing every list, object and
+    // parameter takes at least 8 bytes of the file; values may be shared (the writer does).
+    size_t nodesLeft = d.size() / 2 + 64;
+    size_t bytesLeft = d.size() * 64 + (1u << 20);
+
+    void node() {
+        if (nodesLeft-- == 0) throw std::runtime_error("AAMP: too many shared structures");
+    }
+    std::string copy(size_t at, size_t n) {
+        if (n > bytesLeft) throw std::runtime_error("AAMP: too many shared values");
+        bytesLeft -= n;
+        return d.substr(at, n);
+    }
 
     ParameterList list(size_t at) {
         if (++depth > 64) throw std::runtime_error("AAMP: too deep");
+        node();
         ParameterList l;
         size_t lists = at + size_t(rd16(d, at + 4)) * 4, objects = at + size_t(rd16(d, at + 8)) * 4;
         uint16_t numLists = rd16(d, at + 6), numObjects = rd16(d, at + 10);
@@ -88,6 +103,7 @@ struct Reader {
     }
 
     ParameterObject object(size_t at) {
+        node();
         ParameterObject o;
         size_t params = at + size_t(rd16(d, at + 4)) * 4;
         uint16_t n = rd16(d, at + 6);
@@ -99,24 +115,28 @@ struct Reader {
     }
 
     Parameter parameter(size_t at) {
+        node();
         Parameter p;
         uint32_t word = rd32(d, at + 4);
         p.type = Type(word >> 24);
         if (uint8_t(p.type) > uint8_t(Type::StringRef)) throw std::runtime_error("AAMP: unknown parameter type");
         size_t data = at + size_t(word & 0xFFFFFF) * 4;
         if (p.isString()) {
-            size_t end = d.find('\0', data);
-            if (end == std::string::npos) throw std::runtime_error("AAMP: unterminated string");
-            p.data = d.substr(data, std::min(end - data, stringCapacity(p.type)));
+            // Look no further than the type holds (shared strings would be scanned again and again).
+            if (data >= d.size()) throw std::runtime_error("AAMP: unterminated string");
+            size_t window = std::min(d.size() - data, stringCapacity(p.type));
+            const void* end = std::memchr(d.data() + data, '\0', window);
+            if (!end && window == d.size() - data) throw std::runtime_error("AAMP: unterminated string");
+            p.data = copy(data, end ? size_t(static_cast<const char*>(end) - (d.data() + data)) : window);
         } else if (isBuffer(p.type)) {
             uint32_t count = rd32(d, data - 4);
             size_t bytes = p.type == Type::BufferBinary ? count : size_t(count) * 4;
             if (data + bytes > d.size()) throw std::runtime_error("AAMP: buffer out of range");
-            p.data = d.substr(data, bytes);
+            p.data = copy(data, bytes);
         } else {
             size_t size = fixedSize(p.type);
             if (data + size > d.size()) throw std::runtime_error("AAMP: value out of range");
-            p.data = d.substr(data, size);
+            p.data = copy(data, size);
         }
         return p;
     }
@@ -135,6 +155,12 @@ struct Writer {
         ++numLists;
     }
 
+    // Offsets (in words, relative to the struct) and counts are 16-bit in the format.
+    void set16Checked(size_t at, size_t v) {
+        if (v > 0xFFFF) throw std::runtime_error("AAMP: file too large");
+        set16(out, at, uint16_t(v));
+    }
+
     size_t posOf(const ParameterList* l) const {
         for (const auto& [p, at] : listPos)
             if (p == l) return at;
@@ -142,8 +168,8 @@ struct Writer {
     }
 
     void childLists(const ParameterList& l, size_t at) {
-        set16(out, at + 4, uint16_t((out.size() - at) / 4));
-        set16(out, at + 6, uint16_t(l.lists.size()));
+        set16Checked(at + 4, (out.size() - at) / 4);
+        set16Checked(at + 6, l.lists.size());
         std::vector<size_t> children;
         for (const auto& [k, c] : l.lists) {
             children.push_back(out.size());
@@ -155,8 +181,8 @@ struct Writer {
 
     void objects(const ParameterList& l) {
         size_t at = posOf(&l);
-        set16(out, at + 8, uint16_t((out.size() - at) / 4));
-        set16(out, at + 10, uint16_t(l.objects.size()));
+        set16Checked(at + 8, (out.size() - at) / 4);
+        set16Checked(at + 10, l.objects.size());
         for (const auto& [k, o] : l.objects) {
             objectPos.emplace_back(&o, out.size());
             put32(out, k);
@@ -176,8 +202,8 @@ struct Writer {
         for (const auto& [k, c] : l.lists) params(c);
         for (const auto& [k, o] : l.objects) {
             size_t at = objectAt(&o);
-            set16(out, at + 4, uint16_t((out.size() - at) / 4));
-            set16(out, at + 6, uint16_t(o.params.size()));
+            set16Checked(at + 4, (out.size() - at) / 4);
+            set16Checked(at + 6, o.params.size());
             for (const auto& [pk, p] : o.params) {
                 paramPos.emplace_back(&p, out.size());
                 put32(out, pk);
@@ -218,11 +244,6 @@ Parameter Parameter::u32(uint32_t v) {
     put32(p.data, v);
     return p;
 }
-Parameter Parameter::floats(Type type, const std::vector<float>& v) {
-    Parameter p{type, std::string(v.size() * 4, '\0')};
-    if (!v.empty()) std::memcpy(p.data.data(), v.data(), v.size() * 4);
-    return p;
-}
 Parameter Parameter::string(Type type, std::string v) { return Parameter{type, std::move(v)}; }
 
 bool Parameter::asBool() const { return data.size() >= 4 && rd32(data, 0) != 0; }
@@ -232,7 +253,6 @@ float Parameter::asF32() const {
     return f;
 }
 int32_t Parameter::asInt() const { return data.size() >= 4 ? int32_t(rd32(data, 0)) : 0; }
-uint32_t Parameter::asU32() const { return data.size() >= 4 ? rd32(data, 0) : 0; }
 
 const Parameter* ParameterObject::find(uint32_t key) const {
     for (const auto& [k, p] : params)
