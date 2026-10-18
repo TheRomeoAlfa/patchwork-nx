@@ -233,7 +233,10 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
         });
     registerAction("Search", brls::BUTTON_X, [this](brls::View*) {
         if (flow_->active()) return false;
-        openSearchKeyboard();
+        if (!searchMode_ && onSearch)
+            brls::sync(onSearch);  // next frame: it replaces this page (results belong on Search)
+        else
+            openSearchKeyboard();
         return true;
     });
 
@@ -375,6 +378,7 @@ void BrowsePage::loadMore() {
         mm::gb::Page result;
         size_t fetched = 0;  // mods on the page before hiding any
         std::string error;
+        bool numberLookup = false;  // its errors already say what's wrong ("for the other game"…)
         try {
             if (waikuteru) {
                 // One page: every mod for this game that has a Switch version.
@@ -384,6 +388,7 @@ void BrowsePage::loadMore() {
                 result.isLast = true;
             } else if (search && isModNumber(query)) {
                 // A GameBanana mod number (the end of its link) goes straight to that mod.
+                numberLookup = true;
                 auto d = AppState::get().resolveLink("https://gamebanana.com/mods/" + query, game);
                 result.mods.push_back(d.summary);
                 result.totalCount = 1;
@@ -408,7 +413,10 @@ void BrowsePage::loadMore() {
             loading_ = false;
             if (!error.empty()) {
                 if (items_.empty())
-                    showEmptyState("Couldn't reach GameBanana. Check your internet connection.\n\n" + error, "Try again");
+                    showEmptyState(numberLookup ? error
+                                   : std::string("Couldn't reach ") + (waikuteru ? "Waikuteru's site" : "GameBanana") +
+                                         ". Check your internet connection.\n\n" + error,
+                                   search ? "Search again" : "Try again");
                 else
                     retryAfter_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);  // retried on scroll
                 return;

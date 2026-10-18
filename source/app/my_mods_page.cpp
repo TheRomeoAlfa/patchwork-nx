@@ -3,11 +3,20 @@
 #include <ctime>
 
 #include "app_state.hpp"
+#include "platform.hpp"
 #include "compat.hpp"
 #include "install_flow.hpp"
 #include "ui.hpp"
 
 namespace app {
+
+namespace {
+// Shown while a change waits for the job ahead of it on the SD card.
+std::string waitingText() {
+    auto task = AppState::get().backgroundTask();
+    return task.empty() ? "Waiting for the current install to finish…" : "Waiting while Patchwork " + task + "…";
+}
+}  // namespace
 
 MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     setGrow(1);
@@ -22,16 +31,15 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     header->setMargins(0, 28, 10, 6);  // right: lines up with the rows
     header->addView(ui::label("Load order", 22, ui::text()));
     header->addView(ui::grow());
-    count_ = ui::label("top of the list wins", 15, ui::muted());
-    header->addView(count_);
+    header->addView(ui::label("top of the list wins", 15, ui::muted()));
     left->addView(header);
 
     list_ = ui::vbox();
     list_->setPaddingRight(28);  // keeps rows clear of the scroll bar
-    scroll_ = new brls::ScrollingFrame();
-    scroll_->setGrow(1);
-    scroll_->setContentView(list_);
-    left->addView(scroll_);
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setContentView(list_);
+    left->addView(scroll);
     addView(left);
 
     pane_ = ui::vbox();
@@ -417,7 +425,10 @@ void MyModsPage::showDetails(const std::string& id) {
 
     char date[32] = "";
     std::time_t t = static_cast<std::time_t>(m->installedAt);
-    if (t) std::strftime(date, sizeof date, "%b %d, %Y", std::localtime(&t));
+    if (t) {
+        auto tm = platform::localTime(t);  // the console's time zone (newlib's localtime is UTC there)
+        std::strftime(date, sizeof date, "%b %d, %Y", &tm);
+    }
     std::string info = "Installed " + std::string(date);
     if (!m->sourceFile.empty()) info += "\nFile: " + m->sourceFile;
     if (!m->version.empty()) info += "\nMod version: " + m->version;
@@ -437,7 +448,7 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     AppState::get().setInstallBusy(true);  // also blocks switching game
     clearPane();
     auto busy = ui::busyBox(status,
-                            AppState::get().fileJobRunning() ? "Waiting for the current install to finish…" : "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
+                            AppState::get().fileJobRunning() ? waitingText() : "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
                             "Please wait until the files are copied");
     auto* box = busy.box;
     pane_->addView(box);

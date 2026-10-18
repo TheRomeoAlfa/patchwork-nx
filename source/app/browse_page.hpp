@@ -2,6 +2,8 @@
 
 #include <borealis.hpp>
 
+#include <functional>
+
 #include <chrono>
 #include <memory>
 #include <string>
@@ -20,6 +22,10 @@ class InstallFlow;
 class BrowsePage : public brls::Box {
 public:
     explicit BrowsePage(bool searchMode);
+
+    // Browse (not Search): X asks for this, which opens the Search page with its keyboard.
+    std::function<void()> onSearch;
+    void openSearchKeyboard();
     ~BrowsePage() override;
 
     brls::View* getDefaultFocus() override;
@@ -34,7 +40,6 @@ private:
 
     void reload();
     void loadMore();
-    void openSearchKeyboard();
     void updateHeader();
     void refreshCells();
     void showPreview(int row);

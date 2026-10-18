@@ -27,10 +27,6 @@ std::string gameVersion(mm::Game game);
 
 uint64_t freeSpaceBytes();
 
-// Memory this process uses now, and what it may use at most (0 when unknown). On desktop:
-// the peak resident size, and 0.
-uint64_t memoryUsedBytes();
-uint64_t memoryTotalBytes();
 
 std::string userAgent();
 
@@ -96,6 +92,7 @@ public:
 private:
     SaveData() = default;
     mm::fs::path root_;
+    [[maybe_unused]] bool mounted_ = false;  // only unmount what this object mounted (Switch)
 };
 
 }  // namespace platform

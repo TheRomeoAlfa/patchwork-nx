@@ -55,7 +55,7 @@ brls::View* MainActivity::createContentView() {
 
     // Collapse the sidebar to icons whenever focus leaves it.
     focusSub_ = brls::Application::getGlobalFocusChangeEvent()->subscribe([this](brls::View* v) {
-        if (sidebar_ && v) sidebar_->setExpanded(focusInside(sidebar_));
+        if (sidebar_ && v) sidebar_->setExpanded(ui::focusInside(sidebar_));
     });
     gameSub_ = AppState::get().gameChanged()->subscribe([this] {
         sidebar_->refresh();
@@ -82,8 +82,9 @@ void MainActivity::onContentAvailable() {
 // Opened from Breath of the Wild while BCML packages wait for its files: say what's next.
 void MainActivity::checkBcmlSetup() {
     auto& st = AppState::get();
-    // Wait for the startup check (it tells whether mods were on) and for any other dialog.
-    if (st.sizeTableProgress() >= 0 || brls::Application::getActivitiesStack().size() > 1) {
+    // Wait for the startup check (it tells whether mods were on), any other dialog, and any
+    // install or change: its screen must not be replaced underneath it.
+    if (st.sizeTableProgress() >= 0 || brls::Application::getActivitiesStack().size() > 1 || st.installBusy()) {
         brls::delay(500, [this] { checkBcmlSetup(); });
         return;
     }
@@ -105,6 +106,7 @@ void MainActivity::checkBcmlSetup() {
         dialog->addButton("Later", [] {});
         if (!pending.empty())
             dialog->addButton("Open My mods", [this] {
+                if (AppState::get().installBusy()) return;
                 showPage(Page::MyMods);
                 brls::sync([this] { ui::tryFocus(content_); });
             });
@@ -120,6 +122,10 @@ void MainActivity::checkBcmlSetup() {
 // If Atmosphère's mod loader crashed since the last check (the game wouldn't start with
 // mods on), explain the usual cause: Patchwork itself never sees that crash happen.
 void MainActivity::checkModLoaderCrashes() {
+    if (brls::Application::getActivitiesStack().size() > 1 || AppState::get().installBusy()) {
+        brls::delay(500, [this] { checkModLoaderCrashes(); });
+        return;
+    }
     auto reports = mm::modLoaderCrashReports(platform::sdRoot());
     auto& seen = AppState::get().settings().seenCrashReports;
     bool firstCheck = !seen.has_value();
@@ -138,6 +144,7 @@ void MainActivity::checkModLoaderCrashes() {
         "the game again.");
     dialog->addButton("Later", [] {});
     dialog->addButton("Open Settings", [this] {
+        if (AppState::get().installBusy()) return;
         showPage(Page::Settings);
         // The dialog hands focus back to where it was once it has closed; move it after that.
         brls::sync([this] { ui::tryFocus(content_); });
@@ -154,11 +161,6 @@ void MainActivity::switchGame() {
     st.setGame(st.game() == mm::Game::Totk ? mm::Game::Botw : mm::Game::Totk);
 }
 
-bool MainActivity::focusInside(brls::View* container) const {
-    for (auto* v = brls::Application::getCurrentFocus(); v; v = v->getParent())
-        if (v == container) return true;
-    return false;
-}
 
 void MainActivity::showPage(Page page) {
     page_ = page;
@@ -168,7 +170,19 @@ void MainActivity::showPage(Page page) {
     content_->clearViews();
     brls::View* view = nullptr;
     switch (page) {
-        case Page::Browse: view = new BrowsePage(false); break;
+        case Page::Browse: {
+            auto* browse = new BrowsePage(false);
+            browse->onSearch = [this] {
+                showPage(Page::Search);
+                sidebar_->setActive(Page::Search);
+                if (auto* search = dynamic_cast<BrowsePage*>(content_->getChildren().front())) {
+                    ui::tryFocus(search);
+                    search->openSearchKeyboard();
+                }
+            };
+            view = browse;
+            break;
+        }
         case Page::Search: view = new BrowsePage(true); break;
         case Page::AddMods: view = new AddModsPage(); break;
         case Page::MyMods: view = new MyModsPage(); break;
