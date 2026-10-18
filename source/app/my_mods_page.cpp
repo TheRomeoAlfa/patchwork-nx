@@ -65,6 +65,12 @@ void MyModsPage::rebuild() {
     ui::parkFocusIfInside(this, sink_);
     list_->clearViews();
     clearPane();
+    if (!st.snapshot().loaded) {
+        auto* loading = ui::label("Loading your mods…", 16, ui::muted());
+        loading->setMargins(10, 0, 0, 6);
+        list_->addView(loading);
+        return;  // rebuilt when the list arrives
+    }
 
     // Mod files on the card that Patchwork didn't install (a randomizer, manual copies…).
     brls::View* unmanagedRow = nullptr;

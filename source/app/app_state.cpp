@@ -213,6 +213,7 @@ void AppState::init() {
         removeBcmlTestLeftovers(dataDir_);
         setSizeTableProgress(0.1f);
         lib.load();
+        publishSnapshot(lib);  // show the mod list now; the checks below can take a while
         setSizeTableProgress(0.2f);
         try {
             finish.status = captureOriginalSizeTable(originalTable, [this](float p) { setSizeTableProgress(0.2f + 0.8f * p); });
@@ -363,6 +364,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
     }
     snap->bcmlWaiting = lib.bcmlPending();
+    snap->loaded = true;
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);
         libraryChanged_.fire();
