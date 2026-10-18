@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "nlohmann/json.hpp"
+#include "sizetable.hpp"
 
 namespace mm {
 
@@ -31,6 +32,7 @@ json toJson(const ModRecord& m) {
         {"enabled", m.enabled},
         {"priority", m.priority},
         {"files", m.files},
+        {"resourceSizes", m.resourceSizes},
     };
 }
 
@@ -53,6 +55,7 @@ ModRecord fromJson(const json& j) {
     m.enabled = j.value("enabled", false);
     m.priority = j.value("priority", 0);
     m.files = j.value("files", std::vector<std::string>{});
+    m.resourceSizes = j.value("resourceSizes", std::map<std::string, uint32_t>{});
     return m;
 }
 
@@ -67,6 +70,11 @@ std::string ipsBuildId(const std::string& target) {
 
 // FAT32 is case-insensitive, so two targets differing only by case are the same file.
 std::string targetKey(const std::string& target) { return toLower(target); }
+
+void replaceFile(const fs::path& from, const fs::path& to);  // below
+
+const std::string kSizeTableKey = toLower(kBotwSizeTable);
+constexpr const char* kMergedPrefix = "*merged:";
 
 }  // namespace
 
@@ -330,7 +338,88 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     }
     std::map<std::string, std::string> out;
     for (auto& [key, o] : owners) out[o.target] = o.id;
+    auto merged = sizeTableOwner();
+    if (!merged.empty()) {
+        for (auto it = out.begin(); it != out.end(); ++it)
+            if (targetKey(it->first) == kSizeTableKey) {
+                out.erase(it);
+                break;
+            }
+        out[kBotwSizeTable] = merged;
+    }
     return out;
+}
+
+bool Library::hasOriginalSizeTableOnCard() const {
+    if (backedUp_.count(kSizeTableKey)) return true;
+    for (const auto& [t, id] : deployed_)
+        if (targetKey(t) == kSizeTableKey) return false;  // ours, not the user's
+    std::error_code ec;
+    return fs::exists(sdRoot_ / kBotwSizeTable, ec);
+}
+
+std::string Library::sizeTableOwner() const {
+    // Inputs: enabled BOTW mods that ship a table or list sizes, the user's own table, the
+    // game's original. Merge when sizes need a base, or when two tables would compete.
+    std::string inputs;
+    int tables = 0;
+    bool sizes = false;
+    std::vector<const ModRecord*> contributing;
+    for (const auto& m : mods_) {
+        if (!m.enabled || m.game != Game::Botw) continue;
+        bool shipsTable = std::any_of(m.files.begin(), m.files.end(), [](const std::string& t) { return targetKey(t) == kSizeTableKey; });
+        if (!shipsTable && m.resourceSizes.empty()) continue;
+        tables += shipsTable;
+        sizes |= !m.resourceSizes.empty();
+        contributing.push_back(&m);
+    }
+    bool original = hasOriginalSizeTableOnCard();
+    tables += original;
+    if (!sizes && tables < 2) return "";
+    std::sort(contributing.begin(), contributing.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    for (const auto* m : contributing) inputs += m->id + "@" + std::to_string(m->installedAt) + ";";
+    std::error_code ec;
+    if (original) inputs += "card;";
+    if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec))
+        inputs += "game@" + std::to_string(fs::file_size(originalSizeTable_, ec)) + ";";
+    return kMergedPrefix + std::to_string(stableId(inputs));
+}
+
+bool Library::canMergeSizes(const ModRecord& mod) const {
+    if (mod.resourceSizes.empty()) return true;
+    std::error_code ec;
+    if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec)) return true;
+    if (hasOriginalSizeTableOnCard()) return true;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Botw)
+            for (const auto& t : m.files)
+                if (targetKey(t) == kSizeTableKey) return true;
+    return std::any_of(mod.files.begin(), mod.files.end(), [](const std::string& t) { return targetKey(t) == kSizeTableKey; });
+}
+
+void Library::writeMergedSizeTable(const fs::path& sdPath) const {
+    std::vector<std::string> tables;
+    std::error_code ec;
+    if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec)) tables.push_back(readFile(originalSizeTable_));
+    auto bk = backedUp_.find(kSizeTableKey);
+    if (bk != backedUp_.end() && fs::exists(backupPath(bk->second), ec)) tables.push_back(readFile(backupPath(bk->second)));
+    std::vector<const ModRecord*> contributing;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Botw) contributing.push_back(&m);
+    std::sort(contributing.begin(), contributing.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    std::vector<std::map<std::string, uint32_t>> sizes;
+    for (const auto* m : contributing) {
+        for (const auto& t : m->files)
+            if (targetKey(t) == kSizeTableKey) tables.push_back(readFile(modDir(*m) / fs::path(t)));
+        if (!m->resourceSizes.empty()) sizes.push_back(m->resourceSizes);
+    }
+    if (tables.empty())
+        throw std::runtime_error("BOTW's size table is needed to install this mod. Open Patchwork once by holding R while "
+                                 "starting Breath of the Wild so it can read it.");
+    auto merged = mergeSizeTables(tables, sizes);
+    auto staged = dataDir_ / "merged" / fs::path(kBotwSizeTable);
+    writeFileAtomic(staged, merged);
+    replaceFile(staged, sdPath);
 }
 
 namespace {
@@ -424,8 +513,11 @@ void Library::apply(const ProgressFn& progress) {
                 backedUp_[key] = t;
             }
             if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
+            if (id.rfind(kMergedPrefix, 0) == 0)
+                writeMergedSizeTable(sdPath);
+            else
+                replaceFile(modDir(*m) / fs::path(t), sdPath);
             deployed_[t] = id;
-            replaceFile(modDir(*m) / fs::path(t), sdPath);
             ++done;
             checkpoint();
         }
@@ -531,6 +623,7 @@ std::vector<Conflict> Library::conflicts(Game game) const {
     for (const auto* m : mods(game)) {  // already sorted highest priority first
         if (!m->enabled) continue;
         for (const auto& t : m->files) {
+            if (targetKey(t) == kSizeTableKey && m->game == Game::Botw) continue;  // merged, not a conflict
             auto& c = byKey[targetKey(t)];
             if (c.target.empty()) c.target = t;
             c.modIds.push_back(m->id);

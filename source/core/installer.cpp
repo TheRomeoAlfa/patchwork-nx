@@ -3,6 +3,8 @@
 #include <map>
 #include <stdexcept>
 
+#include "bnp.hpp"
+
 namespace mm {
 
 PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir, Game game, const std::string& modSlug,
@@ -10,9 +12,24 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
     std::string err;
     if (!removeTree(workDir, &err)) throw std::runtime_error("couldn't clear the unpack folder: " + err);
     PreparedArchive p{workDir, {}};
-    // A .bnp is a 7z with BCML's own layout; don't bother extracting it.
     if (endsWithI(archive.filename().string(), ".bnp")) {
-        p.layout.kind = PackageKind::Bcml;
+        // A BCML package: installable when it only needs its resource sizes merged.
+        extractArchive(archive, workDir, {}, progress);
+        std::vector<std::string> paths;
+        for (const auto& e : fs::recursive_directory_iterator(workDir))
+            if (e.is_regular_file()) paths.push_back(e.path().lexically_relative(workDir).generic_string());
+        auto check = checkBnp(paths);
+        if (!check.installable()) {
+            p.layout.kind = PackageKind::Bcml;
+            p.layout.problem = bnpProblem(check);
+            return p;
+        }
+        p.layout = detectLayout(workDir, game, modSlug);
+        for (auto& v : p.layout.variants) {
+            // "Main" is the package itself; options are "options/<name>".
+            auto root = v.name.rfind("options/", 0) == 0 ? workDir / fs::path(v.name) : workDir;
+            v.resourceSizes = readBnpSizes(root);
+        }
         return p;
     }
     if (endsWithI(archive.filename().string(), ".tkcl")) {
@@ -23,6 +40,14 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
     extractNestedArchives(workDir);
     p.layout = detectLayout(workDir, game, modSlug);
     return p;
+}
+
+std::map<std::string, uint32_t> mergeVariantSizes(const LayoutResult& layout, const std::vector<size_t>& selected) {
+    std::map<std::string, uint32_t> out;
+    for (auto idx : selected)
+        if (idx < layout.variants.size())
+            for (const auto& [name, size] : layout.variants[idx].resourceSizes) out[name] = size;
+    return out;
 }
 
 std::vector<FileMapping> mergeVariants(const LayoutResult& layout, const std::vector<size_t>& selected) {

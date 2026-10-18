@@ -213,8 +213,10 @@ TEST("compat: add-on files vs newer versions of the same file") {
 }
 
 TEST("gamebanana: mods that only come as PC packages") {
-    auto names = gb::parseFileNames(R"([{"_sFile":"fastswim.bnp"},{"_sFile":"old.zip","_bIsArchived":true}])");
-    CHECK_EQ(names.size(), 1u);
+    auto files = gb::parseFiles(R"([{"_sFile":"fastswim.bnp"},{"_sFile":"old.zip","_bIsArchived":true}])");
+    CHECK_EQ(files.size(), 1u);
+    std::vector<std::string> names;
+    for (const auto& f : files) names.push_back(f.filename);
     CHECK(gb::needsPcTool(names));
     CHECK(gb::pcToolMessage(names).find("BCML") != std::string::npos);
     CHECK(!gb::needsPcTool({"mod.bnp", "mod-switch.zip"}));  // has something installable

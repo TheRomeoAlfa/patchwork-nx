@@ -97,6 +97,27 @@ Page parseModList(const std::string& body) {
     return p;
 }
 
+std::vector<ModFile> parseFileArray(const json& files) {
+    std::vector<ModFile> out;
+    if (!files.is_array()) return out;
+    for (const auto& f : files) {
+        if (flag(f, "_bIsArchived")) continue;
+        ModFile mf;
+        mf.id = num(f, "_idRow");
+        mf.filename = str(f, "_sFile");
+        mf.size = num(f, "_nFilesize");
+        mf.downloadUrl = str(f, "_sDownloadUrl");
+        mf.md5 = str(f, "_sMd5Checksum");
+        mf.version = str(f, "_sVersion");
+        mf.description = str(f, "_sDescription");
+        mf.dateAdded = num(f, "_tsDateAdded");
+        auto av = str(f, "_sAvResult");
+        mf.avClean = av.empty() || av == "clean";
+        out.push_back(std::move(mf));
+    }
+    return out;
+}
+
 ModDetails parseModDetails(const std::string& body, int64_t modId) {
     auto j = parse(body);
     ModDetails d;
@@ -110,32 +131,11 @@ ModDetails parseModDetails(const std::string& body, int64_t modId) {
     if (auto imgs = images(j))
         for (const auto& img : *imgs)
             if (auto u = imageUrl(img, "530"); !u.empty()) d.screenshotUrls.push_back(u);
-    for (const auto& f : j.value("_aFiles", json::array())) {
-        ModFile mf;
-        mf.id = num(f, "_idRow");
-        mf.filename = str(f, "_sFile");
-        mf.size = num(f, "_nFilesize");
-        mf.downloadUrl = str(f, "_sDownloadUrl");
-        mf.md5 = str(f, "_sMd5Checksum");
-        mf.version = str(f, "_sVersion");
-        mf.description = str(f, "_sDescription");
-        mf.dateAdded = num(f, "_tsDateAdded");
-        auto av = str(f, "_sAvResult");
-        mf.avClean = av.empty() || av == "clean";
-        if (flag(f, "_bIsArchived")) continue;
-        d.files.push_back(std::move(mf));
-    }
+    d.files = parseFileArray(j.value("_aFiles", json::array()));
     return d;
 }
 
-std::vector<std::string> parseFileNames(const std::string& body) {
-    std::vector<std::string> out;
-    auto j = parse(body);
-    if (!j.is_array()) return out;
-    for (const auto& f : j)
-        if (!flag(f, "_bIsArchived")) out.push_back(str(f, "_sFile"));
-    return out;
-}
+std::vector<ModFile> parseFiles(const std::string& body) { return parseFileArray(parse(body)); }
 
 bool needsPcTool(const std::vector<std::string>& names) {
     if (names.empty()) return false;
@@ -197,8 +197,8 @@ Page Client::search(Game game, const std::string& query, int page) {
 
 ModDetails Client::details(int64_t modId) { return parseModDetails(http_.get(detailsUrl(modId)), modId); }
 
-std::vector<std::string> Client::fileNames(int64_t modId) {
-    return parseFileNames(http_.get(std::string(kApi) + "/Mod/" + std::to_string(modId) + "/Files"));
+std::vector<ModFile> Client::files(int64_t modId) {
+    return parseFiles(http_.get(std::string(kApi) + "/Mod/" + std::to_string(modId) + "/Files"));
 }
 
 std::vector<Category> Client::categories(Game game) {
