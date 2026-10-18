@@ -75,6 +75,7 @@ void MyModsPage::rebuild() {
     bool hadFocus = ui::focusInside(this) || ui::focusParked();
     ui::parkFocusIfInside(this, sink_);
     list_->clearViews();
+    focusedRow_ = nullptr;
     clearPane();
     if (!st.snapshot().loaded) {
         auto* loading = ui::label("Loading your mods…", 16, ui::muted());
@@ -207,8 +208,9 @@ void MyModsPage::rebuild() {
         pill->addView(ui::label(m->enabled ? "On" : "Off", 15, m->enabled ? nvgRGB(0x10, 0x28, 0x2d) : ui::muted()));
         row->addView(pill);
 
-        row->getFocusEvent()->subscribe([this, id](brls::View*) {
+        row->getFocusEvent()->subscribe([this, id, row](brls::View*) {
             focusedId_ = id;
+            focusedRow_ = row;
             if (paneFree()) showDetails(id);
         });
         row->registerClickAction([this, id](brls::View*) {
@@ -264,6 +266,7 @@ void MyModsPage::rebuildWhenSafe() {
 }
 
 void MyModsPage::clearPane() {
+    *detailsToken_ = false;  // late GameBanana details for the old pane are dropped
     ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
 }
@@ -357,15 +360,29 @@ void MyModsPage::showDetails(const std::string& id) {
     clearPane();
     if (!m) return;
 
-    pane_->addView(ui::label(m->name, 26, ui::text()));
+    // Everything scrolls together: move right into the pane to read the mod's description.
+    auto* content = ui::vbox();
+    content->setPadding(0, 22, 20, 0);  // right: keep text clear of the scroll bar
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
+    scroll->setContentView(content);
+    pane_->addView(scroll);
+    // On the frame: it takes focus itself while the description is still loading.
+    scroll->registerAction("Back to list", brls::BUTTON_B, [this](brls::View*) {
+        if (focusedRow_) brls::Application::giveFocus(focusedRow_);
+        return true;
+    });
+
+    content->addView(ui::label(m->name, 26, ui::text()));
     bool bcml = !m->bcmlLogs.empty();
     std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") +
                        (bcml ? std::string("BCML package") : std::to_string(m->files.size()) + " files") + " · " + (m->enabled ? "on" : "off");
     auto* metaL = ui::label(meta, 16, ui::muted());
     metaL->setMargins(4, 0, 16, 0);
-    pane_->addView(metaL);
+    content->addView(metaL);
 
-    auto addNote = [this](const std::string& text, NVGcolor color, NVGcolor bg) {
+    auto addNote = [content](const std::string& text, NVGcolor color, NVGcolor bg) {
         auto* box = ui::hbox();
         box->setBackgroundColor(bg);
         box->setCornerRadius(4);
@@ -375,7 +392,7 @@ void MyModsPage::showDetails(const std::string& id) {
         l->setGrow(1);
         l->setShrink(1);
         box->addView(l);
-        pane_->addView(box);
+        content->addView(box);
     };
     auto nameOf = [&st](const std::string& modId) {
         auto* other = st.findMod(modId);
@@ -439,7 +456,78 @@ void MyModsPage::showDetails(const std::string& id) {
     }
     auto* infoL = ui::label(info, 16, ui::muted(), false);
     infoL->setMarginTop(8);
-    pane_->addView(infoL);
+    content->addView(infoL);
+    showModPage(*m, content);
+}
+
+// The mod's picture and description from its page (GameBanana or Waikuteru), below the details.
+void MyModsPage::showModPage(const mm::ModRecord& m, brls::Box* content) {
+    bool gb = m.sourceKey.rfind("gb:", 0) == 0 && m.gamebananaModId;
+    if (!gb && m.sourceKey.rfind("wk:", 0) != 0) return;  // imported or from a link: no page
+    mm::gb::ModSummary summary;
+    summary.id = m.gamebananaModId;
+    summary.sourceKey = m.sourceKey;
+    summary.name = m.name;
+    summary.author = m.author;
+    summary.profileUrl = m.profileUrl;
+
+    auto* heading = ui::label(std::string("About this mod · ") + (gb ? "GameBanana" : "Waikuteru"), 16, ui::muted());
+    heading->setMargins(22, 0, 8, 0);
+    content->addView(heading);
+    auto* body = ui::vbox();
+    body->addView(new brls::ProgressSpinner());
+    content->addView(body);
+
+    auto token = std::make_shared<bool>(true);
+    detailsToken_ = token;
+    auto alive = alive_;
+    auto wanted = [alive, token] { return *alive && *token; };
+    auto fill = [body, wanted](const mm::gb::ModDetails& d) {
+        if (!wanted()) return;
+        body->clearViews();  // only the spinner: focus can't be in it
+        if (!d.screenshotUrls.empty()) {
+            auto* hero = new brls::Image();
+            hero->setHeight(240);
+            hero->setCornerRadius(6);
+            hero->setBackgroundColor(ui::thumbBg());
+            hero->setScalingType(brls::ImageScalingType::FILL);
+            hero->setClipsToBounds(true);
+            hero->setMarginBottom(10);
+            body->addView(hero);
+            AppState::get().loadImage(hero, d.screenshotUrls[0], wanted);
+        }
+        auto paras = paragraphs(stripHtml(d.descriptionHtml, 12000));
+        if (paras.size() > 1) body->addView(ui::label("Press → to read the full description", 16, ui::muted()));
+        for (size_t i = 0; i < paras.size(); ++i) {
+            // One focusable chunk per paragraph, so it can be scrolled through.
+            auto* chunk = ui::vbox();
+            chunk->setFocusable(true);
+            chunk->setHideHighlightBackground(true);
+            chunk->setHighlightPadding(4);
+            chunk->setMarginTop(i == 0 ? 10 : 8);
+            chunk->addView(ui::label(paras[i], 16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+            body->addView(chunk);
+        }
+    };
+    if (auto d = AppState::get().cachedDetails(m.sourceKey)) {
+        fill(*d);
+        return;
+    }
+    AppState::get().runNetwork([summary, fill, wanted, body] {
+        try {
+            auto d = AppState::get().fetchDetails(summary);
+            brls::sync([d, fill] {
+                AppState::get().cacheDetails(d);
+                fill(d);
+            });
+        } catch (const std::exception& e) {
+            brls::sync([wanted, body] {
+                if (!wanted()) return;
+                body->clearViews();
+                body->addView(ui::label("Couldn't load the mod's page. Check your internet connection.", 16, ui::muted(), false));
+            });
+        }
+    });
 }
 
 void MyModsPage::runJob(const std::string& status, std::function<void(mm::Library&, const mm::ProgressFn&)> job) {

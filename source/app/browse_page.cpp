@@ -91,29 +91,6 @@ mm::gb::Sort nextSort(mm::gb::Sort s) {
     return mm::gb::Sort::MostDownloaded;
 }
 
-// Break a description into chunks short enough to scroll through one at a time.
-std::vector<std::string> paragraphs(const std::string& text, size_t maxLen = 360) {
-    std::vector<std::string> out;
-    size_t start = 0;
-    while (start < text.size()) {
-        size_t end = text.find("\n\n", start);
-        auto para = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        start = end == std::string::npos ? text.size() : end + 2;
-        while (para.size() > maxLen) {
-            // Prefer to cut after a sentence or line, else at a space.
-            size_t cut = para.rfind(". ", maxLen);
-            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind('\n', maxLen);
-            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind(' ', maxLen);
-            if (cut == std::string::npos || cut == 0) cut = maxLen;
-            out.push_back(para.substr(0, cut + 1));
-            para.erase(0, cut + 1);
-            while (!para.empty() && (para[0] == ' ' || para[0] == '\n')) para.erase(0, 1);
-        }
-        if (!para.empty() && para.find_first_not_of(" \n") != std::string::npos) out.push_back(para);
-    }
-    return out;
-}
-
 }  // namespace
 
 // ------------------------------------------------------------------ page

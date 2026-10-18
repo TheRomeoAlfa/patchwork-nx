@@ -220,5 +220,7 @@ std::string formatCount(int64_t n);
 // times that libarchive converted with the C library's zone, so convert back the same way.
 std::string formatDateTime(int64_t unixSeconds, bool inConsoleZone = true);
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
+// Break a description into chunks short enough to scroll through one at a time.
+std::vector<std::string> paragraphs(const std::string& text, size_t maxLen = 360);
 
 }  // namespace app
