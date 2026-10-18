@@ -589,9 +589,10 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
         busy_ = false;
         if (!error.empty() && error.find("hasn't read yet") != std::string::npos) {
             // A BCML merge needs game files: explain the setup rather than show the raw error.
-            auto* dialog = new brls::Dialog("This change merges BCML packages with Breath of the Wild's own files, which Patchwork "
-                                            "hasn't read yet:\n\n" + AppState::bcmlSetupSteps(false) +
-                                            "\n\nThen make the change again.");
+            // The change itself is kept; only the merge waits (BCML packages are off the SD meanwhile).
+            auto* dialog = new brls::Dialog("Done, but your BCML packages have to be merged again with Breath of the Wild's own "
+                                            "files, which Patchwork hasn't read yet. Until then they're off the SD card. To read them:\n\n" +
+                                            AppState::bcmlSetupSteps(false) + "\n\nThe packages are merged as soon as Patchwork opens that way.");
             dialog->addButton("OK", [] {});
             dialog->open();
         } else if (!error.empty()) {

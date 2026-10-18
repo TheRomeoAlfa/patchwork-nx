@@ -122,7 +122,7 @@ TEST("saves: back up and restore the whole save") {
     auto backups = d.path / "backups";
     auto dir = newBackupDir(backups, Game::Totk, "0123456789abcdef", 1760000000);
     backupSave(save, dir / "save");
-    writeBackupInfo({dir, Game::Totk, "0123456789abcdef", "Ryan", "Before installing X into Slot 1", 1760000000});
+    writeBackupInfo({dir, Game::Totk, "0123456789abcdef", "Alex", "Before installing X into Slot 1", 1760000000});
     CHECK(newBackupDir(backups, Game::Totk, "0123456789abcdef", 1760000000) != dir);  // never reuses a folder
 
     // Mess it up, then restore.
@@ -137,7 +137,7 @@ TEST("saves: back up and restore the whole save") {
 
     auto list = listSaveBackups(backups, Game::Totk);
     CHECK_EQ(list.size(), 1u);
-    CHECK_EQ(list[0].userName, std::string("Ryan"));
+    CHECK_EQ(list[0].userName, std::string("Alex"));
     CHECK_EQ(list[0].reason, std::string("Before installing X into Slot 1"));
     CHECK(listSaveBackups(backups, Game::Botw).empty());
 
