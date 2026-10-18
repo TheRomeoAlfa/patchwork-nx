@@ -19,6 +19,10 @@ namespace mm::bcml {
 inline constexpr const char* kContent = "01007EF00011E000/romfs/";
 inline constexpr const char* kDlc = "01007EF00011F001/romfs/";
 
+// A safe relative path inside the game's or the DLC's romfs. Paths from packages' logs are
+// only read or written when they are.
+bool isPackagePath(const std::string& path);
+
 // The game's own files, read on demand.
 class GameFiles {
 public:
@@ -57,7 +61,8 @@ struct Options {
 };
 
 // Packages lowest priority first. Throws if a game file it needs can't be read (the message
-// names it).
+// names it). Log entries that can't be merged (malformed, or a path outside the game) are
+// skipped and noted in Result::notes; every path in Result::files passes isPackagePath().
 Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options = {});
 
 // The game files merging these packages reads (to copy them while they can be read).
