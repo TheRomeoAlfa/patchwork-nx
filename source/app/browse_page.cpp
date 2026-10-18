@@ -166,6 +166,23 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     header->addView(count_);
     left->addView(header);
 
+    if (searchMode_) {
+        // Above the results, so a new search is one press up (X does it from anywhere).
+        newSearch_ = ui::focusRow();
+        ui::tappable(newSearch_, ui::Tap::Act);
+        newSearch_->setMargins(0, 34, 6, 6);
+        newSearch_->addView(ui::label(ui::icon::search, 22, ui::accent()));
+        auto* l = ui::label("New search", 17, ui::text());
+        l->setMarginLeft(12);
+        newSearch_->addView(l);
+        newSearch_->registerClickAction([this](brls::View*) {
+            openSearchKeyboard();
+            return true;
+        });
+        newSearch_->setVisibility(brls::Visibility::GONE);
+        left->addView(newSearch_);
+    }
+
     listEmpty_ = ui::vbox();
     listEmpty_->setVisibility(brls::Visibility::GONE);
     listEmpty_->setPadding(0, 18, 0, 6);
@@ -304,6 +321,7 @@ brls::View* BrowsePage::rowFocus() {
 }
 
 void BrowsePage::updateHeader() {
+    if (newSearch_) newSearch_->setVisibility(query_.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
     if (searchMode_)
         title_->setText(query_.empty() ? "Search" : "Results for \"" + query_ + "\"");
     else if (source_ == Source::Waikuteru)
