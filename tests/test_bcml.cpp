@@ -374,7 +374,7 @@ TEST("bcml: drop tables, shops and animation lists") {
     bcml::FolderGameFiles files(game);
     std::vector<float> steps;
     bcml::Options opt;
-    opt.progress = [&](float f) { steps.push_back(f); };
+    opt.progress = [&](float f, const std::string&) { steps.push_back(f); };
     auto r = bcml::merge({{"p", p, {p / "logs"}}}, files, opt);
     CHECK(steps.size() > 10 && steps.front() == 0.0f && steps.back() == 1.0f);
     CHECK(std::is_sorted(steps.begin(), steps.end()));

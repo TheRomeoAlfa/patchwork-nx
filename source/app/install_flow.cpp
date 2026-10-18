@@ -97,6 +97,7 @@ void InstallFlow::clear() {
     pane_->clearViews();
     workingLabel_ = nullptr;
     bar_ = nullptr;
+    hint_ = nullptr;
 }
 
 void InstallFlow::leave() {
@@ -119,15 +120,18 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
         box->setJustifyContent(brls::JustifyContent::CENTER);
         box->setAlignItems(brls::AlignItems::CENTER);
         box->addView(new brls::ProgressSpinner());
-        workingLabel_ = ui::label(status, 20, ui::text());
+        workingLabel_ = ui::label(status, 20, ui::text(), false);
+        workingLabel_->setHorizontalAlign(brls::HorizontalAlign::CENTER);
         workingLabel_->setMarginTop(16);
         box->addView(workingLabel_);
         bar_ = new ui::ProgressBar(360);
         bar_->setMarginTop(14);
         box->addView(bar_);
-        auto* hint = ui::label("Press B to cancel", 15, ui::muted());
-        hint->setMarginTop(12);
-        box->addView(hint);
+        hint_ = ui::label("", 15, ui::muted(), false);
+        hint_->setMarginTop(12);
+        hint_->setMaxWidth(420);
+        hint_->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+        box->addView(hint_);
         // Focusable so B works and focus doesn't stay on the list behind.
         box->setFocusable(true);
         box->setHideHighlight(true);
@@ -155,6 +159,9 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
     } else {
         workingLabel_->setText(status);
     }
+    // Downloading and unpacking can be stopped; installing and merging can't.
+    hint_->setText(busy_ && !cancel_ ? "Please wait. Don't close Patchwork or turn off the Switch until this finishes."
+                                     : "Press B to cancel");
     bar_->setVisibility(progress >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::INVISIBLE);
     if (progress >= 0) bar_->setProgress(progress);
 }
@@ -640,12 +647,15 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     if (!missing.empty()) throw std::runtime_error(kSetupMarker + missing.front());
                 }
                 auto lastPct = std::make_shared<int>(-1);
-                lib.setMergeProgress([this, alive, lastPct](float f) {
+                auto lastWhat = std::make_shared<std::string>();
+                lib.setMergeProgress([this, alive, lastPct, lastWhat](float f, const std::string& what) {
                     int pct = static_cast<int>(f * 100);
-                    if (pct == *lastPct) return;
+                    if (pct == *lastPct && what == *lastWhat) return;
                     *lastPct = pct;
-                    brls::sync([this, alive, pct, f] {
-                        if (*alive && workingLabel_) setWorking("Merging with the game's files… " + std::to_string(pct) + "%", f);
+                    *lastWhat = what;
+                    auto text = "Merging with the game's files… " + std::to_string(pct) + "%\n" + what;
+                    brls::sync([this, alive, text, f] {
+                        if (*alive && workingLabel_) setWorking(text, f);
                     });
                 });
                 struct StopProgress {

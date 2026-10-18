@@ -75,6 +75,7 @@ private:
     std::shared_ptr<std::atomic<bool>> cancel_;
     brls::Label* workingLabel_ = nullptr;
     ui::ProgressBar* bar_ = nullptr;
+    brls::Label* hint_ = nullptr;
 };
 
 }  // namespace app
