@@ -45,7 +45,10 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     flow_ = std::make_unique<InstallFlow>(pane_, sink_);
     flow_->onExit = [this] { rebuild(); };
     libSub_ = AppState::get().libraryChanged()->subscribe([this] {
-        if (!busy_ && !flow_->active()) rebuildWhenSafe();
+        if (!busy_ && !flow_->active())
+            rebuildWhenSafe();
+        else
+            dirty_ = true;  // catch up when the job or the install screen is done
     });
     rebuild();
 }
@@ -264,6 +267,14 @@ bool MyModsPage::paneFree() {
     flow_->onExit = nullptr;
     flow_ = std::make_unique<InstallFlow>(pane_, sink_);
     flow_->onExit = [this] { rebuild(); };
+    if (dirty_ && !busy_) {
+        // Something was installed meanwhile: show it in the list (next frame, focus is moving).
+        dirty_ = false;
+        auto alive = alive_;
+        brls::sync([this, alive] {
+            if (*alive) rebuild();
+        });
+    }
     return true;
 }
 
