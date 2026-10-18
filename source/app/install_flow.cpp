@@ -208,6 +208,12 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     brls::Application::giveFocus(box);
 }
 
+// The library id a file of a mod is installed under.
+static std::string modIdFor(const ModDetails& d, const ModFile& file) {
+    if (d.summary.sourceKey.rfind("gb:", 0) == 0) return "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id);
+    return "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
+}
+
 void InstallFlow::showFilePicker(const ModDetails& d) {
     active_ = true;
     clear();
@@ -244,6 +250,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         const auto file = d.files[i];
         auto note = noteFor(file, game, installed, versionWordIsMod);
         bool downloaded = st.isDownloaded(file);
+        const auto* installedMod = st.findMod(modIdFor(d, file));
         auto* row = ui::focusRow();
         ui::tappable(row);
         row->addView(ui::label(ui::icon::file, 24, ui::muted()));
@@ -257,16 +264,26 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         desc->setMarginTop(3);
         text->addView(desc);
         row->addView(text);
-        auto* n = downloaded ? ui::label("Downloaded", 15, ui::accent())
-                             : ui::label((note.matches ? std::string(ui::icon::check) + " " : "") + note.text, 15, note.color);
+        auto* n = installedMod ? ui::label(std::string(ui::icon::check) + " Installed", 15, ui::ok())
+                  : downloaded ? ui::label("Downloaded", 15, ui::accent())
+                               : ui::label((note.matches ? std::string(ui::icon::check) + " " : "") + note.text, 15, note.color);
         n->setMarginLeft(10);
         row->addView(n);
         auto details = d;
-        row->registerClickAction([this, details, file](brls::View*) {
-            install(details, file);
+        std::string installedState = installedMod ? (installedMod->enabled ? "on" : "off") : "";
+        row->registerClickAction([this, details, file, installedState](brls::View*) {
+            if (installedState.empty()) {
+                install(details, file);
+                return true;
+            }
+            auto* dialog = new brls::Dialog(file.filename + " is already installed (turned " + installedState +
+                                            " in My mods). Download and install it again?");
+            dialog->addButton("Cancel", [] {});
+            dialog->addButton("Install again", [this, details, file] { install(details, file); });
+            dialog->open();
             return true;
         });
-        row->updateActionHint(brls::BUTTON_A, downloaded ? "Finish installing" : "Install");
+        row->updateActionHint(brls::BUTTON_A, installedMod ? "Install again" : downloaded ? "Finish installing" : "Install");
         list->addView(row);
         if (i == rec) recRow = row;
     }
@@ -572,8 +589,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         }
     }
     bool fromGameBanana = d.summary.sourceKey.rfind("gb:", 0) == 0;
-    auto newId = fromGameBanana ? "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id)
-                                : "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
+    auto newId = modIdFor(d, file);
     // Other files of the same mod already installed (an older version, usually).
     std::vector<std::string> others;
     std::string otherNames;
