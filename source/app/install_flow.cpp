@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 #include "compat.hpp"
 #include "md5.hpp"
+#include "bcml.hpp"
 #include "platform.hpp"
 #include "waikuteru.hpp"
 
@@ -682,6 +683,13 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 }
                 setBusy(false);
                 if (error.rfind(kSetupMarker, 0) == 0) {
+                    // The DLC is installed but couldn't be opened: holding L and R won't help.
+                    auto dlcError = platform::lastDlcError();
+                    if (error.find(mm::bcml::kDlc) != std::string::npos && !dlcError.empty() && platform::botwDlcInstalled() == 1) {
+                        showMessage("Couldn't read the DLC", "This package changes the map, so it's merged with the Expansion Pass's own map files. " + dlcError +
+                                    "\n\nPlease report this error. The download was kept.", true);
+                        return;
+                    }
                     showBcmlSetup(isLocalFile(file));
                     return;
                 }

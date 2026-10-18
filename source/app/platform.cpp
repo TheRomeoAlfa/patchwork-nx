@@ -405,8 +405,34 @@ Result findDlcContent(NcmStorageId& storageOut, char* path, size_t pathSize) {
     ncmExit();
     return last;
 }
+// Games ask the add-on content service to make a DLC available before mounting it
+// (aoc:u PrepareAddOnContent; libnx has no wrapper). Running in place of BOTW, this is
+// BOTW's own DLC. Harmless if it fails.
+Result prepareDlc() {
+    Service aoc;
+    Result rc = smGetService(&aoc, "aoc:u");
+    if (R_FAILED(rc)) return rc;
+    const struct {
+        s32 index;
+        u32 pad;
+        u64 pid;  // filled in by the kernel
+    } in = {static_cast<s32>(kBotwDlc - 0x01007EF00011F000ull), 0, 0};
+    rc = serviceDispatchIn(&aoc, 7, in, .in_send_pid = true);
+    serviceClose(&aoc);
+    return rc;
+}
+
+std::string dlcError;
 }  // namespace
 #endif
+
+std::string lastDlcError() {
+#ifdef __SWITCH__
+    return dlcError;
+#else
+    return {};
+#endif
+}
 
 int botwDlcInstalled() {
 #ifdef __SWITCH__
@@ -438,6 +464,7 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
     // Mounted the way the game itself does first; else straight from the installed content.
     bool mounted = false;
     std::string errors;
+    static Result prepared = prepareDlc();
     FsStorage storage;
     Result rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_SdCard);
     if (R_FAILED(rc)) rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_BuiltInUser);
@@ -470,8 +497,9 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
             if (notInGame) *notInGame = true;
             why = "The Breath of the Wild DLC isn't installed.";
         } else {
-            why = "Couldn't open the Breath of the Wild DLC (error " + errors + ").";
+            why = "Couldn't open the Breath of the Wild DLC (errors " + errors + "; prepare " + resultCode(prepared) + ").";
         }
+        dlcError = why;
         return false;
     }
     try {
@@ -485,6 +513,7 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
+    dlcError.clear();
     if (fsdev) fsdevUnmountDevice("dlcfs");
     else romfsUnmount("dlcfs");
     return why.empty();

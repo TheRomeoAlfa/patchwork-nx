@@ -42,6 +42,8 @@ std::string caBundle();
 bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame = nullptr);
 // Whether BOTW's DLC is installed: 1 yes, 0 no, -1 couldn't tell. On desktop: $MM_GAME_ROMFS_BOTW_DLC set.
 int botwDlcInstalled();
+// Why the DLC couldn't be opened the last time it was tried ("" if it could).
+std::string lastDlcError();
 
 // A data file shipped with the app (romfs on Switch, ./resources on desktop).
 mm::fs::path resourcePath(const std::string& name);
