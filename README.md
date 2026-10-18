@@ -4,84 +4,179 @@
 
 A mod manager that runs on your modded Switch. Browse mods for *The Legend of Zelda: Breath of the Wild*
 and *Tears of the Kingdom* on [GameBanana](https://gamebanana.com), then download, install, turn on/off,
-reorder and remove them, all from the console.
+reorder and remove them, all from the console. No PC needed, including for most BCML packages.
 
-Patchwork is an unofficial fan project. It isn't affiliated with or endorsed by Nintendo or GameBanana.
-Mods belong to their authors.
+<p align="center">
+  <img src="docs/screenshots/browse.png" width="32%" alt="Browsing GameBanana">
+  <img src="docs/screenshots/install.png" width="32%" alt="Choosing a file to install">
+  <img src="docs/screenshots/my-mods.png" width="32%" alt="My mods: load order and details">
+</p>
+
+Patchwork is an unofficial fan project. It isn't affiliated with or endorsed by Nintendo, GameBanana or
+Waikuteru. *The Legend of Zelda* is a trademark of Nintendo. Mods belong to their authors.
 
 ## Features
 
-- **Browse and search** GameBanana with a live preview of each mod
+- **Browse and search** GameBanana with a live preview of each mod, and see an installed mod's page again in My mods
 - **Waikuteru's mods** ([waikuteru-zelda-mods.com](https://www.waikuteru-zelda-mods.com)) as a second source in Browse (L/R); only Switch versions are offered
-- **Add mods from anywhere**: copy archives into `switch/patchwork/inbox` on the SD card, send a link from your phone (open the address/QR code the Switch shows, paste a link), or type a GameBanana mod number (the end of its link, e.g. `724536`) in Add mods or Search
+- **Add mods from anywhere**: copy archives into `switch/patchwork/inbox` on the SD card, send a link from your phone (scan the QR code the Switch shows and paste a link), or type a GameBanana mod number (the end of its link, e.g. `724536`) in Add mods or Search
 - **Picks the right file** for your installed game version and warns about mismatches
 - **One-press install** from zip, 7z and rar, including archives with several options or nested archives
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
 - **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
-- **Save files** from GameBanana (100% saves, unlocked shrines…): pick the save, the user profile and the slot. Patchwork backs up that profile's whole save to `switch/patchwork/save-backups` first, and Settings → Save backups puts it back. A save's photo album is only copied if you turn that on.
+- **BCML packages (`.bnp`) for Breath of the Wild are merged on the console**, like BCML does on a PC ([below](#bcml-packages-breath-of-the-wild))
+- **Save files** from GameBanana (100% saves, unlocked shrines…): pick the save, the user profile and the slot. Patchwork backs up that profile's whole save first, and Settings → Save backups puts it back. A save's photo album is only copied if you turn that on.
+- **Background add-ons**: Settings lists the sysmodules in `atmosphere/contents` and can turn them off and on. Some of them use the memory Atmosphère needs to load mods, which shows up as a crash with Program ID `010041544D530000`; Patchwork notices that crash and explains it. Changes apply after a restart.
 - **Hides NSFW mods** (uses GameBanana's own content ratings), including mods opened by link or number. The setting is kept out of sight for kids: hold **L + R + −** for 3 seconds on the Settings page to show it. It turns back on every time Patchwork starts.
 
-Patchwork copies files into Atmosphère's LayeredFS folders. For BOTW it also does what BCML does on a PC:
-**BCML packages (`.bnp`) are merged with the game's own files on the console**: archives (packs), parameter
-files, game data and save flags, actor info, events, text, drops, shops, animation lists, map units and the
-resource size table, in load order, every time a BCML package is turned on, off or moved. The game's files
-are read once when Patchwork is opened by holding **L and R** while starting BOTW (R opens the Homebrew Menu,
-L turns mods off for that launch) and kept in `switch/patchwork/original/botw-files`. That covers 376 of the
-383 BCML packages on GameBanana; the rest (BCML 2's old format) and TKMM (`.tkcl`) packages are flagged as
-needing those PC tools.
+## Requirements
+
+- A Switch running [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) custom firmware
+- Breath of the Wild and/or Tears of the Kingdom
+- An internet connection (Wi-Fi) for browsing and downloading
+
+Mods are installed with Atmosphère's LayeredFS: Patchwork copies them into `atmosphere/contents/<game>/`,
+and Atmosphère loads them in place of the game's files when the game starts. Mods are only active while
+running Atmosphère.
 
 ## Install
 
-1. Download `patchwork.nro` from the releases page.
+1. Download `patchwork.nro` from the [releases page](https://github.com/TheRomeoAlfa/patchwork-nx/releases).
 2. Copy it to `sd:/switch/patchwork/patchwork.nro`.
-3. Launch it from the Homebrew Menu. For the most memory, open the Homebrew Menu by holding **R** while starting a game.
+3. Open the Homebrew Menu and start Patchwork. For the most memory, open the Homebrew Menu by holding **R**
+   while starting a game, rather than from the Album.
 
-Requires Atmosphère and an internet connection. Mods are stored in `sd:/switch/patchwork/`.
+To update, replace the `.nro`. Your mods and settings are kept.
+
+## BCML packages (Breath of the Wild)
+
+Many BOTW mods are made with [BCML](https://github.com/NiceneNerd/BCML) and come as `.bnp` packages that a
+PC normally merges into the game's files. Patchwork does that merge on the console: archives (packs),
+parameter files, game data and save flags, actor info, events, text, drops, shops, animation lists, map
+units (with or without the DLC) and the resource size table, in load order, every time a BCML package is
+installed, turned on or off, or moved.
+
+To merge, Patchwork needs the game's own, unmodded files. It reads them from the game itself, once:
+
+1. Press **+** to close Patchwork.
+2. Hold **L and R** and start Breath of the Wild. Keep holding until the Homebrew Menu opens.
+   (R opens the Homebrew Menu instead of the game; L turns mods off for that launch, so the files are the game's own.)
+3. Open Patchwork from the Homebrew Menu.
+
+Patchwork keeps copies of the files it reads in `switch/patchwork/original/botw-files`, so this is only
+needed again after a game update, or when a package needs a file it hasn't read yet (it says which).
+Patchwork shows these steps whenever they're needed.
+
+This covers 376 of the 383 BCML packages on GameBanana. The rest use BCML 2's old format and, like TKMM
+packages for Tears of the Kingdom (`.tkcl`), are marked as needing those PC tools.
 
 ## Controls
 
 | Button | Browse | My mods |
 |---|---|---|
 | A | Install | Turn on / off |
-| Y | Change sort | |
+| B | Back | Back |
 | X | Search | Remove |
-| L / R | | Move up / down in load order |
-| L / R | GameBanana / Waikuteru | |
+| Y | Change sort | |
+| L / R | GameBanana / Waikuteru | Move up / down in load order |
+| → | Read the full description | Read the mod's page |
 | ZL / ZR | Switch game | Switch game |
 | + | Quit | Quit |
 
+## Where things are on the SD card
+
+| Path | What |
+|---|---|
+| `switch/patchwork/patchwork.nro` | the app |
+| `switch/patchwork/library/` | a clean copy of every installed mod |
+| `switch/patchwork/inbox/` | drop archives or `.bnp` files here to install them from Add mods |
+| `switch/patchwork/downloads/` | downloads that aren't installed yet |
+| `switch/patchwork/backup/` | your own files that a mod replaced (restored when it's turned off) |
+| `switch/patchwork/save-backups/` | save backups made before installing a save file |
+| `switch/patchwork/original/` | the games' size tables and BOTW files kept for merging |
+| `switch/patchwork/merged/`, `bcml-merged/` | merged size tables and BCML merges, copied to the game from here |
+| `switch/patchwork/state.json` | what's installed and deployed |
+
+## Troubleshooting
+
+- **"Couldn't reach GameBanana" / secure connection errors**: check the Switch's date and time
+  (System Settings → System). A wrong clock makes secure connections fail.
+- **The game crashes with an Atmosphère error (Program ID 010041544D530000) when mods are on**: usually not
+  the mod. Turn off background add-ons in Settings, restart, and try again.
+- **A mod doesn't show up in the game**: check it's turned on in My mods and higher in the list than mods
+  that change the same files. Settings → "Re-copy enabled mods to the SD card" fixes missing files.
+- **A BCML package says it needs game files**: follow the steps on screen (hold L and R while starting BOTW).
+
+## Uninstall
+
+Turn off or remove your mods in My mods first (that puts back any files they replaced), then delete
+`sd:/switch/patchwork/`.
+
 ## Building
 
-Requires [devkitPro](https://devkitpro.org/wiki/Getting_Started) with `switch-dev` and `switch-portlibs`.
+Switch build: [devkitPro](https://devkitpro.org/wiki/Getting_Started) with `switch-dev` and the portlibs
+Patchwork links: `switch-curl`, `switch-mbedtls`, `switch-libarchive`, `switch-zlib`, `switch-bzip2`,
+`switch-liblzma`, `switch-lz4`, `switch-libzstd`, `switch-libexpat`, `switch-libwebp`, `switch-glfw` and
+`switch-mesa` (all included in `switch-portlibs`).
 
 ```bash
-git clone --recursive https://github.com/<you>/patchwork-nx
-cd patchwork-nx
+git clone --recursive https://github.com/TheRomeoAlfa/patchwork-nx
+cd patchwork-nx   # if you cloned without --recursive: git submodule update --init --recursive
 export DEVKITPRO=/opt/devkitpro
 cmake -S . -B build-switch -DPLATFORM_SWITCH=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build-switch --target patchwork.nro
+cmake --build build-switch --target patchwork.nro   # → build-switch/patchwork.nro
 ```
 
-Desktop build for UI development (macOS/Linux, needs `libarchive` and `curl`):
+### Development on a computer
+
+The same app builds for macOS and Linux with a fake SD card, which is how most of it is developed and tested.
+It needs CMake, pkg-config, `libarchive`, `curl` and `libwebp` (macOS: `brew install cmake pkg-config
+libarchive curl webp`; Homebrew doesn't link libarchive, so also
+`export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"`).
 
 ```bash
 cmake -S . -B build-desktop -DPLATFORM_DESKTOP=ON
 cmake --build build-desktop
-cd build-desktop && MM_SD_ROOT=/tmp/fake-sd MM_TOTK_VERSION=1.2.1 ./patchwork
+cd build-desktop && MM_SD_ROOT=/tmp/fake-sd MM_TOTK_VERSION=1.2.1 MM_BOTW_VERSION=1.6.0 ./patchwork
 ```
 
-Core logic tests (no UI); see [docs/TESTING.md](docs/TESTING.md) for the full test plan:
+Environment variables stand in for the console:
+
+| Variable | Stands in for |
+|---|---|
+| `MM_SD_ROOT` | the SD card |
+| `MM_TOTK_VERSION`, `MM_BOTW_VERSION` | the installed game versions (unset: not installed) |
+| `MM_GAME_ROMFS_BOTW`, `MM_GAME_ROMFS_BOTW_DLC`, `MM_GAME_ROMFS_TOTK` | the games' files, as if Patchwork were opened from the game with L and R |
+| `MM_GAME_LANG` | the game's text language (e.g. `USen`) |
+| `MM_USERS`, `MM_SAVE_ROOT`, `MM_GAME_OPEN` | user profiles, their save data, and a game being open |
+| `MM_DEBUG_SCRIPT`, `MM_SHOT_DIR` | scripted button presses and screenshots (see `source/app/debug_script.hpp`) |
+
+`tools/qa-run.sh` runs the desktop app with a script and collects screenshots (it uses GNU `timeout`;
+on macOS: `brew install coreutils`).
+
+Core logic tests (no UI); see [docs/TESTING.md](docs/TESTING.md) for the on-console test plan:
 
 ```bash
 cmake -S . -B build && cmake --build build && ./build/mmtests
 ```
 
-## Layout
+### Layout
 
-- `source/core/`: portable logic: GameBanana API, archive extraction, layout detection, install/enable/priority engine
-- `source/app/`: the Borealis UI
-- `tools/mmcli.cpp`: desktop command-line driver for the core
-- `tests/`: unit tests
+- `source/core/`: portable logic: GameBanana and Waikuteru, archive extraction, layout detection, the
+  install/enable/load-order engine, saves, and BCML merging (SARC, Yaz0, BYML, AAMP, MSBT, size table)
+- `source/app/`: the [Borealis](https://github.com/xfangfang/borealis) UI (xfangfang's fork, a submodule)
+  and the Switch/desktop platform layer
+- `tests/`: unit tests (`mmtests`)
+- `tools/mmcli.cpp`: command-line driver for the core (install, BCML merges, file round-trips)
+- `tools/survey.cpp`: checks how GameBanana mods would install; `survey --build-cache` regenerates
+  `resources/bnp-cache.json` (which BCML packages need a PC), which must be redone whenever the set of
+  mergeable BCML logs changes (a unit test checks this)
+- `tools/switch_smoke.cpp`: a console-only smoke test of the core (built with the devkitPro toolchain without `PLATFORM_SWITCH`)
 
-Built with [Borealis](https://github.com/xfangfang/borealis), libcurl, libarchive and nlohmann/json.
+## License
+
+Patchwork is free software under the [GNU General Public License v3.0](LICENSE). Its BCML merging follows
+BCML's merge rules ([BCML](https://github.com/NiceneNerd/BCML) is GPL-3.0 as well).
+Third-party software it includes or links is listed with its licenses in
+[resources/THIRD_PARTY_NOTICES.txt](resources/THIRD_PARTY_NOTICES.txt), which also ships inside the `.nro`.

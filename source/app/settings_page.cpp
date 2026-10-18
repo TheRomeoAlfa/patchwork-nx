@@ -202,7 +202,8 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         std::string(APP_TITLE) + " " + APP_VERSION + ", a mod manager for Breath of the Wild and Tears of the Kingdom." +
             "\nMods are downloaded from GameBanana and belong to their authors. Installed mods go into "
             "atmosphere/contents and are only active while running Atmosphère.\n"
-            "BCML packages (.bnp) are merged with Breath of the Wild's own files right here; TKMM packages (.tkcl) need a PC.",
+            "BCML packages (.bnp) are merged with Breath of the Wild's own files right here; TKMM packages (.tkcl) need a PC.\n"
+            "Free software under the GNU GPL v3. Source code and third-party licenses: github.com/TheRomeoAlfa/patchwork-nx",
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
