@@ -201,7 +201,7 @@ struct Context {
 
     const std::string& gameFile(const std::string& path) {
         const auto& f = gameFileOpt(path);
-        if (!f) throw std::runtime_error("needs the game's " + path.substr(path.find("romfs/") + 6) + ", which Patchwork hasn't read yet");
+        if (!f) throw std::runtime_error("needs the game's " + path + ", which Patchwork hasn't read yet");
         return *f;
     }
     std::string gameInner(const std::string& pack, const std::string& inner) {
