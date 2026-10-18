@@ -185,11 +185,8 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     auto* repair = new brls::DetailCell();
     repair->setText("Re-copy enabled mods to the SD card");
     repair->setDetailText("Fixes missing files");
-    repair->registerClickAction([](brls::View*) {
-        brls::Application::notify("Checking mod files…");
-        AppState::get().runFileJob([](mm::Library& lib) { lib.apply(); }, [](const std::string& error) {
-            brls::Application::notify(error.empty() ? "Mod files are up to date" : "Repair failed: " + error);
-        });
+    repair->registerClickAction([this, repair](brls::View*) {
+        recopyMods(repair);
         return true;
     });
     content->addView(repair);
@@ -319,6 +316,59 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
                 brls::Application::notify(name + "'s saves are back");
             } else {
                 auto* dialog = new brls::Dialog("Restoring failed: " + error);
+                dialog->addButton("OK", [] {});
+                dialog->open();
+            }
+        });
+}
+
+// Like any change in My mods: it can re-merge BCML packages, so it can take a while and
+// mustn't be interrupted.
+void SettingsPage::recopyMods(brls::View* cell) {
+    auto& st = AppState::get();
+    if (st.installBusy()) {
+        brls::Application::notify("Wait for the current change to finish");
+        return;
+    }
+    st.setInstallBusy(true);
+    auto busy = ui::busyBox("Re-copying enabled mods…", "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
+                            "Please wait until the files are copied");
+    scroll_->setVisibility(brls::Visibility::GONE);
+    addView(busy.box);
+    brls::Application::giveFocus(busy.box);
+    auto alive = alive_;
+    st.runFileJob(
+        [busy, alive](mm::Library& lib) {
+            lib.setMergeProgress([busy, alive](float f, const std::string& what) {
+                brls::sync([busy, alive, f, what] {
+                    if (!*alive) return;
+                    busy.bar->setVisibility(brls::Visibility::VISIBLE);
+                    busy.bar->setProgress(f);
+                    busy.count->setText("Updating merged files… " + std::to_string(static_cast<int>(f * 100)) + "% · " + what);
+                });
+            });
+            struct StopProgress {
+                mm::Library& lib;
+                ~StopProgress() { lib.setMergeProgress({}); }
+            } stopProgress{lib};
+            lib.apply([busy, alive](size_t done, size_t total, const std::string&) mutable {
+                brls::sync([busy, alive, done, total]() mutable {
+                    if (*alive) busy.update(done, total);
+                });
+            });
+            if (lib.bcmlPending()) throw std::runtime_error("\x01" + lib.bcmlError());  // copied, but not merged
+        },
+        [this, alive, cell, box = busy.box](const std::string& error) {
+            AppState::get().setInstallBusy(false);
+            if (!*alive) return;
+            scroll_->setVisibility(brls::Visibility::VISIBLE);
+            brls::Application::giveFocus(cell);
+            removeView(box);
+            if (error.empty()) {
+                brls::Application::notify("Mod files are up to date");
+            } else {
+                auto* dialog = new brls::Dialog(error[0] == '\x01' ? "Your mods were copied, but some BCML packages couldn't be merged: " + error.substr(1)
+                                                                   : "Re-copying failed: " + error);
                 dialog->addButton("OK", [] {});
                 dialog->open();
             }

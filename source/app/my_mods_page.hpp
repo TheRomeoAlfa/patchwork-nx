@@ -45,9 +45,7 @@ private:
     bool busy_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     brls::Box* list_ = nullptr;
-    brls::ScrollingFrame* scroll_ = nullptr;
     brls::Box* pane_ = nullptr;
-    brls::Label* count_ = nullptr;
     brls::VoidEvent::Subscription libSub_;
     std::unique_ptr<InstallFlow> flow_;  // finishes downloads that weren't installed
     ui::FocusSink* sink_ = nullptr;

@@ -8,6 +8,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <memory>
+#include <atomic>
+#include <mutex>
 #include <vector>
 
 #ifdef __SWITCH__
@@ -57,30 +59,6 @@ uint64_t freeSpaceBytes() {
     auto root = sdRoot().string();
     if (statvfs(root.c_str(), &st) != 0) return 0;
     return static_cast<uint64_t>(st.f_bavail) * st.f_frsize;
-}
-
-uint64_t memoryUsedBytes() {
-#ifdef __SWITCH__
-    u64 v = 0;
-    return R_SUCCEEDED(svcGetInfo(&v, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
-#else
-    struct rusage ru {};
-    getrusage(RUSAGE_SELF, &ru);
-#ifdef __APPLE__
-    return static_cast<uint64_t>(ru.ru_maxrss);  // bytes on macOS
-#else
-    return static_cast<uint64_t>(ru.ru_maxrss) * 1024;
-#endif
-#endif
-}
-
-uint64_t memoryTotalBytes() {
-#ifdef __SWITCH__
-    u64 v = 0;
-    return R_SUCCEEDED(svcGetInfo(&v, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
-#else
-    return 0;
-#endif
 }
 
 std::string caBundle() {
@@ -347,6 +325,7 @@ std::unique_ptr<SaveData> SaveData::open(mm::Game game, const std::string& userI
             why = "Couldn't open the " + name + " save (error " + resultCode(rc) + "). If the game is open, close it and try again.";
         return nullptr;
     }
+    s->mounted_ = true;
     s->root_ = std::string(kSaveDevice) + ":/";
 #else
     const char* env = std::getenv("MM_SAVE_ROOT");
@@ -363,7 +342,7 @@ std::unique_ptr<SaveData> SaveData::open(mm::Game game, const std::string& userI
 
 SaveData::~SaveData() {
 #ifdef __SWITCH__
-    fsdevUnmountDevice(kSaveDevice);
+    if (mounted_) fsdevUnmountDevice(kSaveDevice);
 #endif
 }
 
@@ -422,12 +401,14 @@ Result prepareDlc() {
     return rc;
 }
 
-std::string dlcError;
+std::mutex dlcErrorMutex;
+std::string dlcError;  // guarded by dlcErrorMutex: written on the file thread, read on the UI thread
 }  // namespace
 #endif
 
 std::string lastDlcError() {
 #ifdef __SWITCH__
+    std::lock_guard lock(dlcErrorMutex);
     return dlcError;
 #else
     return {};
@@ -436,7 +417,7 @@ std::string lastDlcError() {
 
 int botwDlcInstalled() {
 #ifdef __SWITCH__
-    static int known = -2;
+    static std::atomic<int> known{-2};  // asked from both threads; the answer doesn't change
     if (known != -2) return known;
     if (R_FAILED(ncmInitialize())) return known = -1;
     int found = 0;
@@ -499,7 +480,10 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
         } else {
             why = "Couldn't open the Breath of the Wild DLC (errors " + errors + "; prepare " + resultCode(prepared) + ").";
         }
-        dlcError = why;
+        {
+            std::lock_guard lock(dlcErrorMutex);
+            dlcError = why;
+        }
         return false;
     }
     try {
@@ -513,7 +497,10 @@ bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& wh
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
-    dlcError.clear();
+    {
+        std::lock_guard lock(dlcErrorMutex);
+        dlcError.clear();
+    }
     if (fsdev) fsdevUnmountDevice("dlcfs");
     else romfsUnmount("dlcfs");
     return why.empty();

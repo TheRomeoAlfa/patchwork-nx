@@ -19,6 +19,7 @@ private:
     void revealNsfwSetting();
     void fillBackups();
     void restoreBackup(const mm::SaveBackup& backup);
+    void recopyMods(brls::View* cell);
 
     brls::ScrollingFrame* scroll_ = nullptr;
     brls::Box* backups_ = nullptr;        // rows of save backups, rebuilt after changes

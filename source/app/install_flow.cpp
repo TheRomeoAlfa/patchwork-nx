@@ -425,7 +425,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                 return;
             }
             if (!error.empty()) {
-                bool kept = AppState::get().isDownloaded(file);
+                bool kept = !isLocalFile(file) && AppState::get().isDownloaded(file);
                 showMessage("Install failed", error + (kept ? "\n\nThe download was kept. Try again from here or from My mods; it won't download again." : ""), true);
                 return;
             }
@@ -697,7 +697,11 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 }, logs);
                 } catch (const mm::BcmlMergeError& e) {
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
-                    if (std::string(e.what()).find("hasn't read yet") != std::string::npos) throw std::runtime_error(kSetupMarker + e.what());
+                    // "needs the game's <path>, which Patchwork hasn't read yet": pass on the path.
+                    std::string what = e.what();
+                    auto from = what.find("needs the game's "), to = what.find(", which Patchwork hasn't read yet");
+                    if (from != std::string::npos && to != std::string::npos && to > from)
+                        throw std::runtime_error(kSetupMarker + what.substr(from + 17, to - from - 17));
                     throw;
                 } catch (...) {
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
@@ -727,7 +731,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     return;
                 }
                 if (!error.empty()) {
-                    showMessage("Install failed", error + "\n\nThe download was kept. Try again from here or from My mods; it won't download again.", true);
+                    showMessage("Install failed", error + (isLocalFile(file) ? std::string() : "\n\nThe download was kept. Try again from here or from My mods; it won't download again."), true);
                     return;
                 }
                 showMessage("Installed", d.summary.name + " is installed and turned on. Start the game to try it.\n\nYou can turn it off or change its load order in My mods.", false);

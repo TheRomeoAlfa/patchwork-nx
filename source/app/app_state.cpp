@@ -27,26 +27,6 @@ bool onlyPcPackages(const std::vector<mm::gb::ModFile>& files) {
     }
     return true;
 }
-
-// Earlier test builds had a BCML merge test in Settings that could put a merged title screen
-// in the game. Take it out if it's still there, then the test's folder.
-void removeBcmlTestLeftovers(const mm::fs::path& dataDir) {
-    std::error_code ec;
-    auto dir = dataDir / "bcml-test";
-    if (!mm::fs::exists(dir, ec)) return;
-    try {
-        auto ours = dir / "out" / "Title.pack";
-        auto inGame = platform::sdRoot() / "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
-        if (mm::fs::exists(ours, ec) && mm::fs::exists(inGame, ec) &&
-            mm::fs::file_size(ours, ec) == mm::fs::file_size(inGame, ec) && mm::readFile(ours) == mm::readFile(inGame)) {
-            mm::fs::remove(inGame, ec);
-            mm::pruneEmptyDirs(inGame.parent_path(), platform::sdRoot() / "atmosphere" / "contents");
-        }
-        mm::removeTree(dir);
-    } catch (const std::exception& e) {
-        brls::Logger::warning("couldn't remove the BCML test's files: {}", e.what());
-    }
-}
 }  // namespace
 
 using json = nlohmann::json;
@@ -163,6 +143,7 @@ void AppState::init() {
     library_->setTextLanguage(platform::gameTextLanguage());
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
+        if (!mm::isSafeRelativePath(path)) return GF{};  // names come from downloaded packages
         std::error_code ec;
         auto cached = gameCache / mm::fs::path(path);
         if (mm::fs::exists(cached, ec)) return GF{GF::State::Found, mm::readFile(cached)};
@@ -210,7 +191,6 @@ void AppState::init() {
             }
         } finish{this};
         mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
-        removeBcmlTestLeftovers(dataDir_);
         setSizeTableProgress(0.1f);
         lib.load();
         publishSnapshot(lib);  // show the mod list now; the checks below can take a while
@@ -231,9 +211,20 @@ void AppState::init() {
                 brls::Logger::info("BCML merge still waiting: {}", e.what());
             }
         }
-        // Opened with the game's files readable: keep the ones most BCML packages merge with,
-        // so later packages rarely need the L and R step again. Already-kept files are skipped.
-        if (platform::runningAsGame(mm::Game::Botw) && finish.status.find("mod's copy") == std::string::npos) {
+        modsWereOn_ = finish.status.find("mod's copy") != std::string::npos;
+    }, [](const std::string& err) {
+        if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
+    });
+
+    // Opened with the game's files readable: keep the ones most BCML packages merge with, so
+    // later packages rarely need the L and R step again. Already-kept files are skipped.
+    if (platform::runningAsGame(mm::Game::Botw))
+        runFileJob([this](mm::Library& lib) {
+            if (modsWereOn_) return;
+            {
+                std::lock_guard lock(statusMutex_);
+                backgroundTask_ = "keeps copies of the game's files";
+            }
             const std::string c = mm::bcml::kContent, d = mm::bcml::kDlc;
             for (const auto& path : {c + "Pack/Bootup.pack", c + "Pack/Bootup_" + platform::gameTextLanguage() + ".pack",
                                      c + "Pack/TitleBG.pack", c + "Actor/ActorInfo.product.sbyml",
@@ -245,10 +236,9 @@ void AppState::init() {
                     brls::Logger::warning("couldn't keep {}: {}", path, e.what());
                 }
             }
-        }
-    }, [](const std::string& err) {
-        if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
-    });
+            std::lock_guard lock(statusMutex_);
+            backgroundTask_.clear();
+        }, {});
 }
 
 void AppState::shutdown() { saveSettings(); }
@@ -266,6 +256,11 @@ size_t AppState::keptGameFiles() const {
     for (mm::fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
         if (it->is_regular_file(ec) && !mm::endsWithI(it->path().filename().string(), ".absent") && it->path().filename() != "version.txt") ++n;
     return n;
+}
+
+std::string AppState::backgroundTask() const {
+    std::lock_guard lock(statusMutex_);
+    return backgroundTask_;
 }
 
 std::vector<std::string> AppState::pendingBcmlNames() const {
@@ -358,7 +353,11 @@ void AppState::runFileJob(std::function<void(mm::Library&)> job, std::function<v
         } catch (const std::exception& e) {
             error = e.what();
         }
-        publishSnapshot(*library_);
+        try {
+            publishSnapshot(*library_);
+        } catch (const std::exception& e) {  // the job must still finish below, or busy screens wait forever
+            brls::Logger::error("couldn't read the library state: {}", e.what());
+        }
         brls::sync([this, done, error] {
             --fileJobs_;
             if (done) done(error);
@@ -830,9 +829,13 @@ std::string stripHtml(const std::string& html, size_t maxLen) {
     static const std::regex blankLines("\\n{3,}");
     auto s = std::regex_replace(html, br, "\n");
     s = std::regex_replace(s, tags, "");
-    for (auto [from, to] : {std::pair{"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#039;", "'"}, {"&nbsp;", " "}}) {
-        size_t pos;
-        while ((pos = s.find(from)) != std::string::npos) s.replace(pos, std::string(from).size(), to);
+    // &amp; last, and each replacement scanned past, so "&amp;lt;" stays "&lt;".
+    for (auto [from, to] : {std::pair{"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#039;", "'"}, {"&nbsp;", " "}, {"&amp;", "&"}}) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, std::string(from).size(), to);
+            pos += std::string(to).size();
+        }
     }
     s = std::regex_replace(s, spaces, " ");
     s = std::regex_replace(s, blankLines, "\n\n");

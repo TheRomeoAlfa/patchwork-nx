@@ -28,7 +28,6 @@ public:
     explicit WorkQueue(int threads);
     ~WorkQueue();
     void post(std::function<void()> job);
-    bool idle() const { return active_ == 0; }
 
 private:
     std::vector<std::thread> threads_;
@@ -67,7 +66,7 @@ struct PendingInstall {
 struct Settings {
     // Hide mods GameBanana treats as NSFW. Not saved: every launch starts hidden, and the
     // setting itself only appears after holding L + R + minus on the Settings page.
-    bool hideNsfw = true;
+    std::atomic<bool> hideNsfw{true};  // also read on the network thread
     bool nsfwSettingRevealed = false;
     // Atmosphère mod-loader crash reports already told about; null until the first check,
     // so reports from before Patchwork was installed aren't announced.
@@ -95,6 +94,8 @@ public:
     // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
     void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
     bool fileJobRunning() const { return fileJobs_ > 0; }
+    // What a background job (not started by the user) is doing, for "waiting" messages; "" if none.
+    std::string backgroundTask() const;
     // An install flow is downloading/unpacking/copying: page and game switches wait for it.
     void setInstallBusy(bool busy) { installBusy_ += busy ? 1 : -1; }
     bool installBusy() const { return installBusy_ > 0; }
@@ -192,6 +193,8 @@ private:
     std::mutex pcMutex_;
     mutable std::mutex statusMutex_;
     std::string sizeTableStatus_ = "Checking…";
+    std::string backgroundTask_;  // guarded by statusMutex_
+    bool modsWereOn_ = false;     // file thread: the startup check got a mod's copy of the size table
     float sizeTableProgress_ = 0;
     void setSizeTableProgress(float p);
     // File thread. `progress` gets 0..1 while the game's file is read.
