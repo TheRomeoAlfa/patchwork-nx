@@ -414,8 +414,8 @@ void Library::writeMergedSizeTable(const fs::path& sdPath) const {
         if (!m->resourceSizes.empty()) sizes.push_back(m->resourceSizes);
     }
     if (tables.empty())
-        throw std::runtime_error("BOTW's size table is needed to install this mod. Open Patchwork once by holding R while "
-                                 "starting Breath of the Wild so it can read it.");
+        throw std::runtime_error("BOTW's size table is needed to install this mod. Open Patchwork once by holding L and R "
+                                 "while starting Breath of the Wild so it can read it.");
     auto merged = mergeSizeTables(tables, sizes);
     auto staged = dataDir_ / "merged" / fs::path(kBotwSizeTable);
     writeFileAtomic(staged, merged);

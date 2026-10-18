@@ -19,11 +19,12 @@ Mods belong to their authors.
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
 - **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
+- **Save files** from GameBanana (100% saves, unlocked shrines…): pick the save, the user profile and the slot. Patchwork backs up that profile's whole save to `switch/patchwork/save-backups` first, and Settings → Save backups puts it back. A save's photo album is only copied if you turn that on.
 - **Hides NSFW mods** (uses GameBanana's own content ratings), including mods opened by link or number. The setting is kept out of sight for kids: hold **L + R + −** for 3 seconds on the Settings page to show it. It turns back on every time Patchwork starts.
 
 Patchwork copies files into Atmosphère's LayeredFS folders. It doesn't merge mods' changes into the game's
 own files, with one exception: BOTW's resource size table, which it merges from the game's copy (read when
-Patchwork is opened by holding R while starting BOTW) and every enabled mod. That makes BCML packages (`.bnp`)
+Patchwork is opened by holding L and R while starting BOTW: R opens the Homebrew Menu, L turns mods off for that launch) and every enabled mod. That makes BCML packages (`.bnp`)
 that only list resource sizes installable. BCML packages that need real merging, and TKMM (`.tkcl`) packages,
 are hidden from Browse and flagged as needing those PC tools.
 

@@ -132,6 +132,48 @@ void tappable(brls::View* view, Tap mode) {
     }));
 }
 
+void BusyBox::update(size_t done, size_t total) {
+    if (!total) return;
+    bar->setVisibility(brls::Visibility::VISIBLE);
+    bar->setProgress(static_cast<float>(done) / total);
+    count->setText(std::to_string(done) + " / " + std::to_string(total) + " files");
+}
+
+BusyBox busyBox(const std::string& statusText, const std::string& hintText, const std::string& pleaseWait) {
+    BusyBox b{};
+    b.box = vbox();
+    b.box->setGrow(1);
+    b.box->setJustifyContent(brls::JustifyContent::CENTER);
+    b.box->setAlignItems(brls::AlignItems::CENTER);
+    b.box->addView(new brls::ProgressSpinner());
+    b.status = label(statusText, 20, text());
+    b.status->setMarginTop(16);
+    b.box->addView(b.status);
+    b.bar = new ProgressBar(360);
+    b.bar->setMarginTop(14);
+    b.bar->setVisibility(brls::Visibility::INVISIBLE);
+    b.box->addView(b.bar);
+    b.count = label("", 15, muted());
+    b.count->setWidth(360);
+    b.count->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+    b.count->setMarginTop(10);
+    b.box->addView(b.count);
+    auto* hint = label(hintText, 15, muted());
+    hint->setMarginTop(12);
+    b.box->addView(hint);
+    b.box->setFocusable(true);
+    b.box->setHideHighlight(true);
+    for (auto button : {brls::BUTTON_NAV_LEFT, brls::BUTTON_NAV_RIGHT, brls::BUTTON_NAV_UP, brls::BUTTON_NAV_DOWN, brls::BUTTON_A,
+                        brls::BUTTON_X, brls::BUTTON_Y})
+        b.box->registerAction("", button, [](brls::View*) { return true; }, true);
+    for (auto button : {brls::BUTTON_B, brls::BUTTON_START})
+        b.box->registerAction("", button, [pleaseWait](brls::View*) {
+            brls::Application::notify(pleaseWait);
+            return true;
+        }, true);
+    return b;
+}
+
 brls::Box* focusRow() {
     auto* b = hbox();
     b->setFocusable(true);

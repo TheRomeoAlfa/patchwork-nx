@@ -6,6 +6,8 @@
 //   mmcli <sd-dir> mods   <botw|totk>
 //   mmcli <sd-dir> enable|disable|remove <id>
 //   mmcli <sd-dir> up|down <id>
+//   mmcli <sd-dir> saves  <botw|totk> <archive>     (save files an archive holds)
+//   mmcli <sd-dir> sarcmerge <out> <game.pack> <mod.pack>...  (BCML pack merge, timed)
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -14,6 +16,9 @@
 #include "gamebanana.hpp"
 #include "installer.hpp"
 #include "library.hpp"
+#include "saves.hpp"
+#include "sarc.hpp"
+#include <chrono>
 
 using namespace mm;
 
@@ -98,6 +103,25 @@ int main(int argc, char** argv) {
             std::cout << "installed " << rec.id << " with " << rec.files.size() << " files\n";
             removeTree(prep.extractDir);
             fs::remove(dl);
+        } else if (cmd == "sarcmerge") {
+            std::vector<std::string> in;
+            for (size_t i = 1; i < args.size(); ++i) in.push_back(readFile(args[i]));
+            auto t0 = std::chrono::steady_clock::now();
+            auto out = mergeSarcs(in, true);
+            auto t1 = std::chrono::steady_clock::now();
+            writeFileAtomic(args.at(0), out);
+            std::cout << "merged " << out.size() << " bytes in " << std::chrono::duration<double>(t1 - t0).count() << " s\n";
+            for (const auto& f : Sarc::parse(out).files) std::cout << "  " << f.data.size() << " " << f.name << "\n";
+        } else if (cmd == "saves") {
+            auto game = parseGame(args.at(0));
+            auto prep = prepareArchive(args.at(1), lib.dataDir() / "work", game, "x");
+            std::cout << packageKindMessage(prep.layout.kind) << "\n";
+            for (const auto& c : findSaves(prep.extractDir, game, &prep.fileTimes)) {
+                std::cout << " save \"" << c.name << "\" slot=" << (c.slot.empty() ? "-" : c.slot) << (c.masterMode() ? " (master mode)" : "") << " t=" << c.savedTime;
+                for (const auto& p : c.photoDirs) std::cout << " +" << p;
+                std::cout << "\n";
+            }
+            removeTree(prep.extractDir);
         } else if (cmd == "mods") {
             auto game = parseGame(args.at(0));
             for (auto* m : lib.mods(game))

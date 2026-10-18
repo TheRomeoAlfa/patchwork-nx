@@ -16,7 +16,7 @@ bool isSupportedArchiveName(const std::string& filename) {
 }
 
 void extractArchive(const fs::path& archivePath, const fs::path& destDir, const ExtractLimits& limits,
-                    const ExtractProgressFn& progress) {
+                    const ExtractProgressFn& progress, FileTimes* times) {
     std::unique_ptr<archive, decltype(&archive_read_free)> a(archive_read_new(), archive_read_free);
     archive_read_support_filter_all(a.get());
     archive_read_support_format_zip(a.get());
@@ -66,6 +66,7 @@ void extractArchive(const fs::path& archivePath, const fs::path& destDir, const 
             continue;
         }
         fs::create_directories(out.parent_path());
+        if (times && archive_entry_mtime_is_set(entry)) (*times)[rel] = static_cast<int64_t>(archive_entry_mtime(entry));
         std::ofstream f(out, std::ios::binary | std::ios::trunc);
         if (!f) throw std::runtime_error("cannot write " + out.string());
         for (;;) {

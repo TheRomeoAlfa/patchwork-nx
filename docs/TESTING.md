@@ -74,15 +74,39 @@ Run these after any release build; they cover what the desktop build can't.
    FastSwim, 372295). The first visit to a page takes a moment longer; later visits are
    instant (switch/patchwork/pc-only-cache.json). Entering 372295 as a mod number explains
    that it needs BCML on a PC.
-18. **BOTW size table (needed for BCML packages):** open Patchwork by holding **R** while
-   starting Breath of the Wild. Settings → Storage → "BOTW size table" should say
-   "Read from game 1.6.0". If it says "Got the SD card's copy" or "Unreadable", report it.
+18. **BOTW size table (needed for BCML packages):** hold **L and R** while starting Breath of
+   the Wild, then start Patchwork from the Homebrew Menu. Settings → Storage → "BOTW size
+   table" should say "Read from game 1.6.0" (a bar shows while it reads). Holding only R gives
+   "Got a mod's copy · hold L too" when a mod (e.g. the Randomizer) has its own table. If it
+   says "Unreadable" or "Couldn't check", report it.
    Opening Patchwork from the Album afterwards keeps the saved copy.
-19. **BCML package that installs as-is:** in BOTW Browse, find Linkle Armor Stands (or enter
-   246556): its .bnp shows "BCML package · installs here". Install it, start the game and
-   look at an armor stand. Then turn it off: the stands are back to normal.
+19. **BCML package that installs as-is:** enter mod number 586246 (Unofficial Linkle 3.0
+   Armor Icons). Pick the **.bnp** file (not the UKMM zip): it shows "BCML package · installs
+   here". Install, start the game, open the inventory's Armor tab: the armor icons show
+   Linkle instead of Link. Turn the mod off: the icons are back to normal.
 20. **BCML package that needs merging** (e.g. FastSwim, 372295): not listed in Browse; the
    number says it needs BCML on a PC.
 21. **Size table merging with the Randomizer:** with your BOTW Randomizer files on the card,
    install a BCML package: the game still starts and the Randomizer works. Turn the package
    off: the Randomizer's own size table is restored.
+22. **Save file (TOTK):** close TOTK first (HOME, X). Install Shrines Unlocked Save File
+   (number 445614). Pick your profile; it suggests the first empty slot. Leave photos off,
+   press "Back up and install". Start TOTK, Load: the save is there with the shrines unlocked,
+   and your own saves and photos are untouched.
+23. **Save backups:** Settings → Save backups lists the backup from step 22. Restore it: the
+   installed save is gone and your saves are as before; a second backup ("Before restoring…")
+   appears. X on a backup deletes it.
+24. **Game open:** with TOTK suspended in the background, try installing a save: Patchwork asks
+   you to close the game first and changes nothing.
+25. **Photos toggle:** install a save with "Also copy the save's photos" on (e.g. 445614 again,
+   into another slot): the in-game album shows the save's photos. Restore the backup to get
+   yours back.
+26. **Whole-save downloads:** a download with all six slots (e.g. 447106) lists them with their
+   dates and highlights the latest. A BOTW Master Mode save (e.g. 582966's master mode file)
+   only offers Master Mode slots; check it loads in Master Mode.
+
+27. **BCML merge test (for full BCML support):** hold **L and R** while starting Breath of the
+   Wild, open Patchwork, Settings → Testing → "BCML merge test" → Run. It downloads two small
+   packages and shows timings and memory (also saved to switch/patchwork/bcml-test/report.txt).
+   Then "Merged Linkle title screen" → Put in game, start BOTW normally: the title screen shows
+   Linkle. Back in Patchwork, "Remove from game".
