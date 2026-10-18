@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 #include "compat.hpp"
 #include "md5.hpp"
+#include "bcml.hpp"
 #include "platform.hpp"
 #include "waikuteru.hpp"
 
@@ -32,7 +33,9 @@ bool modUsesVersionWord(const ModDetails& d, mm::Game game) {
 FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, bool versionWordIsMod) {
     if (mm::endsWithI(f.filename, ".bnp")) {
         if (f.bcml == ModFile::Bcml::NeedsPc) return {"Needs BCML on a PC", ui::warn()};
-        if (f.bcml == ModFile::Bcml::Installable) return {"BCML package · installs here", ui::ok()};
+        if (f.bcml == ModFile::Bcml::Installable)
+            return AppState::get().bcmlSetupNeeded() ? FileNote{"BCML package · one-time setup", ui::accent()}
+                                                     : FileNote{"BCML package · installs here", ui::ok()};
         return {"BCML package", ui::muted()};
     }
     if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
@@ -62,6 +65,9 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
         if (!isUnsupportedPackage(f)) score += 4;
         if (mm::isRestoreOriginalsFile(f.filename, f.description)) score -= 20;  // only if it's all there is
         if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
+        // The author's own advice ("Standalone Version (Not Recommended)").
+        auto desc = mm::toLower(f.description + " " + f.filename);
+        if (desc.find("not recommend") != std::string::npos || desc.find("not-recommend") != std::string::npos) score -= 2;
         // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
         bool isVariantOfAnother = false;
         for (size_t j = 0; j < d.files.size(); ++j)
@@ -94,6 +100,7 @@ void InstallFlow::clear() {
     pane_->clearViews();
     workingLabel_ = nullptr;
     bar_ = nullptr;
+    hint_ = nullptr;
 }
 
 void InstallFlow::leave() {
@@ -116,15 +123,18 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
         box->setJustifyContent(brls::JustifyContent::CENTER);
         box->setAlignItems(brls::AlignItems::CENTER);
         box->addView(new brls::ProgressSpinner());
-        workingLabel_ = ui::label(status, 20, ui::text());
+        workingLabel_ = ui::label(status, 20, ui::text(), false);
+        workingLabel_->setHorizontalAlign(brls::HorizontalAlign::CENTER);
         workingLabel_->setMarginTop(16);
         box->addView(workingLabel_);
         bar_ = new ui::ProgressBar(360);
         bar_->setMarginTop(14);
         box->addView(bar_);
-        auto* hint = ui::label("Press B to cancel", 15, ui::muted());
-        hint->setMarginTop(12);
-        box->addView(hint);
+        hint_ = ui::label("", 15, ui::muted(), false);
+        hint_->setMarginTop(12);
+        hint_->setMaxWidth(420);
+        hint_->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+        box->addView(hint_);
         // Focusable so B works and focus doesn't stay on the list behind.
         box->setFocusable(true);
         box->setHideHighlight(true);
@@ -152,8 +162,54 @@ void InstallFlow::setWorking(const std::string& status, float progress) {
     } else {
         workingLabel_->setText(status);
     }
+    // Downloading and unpacking can be stopped; installing and merging can't.
+    hint_->setText(busy_ && !cancel_ ? "Please wait. Don't close Patchwork or turn off the Switch until this finishes."
+                                     : "Press B to cancel");
     bar_->setVisibility(progress >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::INVISIBLE);
     if (progress >= 0) bar_->setProgress(progress);
+}
+
+namespace {
+// Marks an install error that's really the BCML setup step (see showBcmlSetup).
+const std::string kSetupMarker = "\x01" "bcml-setup:";
+}  // namespace
+
+// What a game file is, in words ("the game's text").
+static std::string describeGameFile(const std::string& path) {
+    if (path.find("Bootup_") != std::string::npos) return "the game's text";
+    if (path.find("Bootup.pack") != std::string::npos) return "the game's data (Bootup.pack)";
+    if (path.find("AocMainField") != std::string::npos || path.find("01007EF00011F001") != std::string::npos) return "the DLC's maps";
+    if (path.find("Map/") != std::string::npos || path.find("TitleBG") != std::string::npos) return "the game's maps";
+    if (path.find("ActorInfo") != std::string::npos) return "the game's actor list";
+    if (path.find("size table") != std::string::npos) return "the game's size table";
+    auto slash = path.find_last_of('/');
+    return "the game's " + (slash == std::string::npos ? path : path.substr(slash + 1));
+}
+
+void InstallFlow::showBcmlSetup(bool fromInbox, const std::string& missing) {
+    using A = AppState::GameAccess;
+    auto& st = AppState::get();
+    auto access = st.botwAccess();
+    bool setUpBefore = st.keptGameFiles() > 0;
+    std::string title = "One-time setup for BCML packages";
+    std::string body;
+    if (access == A::ModsOn) {
+        body = "Patchwork was opened from Breath of the Wild, but L wasn't held, so mods were on and it couldn't read the "
+               "game's own files. Try again holding both buttons:\n\n";
+    } else if (setUpBefore) {
+        title = "More game files needed";
+        body = "This package needs " + describeGameFile(missing) +
+               ", which Patchwork hasn't read from Breath of the Wild yet. To read it:\n\n";
+    } else {
+        body = "This mod is a BCML package. Patchwork merges it with Breath of the Wild's own files, which it reads from "
+               "the game itself. To let it:\n\n";
+    }
+    body += AppState::bcmlSetupSteps(!fromInbox);
+    if (fromInbox) body += "\n4. Install it again from Add mods.";
+    body += "\n\nPatchwork keeps copies of the game files on the SD card, so this is only needed again after a game "
+            "update, or if another package needs other files.";
+    if (!fromInbox) body += " The download is kept; it won't download again.";
+    showMessage(title, body, false);
 }
 
 void InstallFlow::showMessage(const std::string& title, const std::string& body, bool isError) {
@@ -164,7 +220,9 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     box->setGrow(1);
     box->setFocusable(true);
     box->setHideHighlight(true);
-    box->addView(ui::label(std::string(isError ? ui::icon::warning : ui::icon::check) + "  " + title, 24, isError ? ui::warn() : ui::ok()));
+    bool setup = title.rfind("One-time setup", 0) == 0 || title == "More game files needed";
+    box->addView(ui::label(std::string(isError ? ui::icon::warning : setup ? ui::icon::info : ui::icon::check) + "  " + title, 24,
+                           isError ? ui::warn() : setup ? ui::accent() : ui::ok()));
     auto* b = ui::label(body, 17, ui::text(), false);
     b->setMarginTop(14);
     box->addView(b);
@@ -179,6 +237,12 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     });
     pane_->addView(box);
     brls::Application::giveFocus(box);
+}
+
+// The library id a file of a mod is installed under.
+static std::string modIdFor(const ModDetails& d, const ModFile& file) {
+    if (d.summary.sourceKey.rfind("gb:", 0) == 0) return "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id);
+    return "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
 }
 
 void InstallFlow::showFilePicker(const ModDetails& d) {
@@ -199,6 +263,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
     pane_->addView(sub);
 
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -216,6 +281,7 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         const auto file = d.files[i];
         auto note = noteFor(file, game, installed, versionWordIsMod);
         bool downloaded = st.isDownloaded(file);
+        const auto* installedMod = st.findMod(modIdFor(d, file));
         auto* row = ui::focusRow();
         ui::tappable(row);
         row->addView(ui::label(ui::icon::file, 24, ui::muted()));
@@ -229,16 +295,26 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
         desc->setMarginTop(3);
         text->addView(desc);
         row->addView(text);
-        auto* n = downloaded ? ui::label("Downloaded", 15, ui::accent())
-                             : ui::label((note.matches ? std::string(ui::icon::check) + " " : "") + note.text, 15, note.color);
+        auto* n = installedMod ? ui::label(std::string(ui::icon::check) + " Installed", 15, ui::ok())
+                  : downloaded ? ui::label("Downloaded", 15, ui::accent())
+                               : ui::label((note.matches ? std::string(ui::icon::check) + " " : "") + note.text, 15, note.color);
         n->setMarginLeft(10);
         row->addView(n);
         auto details = d;
-        row->registerClickAction([this, details, file](brls::View*) {
-            install(details, file);
+        std::string installedState = installedMod ? (installedMod->enabled ? "on" : "off") : "";
+        row->registerClickAction([this, details, file, installedState](brls::View*) {
+            if (installedState.empty()) {
+                install(details, file);
+                return true;
+            }
+            auto* dialog = new brls::Dialog(file.filename + " is already installed (turned " + installedState +
+                                            " in My mods). Download and install it again?");
+            dialog->addButton("Cancel", [] {});
+            dialog->addButton("Install again", [this, details, file] { install(details, file); });
+            dialog->open();
             return true;
         });
-        row->updateActionHint(brls::BUTTON_A, downloaded ? "Finish installing" : "Install");
+        row->updateActionHint(brls::BUTTON_A, installedMod ? "Install again" : downloaded ? "Finish installing" : "Install");
         list->addView(row);
         if (i == rec) recRow = row;
     }
@@ -349,7 +425,7 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                 return;
             }
             if (!error.empty()) {
-                bool kept = AppState::get().isDownloaded(file);
+                bool kept = !isLocalFile(file) && AppState::get().isDownloaded(file);
                 showMessage("Install failed", error + (kept ? "\n\nThe download was kept. Try again from here or from My mods; it won't download again." : ""), true);
                 return;
             }
@@ -430,6 +506,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         pane_->addView(note);
     }
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -543,8 +620,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         }
     }
     bool fromGameBanana = d.summary.sourceKey.rfind("gb:", 0) == 0;
-    auto newId = fromGameBanana ? "gb" + std::to_string(d.summary.id) + "-" + std::to_string(file.id)
-                                : "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
+    auto newId = modIdFor(d, file);
     // Other files of the same mod already installed (an older version, usually).
     std::vector<std::string> others;
     std::string otherNames;
@@ -576,18 +652,39 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         for (auto i : variants) r.variants.push_back(prep->layout.variants.at(i).name);
         r.resourceSizes = mm::mergeVariantSizes(prep->layout, variants);
         auto files = mm::mergeVariants(prep->layout, variants);
+        std::vector<mm::fs::path> logDirs;  // BCML packages that need merging
+        auto logs = mm::variantLogFiles(prep->layout, variants, r.bcmlLogs);
+        for (auto i : variants)
+            if (!prep->layout.variants.at(i).bcmlLogs.empty()) logDirs.push_back(prep->layout.variants.at(i).bcmlLogs);
         setBusy(true);
         cancel_.reset();  // copying can't be cancelled half-way; the library rolls back on failure
         setWorking("Installing… 0 / " + std::to_string(files.size()) + " files", 0);
         auto alive = flowAlive_;
         st.runFileJob(
-            [this, alive, r, files, replace, prep, fileId = file.id](mm::Library& lib) {
+            [this, alive, r, files, logs, logDirs, replace, prep, fileId = file.id](mm::Library& lib) {
                 size_t lastStep = 0;
                 try {
-                if (!lib.canMergeSizes(r))
-                    throw std::runtime_error(
-                        "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
-                        "Close Patchwork, then open it by holding L and R while starting Breath of the Wild, and install again.");
+                if (!lib.canMergeSizes(r)) throw std::runtime_error(kSetupMarker + "size table");
+                if (!logDirs.empty()) {
+                    auto missing = lib.missingGameFiles(logDirs);
+                    if (!missing.empty()) throw std::runtime_error(kSetupMarker + missing.front());
+                }
+                auto lastPct = std::make_shared<int>(-1);
+                auto lastWhat = std::make_shared<std::string>();
+                lib.setMergeProgress([this, alive, lastPct, lastWhat](float f, const std::string& what) {
+                    int pct = static_cast<int>(f * 100);
+                    if (pct == *lastPct && what == *lastWhat) return;
+                    *lastPct = pct;
+                    *lastWhat = what;
+                    auto text = "Merging with the game's files… " + std::to_string(pct) + "%\n" + what;
+                    brls::sync([this, alive, text, f] {
+                        if (*alive && workingLabel_) setWorking(text, f);
+                    });
+                });
+                struct StopProgress {
+                    mm::Library& lib;
+                    ~StopProgress() { lib.setMergeProgress({}); }
+                } stopProgress{lib};
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;
@@ -597,7 +694,15 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     brls::sync([this, alive, msg, pct] {
                         if (*alive && workingLabel_) setWorking(msg, pct);
                     });
-                });
+                }, logs);
+                } catch (const mm::BcmlMergeError& e) {
+                    mm::removeTree(prep->extractDir);  // the download itself stays for another try
+                    // "needs the game's <path>, which Patchwork hasn't read yet": pass on the path.
+                    std::string what = e.what();
+                    auto from = what.find("needs the game's "), to = what.find(", which Patchwork hasn't read yet");
+                    if (from != std::string::npos && to != std::string::npos && to > from)
+                        throw std::runtime_error(kSetupMarker + what.substr(from + 17, to - from - 17));
+                    throw;
                 } catch (...) {
                     mm::removeTree(prep->extractDir);  // the download itself stays for another try
                     throw;
@@ -607,15 +712,26 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 // Installed: the download and the unpacked copy aren't needed any more.
                 AppState::get().discardPending(fileId);
             },
-            [this, alive, d](const std::string& error) {
+            [this, alive, d, file](const std::string& error) {
                 if (!*alive) {
                     // The page was closed meanwhile; still tell the user how it went.
                     brls::Application::notify(error.empty() ? d.summary.name + " installed" : "Install of " + d.summary.name + " failed");
                     return;
                 }
                 setBusy(false);
+                if (error.rfind(kSetupMarker, 0) == 0) {
+                    // The DLC is installed but couldn't be opened: holding L and R won't help.
+                    auto dlcError = platform::lastDlcError();
+                    if (error.find(mm::bcml::kDlc) != std::string::npos && !dlcError.empty() && platform::botwDlcInstalled() == 1) {
+                        showMessage("Couldn't read the DLC", "This package changes the map, so it's merged with the Expansion Pass's own map files. " + dlcError +
+                                    "\n\nPlease report this error. The download was kept.", true);
+                        return;
+                    }
+                    showBcmlSetup(isLocalFile(file), error.substr(kSetupMarker.size()));
+                    return;
+                }
                 if (!error.empty()) {
-                    showMessage("Install failed", error + "\n\nThe download was kept. Try again from here or from My mods; it won't download again.", true);
+                    showMessage("Install failed", error + (isLocalFile(file) ? std::string() : "\n\nThe download was kept. Try again from here or from My mods; it won't download again."), true);
                     return;
                 }
                 showMessage("Installed", d.summary.name + " is installed and turned on. Start the game to try it.\n\nYou can turn it off or change its load order in My mods.", false);
@@ -727,6 +843,7 @@ void InstallFlow::showSaveList(const ModDetails& d, const ModFile& file, std::sh
     sub->setMargins(6, 0, 16, 0);
     pane_->addView(sub);
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -846,6 +963,7 @@ void InstallFlow::showSaveOptions(const ModDetails& d, const ModFile& file, std:
         pane_->addView(note);
     }
     auto* list = ui::vbox();
+    list->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setContentView(list);

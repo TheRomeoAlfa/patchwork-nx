@@ -8,6 +8,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <memory>
+#include <atomic>
+#include <mutex>
 #include <vector>
 
 #ifdef __SWITCH__
@@ -59,30 +61,6 @@ uint64_t freeSpaceBytes() {
     return static_cast<uint64_t>(st.f_bavail) * st.f_frsize;
 }
 
-uint64_t memoryUsedBytes() {
-#ifdef __SWITCH__
-    u64 v = 0;
-    return R_SUCCEEDED(svcGetInfo(&v, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
-#else
-    struct rusage ru {};
-    getrusage(RUSAGE_SELF, &ru);
-#ifdef __APPLE__
-    return static_cast<uint64_t>(ru.ru_maxrss);  // bytes on macOS
-#else
-    return static_cast<uint64_t>(ru.ru_maxrss) * 1024;
-#endif
-#endif
-}
-
-uint64_t memoryTotalBytes() {
-#ifdef __SWITCH__
-    u64 v = 0;
-    return R_SUCCEEDED(svcGetInfo(&v, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0)) ? v : 0;
-#else
-    return 0;
-#endif
-}
-
 std::string caBundle() {
 #ifdef __SWITCH__
     return "romfs:/cacert.pem";
@@ -117,7 +95,8 @@ std::string readWithProgress(const mm::fs::path& p, const std::function<void(uin
 }  // namespace
 
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
-                  const std::function<void(uint64_t, uint64_t)>& progress) {
+                  const std::function<void(uint64_t, uint64_t)>& progress, bool* notInGame) {
+    if (notInGame) *notInGame = false;
 #ifdef __SWITCH__
     u64 current = 0;
     u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
@@ -131,7 +110,13 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
-        out = readWithProgress("gamefs:/" + romfsPath, progress);
+        std::error_code ec;
+        if (!mm::fs::exists("gamefs:/" + romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The game has no " + romfsPath + ".";
+        } else {
+            out = readWithProgress("gamefs:/" + romfsPath, progress);
+        }
     } catch (const std::exception& e) {
         why = std::string("Couldn't read the file: ") + e.what();
     }
@@ -144,6 +129,12 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         return false;
     }
     try {
+        std::error_code ec;
+        if (!mm::fs::exists(mm::fs::path(env) / romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The game has no " + romfsPath + ".";
+            return false;
+        }
         out = readWithProgress(mm::fs::path(env) / romfsPath, progress);
         return true;
     } catch (const std::exception& e) {
@@ -183,6 +174,56 @@ bool idToUid(const std::string& id, AccountUid& uid) {
 }
 #endif
 }  // namespace
+
+bool runningAsGame(mm::Game game) {
+#ifdef __SWITCH__
+    u64 current = 0;
+    u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
+    return R_SUCCEEDED(svcGetInfo(&current, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) && current == wanted;
+#else
+    return std::getenv(game == mm::Game::Botw ? "MM_GAME_ROMFS_BOTW" : "MM_GAME_ROMFS_TOTK") != nullptr;
+#endif
+}
+
+std::string gameTextLanguage() {
+#ifdef __SWITCH__
+    std::string lang = "USen";
+    if (R_SUCCEEDED(setInitialize())) {
+        u64 code = 0;
+        SetLanguage l;
+        if (R_SUCCEEDED(setGetSystemLanguage(&code)) && R_SUCCEEDED(setMakeLanguage(code, &l))) {
+            switch (l) {
+                case SetLanguage_JA: lang = "JPja"; break;
+                case SetLanguage_ENUS: lang = "USen"; break;
+                case SetLanguage_ENGB: lang = "EUen"; break;
+                case SetLanguage_FR: lang = "EUfr"; break;
+                case SetLanguage_FRCA: lang = "USfr"; break;
+                case SetLanguage_DE: lang = "EUde"; break;
+                case SetLanguage_IT: lang = "EUit"; break;
+                case SetLanguage_ES: lang = "EUes"; break;
+                case SetLanguage_ES419: lang = "USes"; break;
+                case SetLanguage_NL: lang = "EUnl"; break;
+                case SetLanguage_RU: lang = "EUru"; break;
+                case SetLanguage_KO: lang = "KRko"; break;
+                case SetLanguage_ZHCN:
+                case SetLanguage_ZHHANS: lang = "CNzh"; break;
+                case SetLanguage_ZHTW:
+                case SetLanguage_ZHHANT: lang = "TWzh"; break;
+                default: {
+                    // BOTW has no Portuguese: it falls back to English for the region.
+                    SetRegion region;
+                    lang = R_SUCCEEDED(setGetRegionCode(&region)) && region == SetRegion_USA ? "USen" : "EUen";
+                }
+            }
+        }
+        setExit();
+    }
+    return lang;
+#else
+    const char* env = std::getenv("MM_GAME_LANG");
+    return env ? env : "USen";
+#endif
+}
 
 std::tm localTime(int64_t unixSeconds) {
     std::tm tm{};
@@ -284,6 +325,7 @@ std::unique_ptr<SaveData> SaveData::open(mm::Game game, const std::string& userI
             why = "Couldn't open the " + name + " save (error " + resultCode(rc) + "). If the game is open, close it and try again.";
         return nullptr;
     }
+    s->mounted_ = true;
     s->root_ = std::string(kSaveDevice) + ":/";
 #else
     const char* env = std::getenv("MM_SAVE_ROOT");
@@ -300,7 +342,7 @@ std::unique_ptr<SaveData> SaveData::open(mm::Game game, const std::string& userI
 
 SaveData::~SaveData() {
 #ifdef __SWITCH__
-    fsdevUnmountDevice(kSaveDevice);
+    if (mounted_) fsdevUnmountDevice(kSaveDevice);
 #endif
 }
 
@@ -308,6 +350,170 @@ void SaveData::commit() {
 #ifdef __SWITCH__
     Result rc = fsdevCommitDevice(kSaveDevice);
     if (R_FAILED(rc)) throw std::runtime_error("couldn't save the changes (error " + resultCode(rc) + ")");
+#endif
+}
+
+#ifdef __SWITCH__
+namespace {
+constexpr u64 kBotwDlc = 0x01007EF00011F001ull;
+
+// The DLC's data content, through the content database (works whether or not the DLC is
+// registered for this process). Returns the storage holding it.
+Result findDlcContent(NcmStorageId& storageOut, char* path, size_t pathSize) {
+    Result rc = ncmInitialize();
+    if (R_FAILED(rc)) return rc;
+    Result last = rc;
+    for (auto storage : {NcmStorageId_SdCard, NcmStorageId_BuiltInUser}) {
+        NcmContentMetaDatabase db;
+        if (R_FAILED(last = ncmOpenContentMetaDatabase(&db, storage))) continue;
+        NcmContentMetaKey key;
+        NcmContentId content;
+        last = ncmContentMetaDatabaseGetLatestContentMetaKey(&db, &key, kBotwDlc);
+        if (R_SUCCEEDED(last)) last = ncmContentMetaDatabaseGetContentIdByType(&db, &content, &key, NcmContentType_Data);
+        ncmContentMetaDatabaseClose(&db);
+        if (R_FAILED(last)) continue;
+        NcmContentStorage cs;
+        if (R_FAILED(last = ncmOpenContentStorage(&cs, storage))) continue;
+        last = ncmContentStorageGetPath(&cs, path, pathSize, &content);
+        ncmContentStorageClose(&cs);
+        if (R_SUCCEEDED(last)) {
+            storageOut = storage;
+            break;
+        }
+    }
+    ncmExit();
+    return last;
+}
+// Games ask the add-on content service to make a DLC available before mounting it
+// (aoc:u PrepareAddOnContent; libnx has no wrapper). Running in place of BOTW, this is
+// BOTW's own DLC. Harmless if it fails.
+Result prepareDlc() {
+    Service aoc;
+    Result rc = smGetService(&aoc, "aoc:u");
+    if (R_FAILED(rc)) return rc;
+    const struct {
+        s32 index;
+        u32 pad;
+        u64 pid;  // filled in by the kernel
+    } in = {static_cast<s32>(kBotwDlc - 0x01007EF00011F000ull), 0, 0};
+    rc = serviceDispatchIn(&aoc, 7, in, .in_send_pid = true);
+    serviceClose(&aoc);
+    return rc;
+}
+
+std::mutex dlcErrorMutex;
+std::string dlcError;  // guarded by dlcErrorMutex: written on the file thread, read on the UI thread
+}  // namespace
+#endif
+
+std::string lastDlcError() {
+#ifdef __SWITCH__
+    std::lock_guard lock(dlcErrorMutex);
+    return dlcError;
+#else
+    return {};
+#endif
+}
+
+int botwDlcInstalled() {
+#ifdef __SWITCH__
+    static std::atomic<int> known{-2};  // asked from both threads; the answer doesn't change
+    if (known != -2) return known;
+    if (R_FAILED(ncmInitialize())) return known = -1;
+    int found = 0;
+    bool unsure = false;
+    for (auto storage : {NcmStorageId_SdCard, NcmStorageId_BuiltInUser}) {
+        NcmContentMetaDatabase db;
+        if (R_FAILED(ncmOpenContentMetaDatabase(&db, storage))) {
+            unsure = true;  // e.g. no SD card database: can't say it's not there
+            continue;
+        }
+        NcmContentMetaKey key;
+        if (R_SUCCEEDED(ncmContentMetaDatabaseGetLatestContentMetaKey(&db, &key, kBotwDlc))) found = 1;
+        ncmContentMetaDatabaseClose(&db);
+    }
+    ncmExit();
+    return known = found ? 1 : unsure ? -1 : 0;
+#else
+    return std::getenv("MM_GAME_ROMFS_BOTW_DLC") ? 1 : 0;
+#endif
+}
+
+bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame) {
+    if (notInGame) *notInGame = false;
+#ifdef __SWITCH__
+    // Mounted the way the game itself does first; else straight from the installed content.
+    bool mounted = false;
+    std::string errors;
+    static Result prepared = prepareDlc();
+    FsStorage storage;
+    Result rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_SdCard);
+    if (R_FAILED(rc)) rc = fsOpenDataStorageByDataId(&storage, kBotwDlc, NcmStorageId_BuiltInUser);
+    if (R_SUCCEEDED(rc)) {
+        rc = romfsMountFromStorage(storage, 0, "dlcfs");
+        if (R_SUCCEEDED(rc)) mounted = true;
+        else fsStorageClose(&storage);
+    }
+    if (!mounted) errors = resultCode(rc);
+    bool fsdev = false;
+    if (!mounted) {
+        char path[FS_MAX_PATH] = {};
+        NcmStorageId where{};
+        rc = findDlcContent(where, path, sizeof(path));
+        if (R_SUCCEEDED(rc)) {
+            FsFileSystem fs;
+            rc = fsOpenFileSystemWithId(&fs, kBotwDlc, FsFileSystemType_ContentData, path, FsContentAttributes_All);
+            if (R_SUCCEEDED(rc)) {
+                if (fsdevMountDevice("dlcfs", fs) >= 0) {
+                    mounted = fsdev = true;
+                } else {
+                    fsFsClose(&fs);
+                }
+            }
+        }
+        if (!mounted) errors += ", " + resultCode(rc);
+    }
+    if (!mounted) {
+        if (botwDlcInstalled() == 0) {
+            if (notInGame) *notInGame = true;
+            why = "The Breath of the Wild DLC isn't installed.";
+        } else {
+            why = "Couldn't open the Breath of the Wild DLC (errors " + errors + "; prepare " + resultCode(prepared) + ").";
+        }
+        {
+            std::lock_guard lock(dlcErrorMutex);
+            dlcError = why;
+        }
+        return false;
+    }
+    try {
+        std::error_code ec;
+        if (!mm::fs::exists("dlcfs:/" + romfsPath, ec)) {
+            if (notInGame) *notInGame = true;
+            why = "The DLC has no " + romfsPath + ".";
+        } else {
+            out = readWithProgress("dlcfs:/" + romfsPath, {});
+        }
+    } catch (const std::exception& e) {
+        why = std::string("Couldn't read the file: ") + e.what();
+    }
+    {
+        std::lock_guard lock(dlcErrorMutex);
+        dlcError.clear();
+    }
+    if (fsdev) fsdevUnmountDevice("dlcfs");
+    else romfsUnmount("dlcfs");
+    return why.empty();
+#else
+    const char* env = std::getenv("MM_GAME_ROMFS_BOTW_DLC");
+    std::error_code ec;
+    if (!env || !mm::fs::exists(mm::fs::path(env) / romfsPath, ec)) {
+        if (notInGame) *notInGame = true;
+        why = "No DLC file " + romfsPath + ".";
+        return false;
+    }
+    out = readWithProgress(mm::fs::path(env) / romfsPath, {});
+    return true;
 #endif
 }
 

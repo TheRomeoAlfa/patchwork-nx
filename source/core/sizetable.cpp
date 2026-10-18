@@ -35,7 +35,7 @@ std::string yaz0Decompress(const std::string& data) {
     if (!isYaz0(data)) throw std::runtime_error("not Yaz0 data");
     size_t size = be32(data, 4);
     std::string out;
-    out.reserve(size);
+    out.reserve(std::min(size, data.size() * 8));  // the header's size is only a claim
     size_t src = 16;
     while (out.size() < size) {
         if (src >= data.size()) throw std::runtime_error("truncated Yaz0 data");

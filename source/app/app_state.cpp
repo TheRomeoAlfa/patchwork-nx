@@ -1,5 +1,6 @@
 #include "app_state.hpp"
 
+#include "bcml.hpp"
 #include "bnp.hpp"
 #include "remote7z.hpp"
 #include "sizetable.hpp"
@@ -17,7 +18,7 @@
 namespace app {
 
 namespace {
-// Nothing in the mod can be installed here: TKMM packages, and BCML packages that need merging.
+// Nothing in the mod can be installed here: TKMM packages, and BCML packages Patchwork can't merge.
 bool onlyPcPackages(const std::vector<mm::gb::ModFile>& files) {
     if (files.empty()) return false;
     for (const auto& f : files) {
@@ -108,9 +109,77 @@ void AppState::init() {
         for (const auto& g : mm::kGames)
             if (!gameVersions_[g.game].empty()) game_ = g.game;
 
+    // Game files BCML packages are merged with, copied the first time they can be read (when
+    // Patchwork runs in place of BOTW with mods off: L and R held). Cleared after a game update.
+    auto gameCache = dataDir_ / "original" / "botw-files";
+    {
+        std::string version = gameVersions_[mm::Game::Botw], cachedVersion;
+        try {
+            cachedVersion = mm::readFile(gameCache / "version.txt");
+        } catch (...) {
+        }
+        if (!version.empty() && cachedVersion != version) {
+            mm::removeTree(gameCache);
+            try {
+                mm::writeFileAtomic(gameCache / "version.txt", version);
+            } catch (...) {
+            }
+        }
+    }
+    // Earlier versions couldn't always open the DLC and remembered it as missing: look again,
+    // and merge again with its maps if it's there.
+    bool dlcFound = false;
+    {
+        auto dlcCache = gameCache / mm::fs::path(mm::bcml::kDlc);
+        std::error_code ec;
+        if (mm::fs::exists(dlcCache / "Pack" / "AocMainField.pack.absent", ec) && platform::botwDlcInstalled() == 1) {
+            std::vector<mm::fs::path> markers;
+            for (mm::fs::recursive_directory_iterator it(dlcCache, ec), end; it != end; it.increment(ec))
+                if (it->path().extension() == ".absent") markers.push_back(it->path());
+            for (const auto& m : markers) mm::fs::remove(m, ec);
+            dlcFound = true;
+        }
+    }
+    library_->setTextLanguage(platform::gameTextLanguage());
+    library_->setGameFileReader([gameCache](const std::string& path) {
+        using GF = mm::Library::GameFile;
+        if (!mm::isSafeRelativePath(path)) return GF{};  // names come from downloaded packages
+        std::error_code ec;
+        auto cached = gameCache / mm::fs::path(path);
+        if (mm::fs::exists(cached, ec)) return GF{GF::State::Found, mm::readFile(cached)};
+        auto absent = cached;
+        absent += ".absent";
+        if (mm::fs::exists(absent, ec)) return GF{GF::State::Absent, {}};
+        bool dlc = path.rfind(mm::bcml::kDlc, 0) == 0;
+        if (!dlc && path.rfind(mm::bcml::kContent, 0) != 0) return GF{};
+        auto rel = path.substr(std::string(dlc ? mm::bcml::kDlc : mm::bcml::kContent).size());
+        std::string data, why;
+        bool notInGame = false;
+        bool ok = dlc ? platform::readDlcFile(rel, data, why, &notInGame) : platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame);
+        if (!ok) {
+            if (notInGame) {
+                try {
+                    mm::writeFileAtomic(absent, "");
+                } catch (...) {
+                }
+                return GF{GF::State::Absent, {}};
+            }
+            return GF{};
+        }
+        // Opened without L, Atmosphère hands over the SD card's (modded) copy: not the game's.
+        auto onCard = platform::sdRoot() / "atmosphere/contents" / mm::fs::path(dlc ? "01007EF00011F001/romfs" : "01007EF00011E000/romfs") / mm::fs::path(rel);
+        if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return GF{};
+        try {
+            mm::writeFileAtomic(cached, data);
+        } catch (const std::exception& e) {
+            brls::Logger::warning("couldn't keep a copy of {}: {}", path, e.what());
+        }
+        return GF{GF::State::Found, std::move(data)};
+    });
+
     auto staleWork = workDir();
     auto originalTable = dataDir_ / "original" / "botw" / "ResourceSizeTable.product.srsizetable";
-    runFileJob([this, staleWork, originalTable](mm::Library& lib) {
+    runFileJob([this, staleWork, originalTable, dlcFound](mm::Library& lib) {
         // Whatever happens, the size table status must stop saying "Checking…".
         struct Finish {
             AppState* st;
@@ -124,6 +193,7 @@ void AppState::init() {
         mm::removeTree(staleWork);  // leftovers from an install interrupted by a crash or power-off
         setSizeTableProgress(0.1f);
         lib.load();
+        publishSnapshot(lib);  // show the mod list now; the checks below can take a while
         setSizeTableProgress(0.2f);
         try {
             finish.status = captureOriginalSizeTable(originalTable, [this](float p) { setSizeTableProgress(0.2f + 0.8f * p); });
@@ -132,12 +202,82 @@ void AppState::init() {
             finish.status = "Couldn't check";
         }
         lib.setOriginalSizeTable(originalTable);
+        // BCML packages waiting for game files: merge them now if the files can be read.
+        if (dlcFound) lib.invalidateBcml();
+        if (dlcFound || lib.bcmlPending()) {
+            try {
+                lib.apply();
+            } catch (const std::exception& e) {
+                brls::Logger::info("BCML merge still waiting: {}", e.what());
+            }
+        }
+        modsWereOn_ = finish.status.find("mod's copy") != std::string::npos;
     }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });
+
+    // Opened with the game's files readable: keep the ones most BCML packages merge with, so
+    // later packages rarely need the L and R step again. Already-kept files are skipped.
+    if (platform::runningAsGame(mm::Game::Botw))
+        runFileJob([this](mm::Library& lib) {
+            if (modsWereOn_) return;
+            {
+                std::lock_guard lock(statusMutex_);
+                backgroundTask_ = "keeps copies of the game's files";
+            }
+            const std::string c = mm::bcml::kContent, d = mm::bcml::kDlc;
+            for (const auto& path : {c + "Pack/Bootup.pack", c + "Pack/Bootup_" + platform::gameTextLanguage() + ".pack",
+                                     c + "Pack/TitleBG.pack", c + "Actor/ActorInfo.product.sbyml",
+                                     c + "Map/MainField/Static.smubin", d + "Pack/AocMainField.pack",
+                                     d + "Map/MainField/Static.smubin"}) {
+                try {
+                    lib.gameFile(path);
+                } catch (const std::exception& e) {
+                    brls::Logger::warning("couldn't keep {}: {}", path, e.what());
+                }
+            }
+            std::lock_guard lock(statusMutex_);
+            backgroundTask_.clear();
+        }, {});
 }
 
 void AppState::shutdown() { saveSettings(); }
+
+AppState::GameAccess AppState::botwAccess() const {
+    if (!platform::runningAsGame(mm::Game::Botw)) return GameAccess::NotFromGame;
+    if (sizeTableStatus().find("mod's copy") != std::string::npos) return GameAccess::ModsOn;
+    return GameAccess::Ready;
+}
+
+size_t AppState::keptGameFiles() const {
+    size_t n = 0;
+    std::error_code ec;
+    auto dir = dataDir_ / "original" / "botw-files";
+    for (mm::fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && !mm::endsWithI(it->path().filename().string(), ".absent") && it->path().filename() != "version.txt") ++n;
+    return n;
+}
+
+std::string AppState::backgroundTask() const {
+    std::lock_guard lock(statusMutex_);
+    return backgroundTask_;
+}
+
+std::vector<std::string> AppState::pendingBcmlNames() const {
+    std::vector<std::string> out;
+    for (const auto& p : pendingInstalls(mm::Game::Botw))
+        if (mm::endsWithI(p.file.filename, ".bnp")) out.push_back(p.details.summary.name);
+    return out;
+}
+
+std::string AppState::bcmlSetupSteps(bool thenFinishInMyMods) {
+    std::string s =
+        "1. Press + to close Patchwork.\n"
+        "2. Hold L and R, and start Breath of the Wild. Keep holding until the Homebrew Menu opens.\n"
+        "3. Open Patchwork from the Homebrew Menu.";
+    if (thenFinishInMyMods) s += "\n4. Go to My mods and choose Finish installing.";
+    return s;
+}
 
 std::string AppState::sizeTableStatus() const {
     std::lock_guard lock(statusMutex_);
@@ -213,7 +353,11 @@ void AppState::runFileJob(std::function<void(mm::Library&)> job, std::function<v
         } catch (const std::exception& e) {
             error = e.what();
         }
-        publishSnapshot(*library_);
+        try {
+            publishSnapshot(*library_);
+        } catch (const std::exception& e) {  // the job must still finish below, or busy screens wait forever
+            brls::Logger::error("couldn't read the library state: {}", e.what());
+        }
         brls::sync([this, done, error] {
             --fileJobs_;
             if (done) done(error);
@@ -233,6 +377,8 @@ void AppState::publishSnapshot(mm::Library& lib) {
         auto un = lib.unmanagedFiles(g.game);
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
     }
+    snap->bcmlWaiting = lib.bcmlPending();
+    snap->loaded = true;
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);
         libraryChanged_.fire();
@@ -356,17 +502,26 @@ void AppState::loadPcCacheLocked() {
     pcLoaded_ = true;
     // Seed from the list shipped with the app (popular BOTW mods, checked ahead of time), then
     // what this console has learned since. Entries for updated mods are re-checked anyway.
+    // Packages are remembered by the kinds of merging they need, so what's installable
+    // follows what this version of Patchwork can merge. A mod remembered as "needs a PC"
+    // under older rules is checked again.
+    auto read = [this](const json& j) {
+        bool sameRules = j.value("rules", std::string()) == mm::bcml::mergeSupportKey();
+        for (const auto& [id, v] : j["mods"].items()) {
+            bool pcOnly = v.at(1).get<bool>();
+            if (pcOnly && !sameRules) continue;
+            pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), pcOnly};
+        }
+        if (j.contains("bnpLogs"))
+            for (const auto& [id, v] : j["bnpLogs"].items()) bnpLogs_[std::stoll(id)] = v.get<std::vector<std::string>>();
+    };
     try {
-        auto seed = json::parse(mm::readFile(platform::resourcePath("bnp-cache.json")));
-        for (const auto& [id, v] : seed["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
-        for (const auto& [id, v] : seed["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+        read(json::parse(mm::readFile(platform::resourcePath("bnp-cache.json"))));
     } catch (...) {
     }
     try {
         auto cached = json::parse(mm::readFile(dataDir_ / "pc-only-cache.json"));  // keep alive while iterating
-        if (!cached.contains("mods")) return;  // older format: start over
-        for (const auto& [id, v] : cached["mods"].items()) pcOnly_[std::stoll(id)] = {v.at(0).get<int64_t>(), v.at(1).get<bool>()};
-        for (const auto& [id, v] : cached["bnp"].items()) bnpInstallable_[std::stoll(id)] = v.get<bool>();
+        if (cached.contains("mods")) read(cached);
     } catch (...) {
         // none yet, or unreadable: start over
     }
@@ -374,9 +529,9 @@ void AppState::loadPcCacheLocked() {
 
 void AppState::savePcCacheLocked() {
     try {
-        json j = {{"mods", json::object()}, {"bnp", json::object()}};
+        json j = {{"rules", mm::bcml::mergeSupportKey()}, {"mods", json::object()}, {"bnpLogs", json::object()}};
         for (const auto& [id, v] : pcOnly_) j["mods"][std::to_string(id)] = {v.first, v.second};
-        for (const auto& [id, ok] : bnpInstallable_) j["bnp"][std::to_string(id)] = ok;
+        for (const auto& [id, logs] : bnpLogs_) j["bnpLogs"][std::to_string(id)] = logs;
         mm::writeFileAtomic(dataDir_ / "pc-only-cache.json", j.dump());
     } catch (const std::exception& e) {
         brls::Logger::warning("saving the file-type cache failed: {}", e.what());
@@ -387,20 +542,20 @@ bool AppState::bnpInstallable(const mm::gb::ModFile& f) {
     {
         std::lock_guard lock(pcMutex_);
         loadPcCacheLocked();
-        auto it = bnpInstallable_.find(f.id);
-        if (it != bnpInstallable_.end()) return it->second;
+        auto it = bnpLogs_.find(f.id);
+        if (it != bnpLogs_.end()) return mm::bnpInstallable(it->second);
     }
-    bool ok;
+    std::vector<std::string> summary;
     try {
-        ok = mm::checkBnp(mm::remote7zListing(*http_, f.downloadUrl)).installable();
+        summary = mm::checkBnp(mm::remote7zListing(*http_, f.downloadUrl)).summary();
     } catch (const std::exception& e) {
         brls::Logger::warning("couldn't look inside {}: {}", f.filename, e.what());
         return false;  // not remembered: try again next time
     }
     std::lock_guard lock(pcMutex_);
-    bnpInstallable_[f.id] = ok;
+    bnpLogs_[f.id] = summary;
     savePcCacheLocked();
-    return ok;
+    return mm::bnpInstallable(summary);
 }
 
 void AppState::checkBcmlFiles(std::vector<mm::gb::ModFile>& files) {
@@ -674,9 +829,13 @@ std::string stripHtml(const std::string& html, size_t maxLen) {
     static const std::regex blankLines("\\n{3,}");
     auto s = std::regex_replace(html, br, "\n");
     s = std::regex_replace(s, tags, "");
-    for (auto [from, to] : {std::pair{"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#039;", "'"}, {"&nbsp;", " "}}) {
-        size_t pos;
-        while ((pos = s.find(from)) != std::string::npos) s.replace(pos, std::string(from).size(), to);
+    // &amp; last, and each replacement scanned past, so "&amp;lt;" stays "&lt;".
+    for (auto [from, to] : {std::pair{"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#039;", "'"}, {"&nbsp;", " "}, {"&amp;", "&"}}) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, std::string(from).size(), to);
+            pos += std::string(to).size();
+        }
     }
     s = std::regex_replace(s, spaces, " ");
     s = std::regex_replace(s, blankLines, "\n\n");
@@ -689,6 +848,29 @@ std::string stripHtml(const std::string& html, size_t maxLen) {
         s += "…";
     }
     return s;
+}
+
+// Break a description into chunks short enough to scroll through one at a time.
+std::vector<std::string> paragraphs(const std::string& text, size_t maxLen) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find("\n\n", start);
+        auto para = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        start = end == std::string::npos ? text.size() : end + 2;
+        while (para.size() > maxLen) {
+            // Prefer to cut after a sentence or line, else at a space.
+            size_t cut = para.rfind(". ", maxLen);
+            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind('\n', maxLen);
+            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind(' ', maxLen);
+            if (cut == std::string::npos || cut == 0) cut = maxLen;
+            out.push_back(para.substr(0, cut + 1));
+            para.erase(0, cut + 1);
+            while (!para.empty() && (para[0] == ' ' || para[0] == '\n')) para.erase(0, 1);
+        }
+        if (!para.empty() && para.find_first_not_of(" \n") != std::string::npos) out.push_back(para);
+    }
+    return out;
 }
 
 }  // namespace app

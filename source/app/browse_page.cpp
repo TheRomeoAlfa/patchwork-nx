@@ -91,29 +91,6 @@ mm::gb::Sort nextSort(mm::gb::Sort s) {
     return mm::gb::Sort::MostDownloaded;
 }
 
-// Break a description into chunks short enough to scroll through one at a time.
-std::vector<std::string> paragraphs(const std::string& text, size_t maxLen = 360) {
-    std::vector<std::string> out;
-    size_t start = 0;
-    while (start < text.size()) {
-        size_t end = text.find("\n\n", start);
-        auto para = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        start = end == std::string::npos ? text.size() : end + 2;
-        while (para.size() > maxLen) {
-            // Prefer to cut after a sentence or line, else at a space.
-            size_t cut = para.rfind(". ", maxLen);
-            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind('\n', maxLen);
-            if (cut == std::string::npos || cut < maxLen / 3) cut = para.rfind(' ', maxLen);
-            if (cut == std::string::npos || cut == 0) cut = maxLen;
-            out.push_back(para.substr(0, cut + 1));
-            para.erase(0, cut + 1);
-            while (!para.empty() && (para[0] == ' ' || para[0] == '\n')) para.erase(0, 1);
-        }
-        if (!para.empty() && para.find_first_not_of(" \n") != std::string::npos) out.push_back(para);
-    }
-    return out;
-}
-
 }  // namespace
 
 // ------------------------------------------------------------------ page
@@ -166,6 +143,23 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
     header->addView(count_);
     left->addView(header);
 
+    if (searchMode_) {
+        // Above the results, so a new search is one press up (X does it from anywhere).
+        newSearch_ = ui::focusRow();
+        ui::tappable(newSearch_, ui::Tap::Act);
+        newSearch_->setMargins(0, 34, 6, 6);
+        newSearch_->addView(ui::label(ui::icon::search, 22, ui::accent()));
+        auto* l = ui::label("New search", 17, ui::text());
+        l->setMarginLeft(12);
+        newSearch_->addView(l);
+        newSearch_->registerClickAction([this](brls::View*) {
+            openSearchKeyboard();
+            return true;
+        });
+        newSearch_->setVisibility(brls::Visibility::GONE);
+        left->addView(newSearch_);
+    }
+
     listEmpty_ = ui::vbox();
     listEmpty_->setVisibility(brls::Visibility::GONE);
     listEmpty_->setPadding(0, 18, 0, 6);
@@ -216,7 +210,10 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
         });
     registerAction("Search", brls::BUTTON_X, [this](brls::View*) {
         if (flow_->active()) return false;
-        openSearchKeyboard();
+        if (!searchMode_ && onSearch)
+            brls::sync(onSearch);  // next frame: it replaces this page (results belong on Search)
+        else
+            openSearchKeyboard();
         return true;
     });
 
@@ -233,6 +230,7 @@ BrowsePage::BrowsePage(bool searchMode) : brls::Box(brls::Axis::ROW), searchMode
 void BrowsePage::setSource(Source s) {
     if (s == source_) return;
     source_ = s;
+    setActionAvailable(brls::BUTTON_Y, s == Source::GameBanana);  // Waikuteru's list has one order
     updateTabs();
     reload();
 }
@@ -304,6 +302,7 @@ brls::View* BrowsePage::rowFocus() {
 }
 
 void BrowsePage::updateHeader() {
+    if (newSearch_) newSearch_->setVisibility(query_.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
     if (searchMode_)
         title_->setText(query_.empty() ? "Search" : "Results for \"" + query_ + "\"");
     else if (source_ == Source::Waikuteru)
@@ -356,6 +355,7 @@ void BrowsePage::loadMore() {
         mm::gb::Page result;
         size_t fetched = 0;  // mods on the page before hiding any
         std::string error;
+        bool numberLookup = false;  // its errors already say what's wrong ("for the other game"…)
         try {
             if (waikuteru) {
                 // One page: every mod for this game that has a Switch version.
@@ -365,6 +365,7 @@ void BrowsePage::loadMore() {
                 result.isLast = true;
             } else if (search && isModNumber(query)) {
                 // A GameBanana mod number (the end of its link) goes straight to that mod.
+                numberLookup = true;
                 auto d = AppState::get().resolveLink("https://gamebanana.com/mods/" + query, game);
                 result.mods.push_back(d.summary);
                 result.totalCount = 1;
@@ -389,7 +390,10 @@ void BrowsePage::loadMore() {
             loading_ = false;
             if (!error.empty()) {
                 if (items_.empty())
-                    showEmptyState("Couldn't reach GameBanana. Check your internet connection.\n\n" + error, "Try again");
+                    showEmptyState(numberLookup ? error
+                                   : std::string("Couldn't reach ") + (waikuteru ? "Waikuteru's site" : "GameBanana") +
+                                         ". Check your internet connection.\n\n" + error,
+                                   search ? "Search again" : "Try again");
                 else
                     retryAfter_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);  // retried on scroll
                 return;

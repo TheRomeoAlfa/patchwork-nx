@@ -12,13 +12,17 @@ namespace mm {
 // BCML packages (.bnp): a 7z holding the mod's files in Switch title folders
 // (01007EF00011E000/romfs, 01007EF00011F001/romfs), info.json, and logs/ describing changes
 // BCML merges into the original game files. Optional parts live in options/<name>/ with
-// the same layout. Patchwork can install a package whose logs only list resource sizes:
-// those files are complete, and the sizes go into a merged size table.
+// the same layout. Patchwork installs a package when it can merge every kind of change its
+// logs list (see bcml::canMerge); the resource sizes go into a merged size table.
 struct BnpCheck {
     bool forSwitch = true;               // false: a Wii U package (content/, aoc/)
     std::vector<std::string> mergeLogs;  // logs that need merging with the game's files
-    bool installable() const { return forSwitch && mergeLogs.empty(); }
+    bool installable() const;
+    // What a cache keeps to answer installable() later, when Patchwork can merge more: the
+    // merge logs, plus "!wiiu" for Wii U packages.
+    std::vector<std::string> summary() const;
 };
+bool bnpInstallable(const std::vector<std::string>& summary);
 
 // Works from the archive's file list alone, so it can run before downloading.
 BnpCheck checkBnp(const std::vector<std::string>& archivePaths);

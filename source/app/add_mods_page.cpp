@@ -11,6 +11,14 @@
 namespace app {
 
 namespace {
+// What the inbox takes for the selected game (BCML packages are Breath of the Wild only).
+std::string inboxKinds() {
+    return AppState::get().game() == mm::Game::Botw ? ".zip, .7z, .rar or BCML .bnp files (mods or save files)"
+                                                    : ".zip, .7z or .rar files (mods or save files)";
+}
+}  // namespace
+
+namespace {
 
 // Draws a QR code for a short text (the link page's address).
 class QrView : public brls::Box {
@@ -77,6 +85,7 @@ AddModsPage::AddModsPage() : brls::Box(brls::Axis::ROW) {
     title->setMargins(0, 6, 10, 6);
     left->addView(title);
     list_ = ui::vbox();
+    list_->setPaddingRight(28);  // keeps rows clear of the scroll bar
     auto* scroll = new brls::ScrollingFrame();
     scroll->setGrow(1);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
@@ -178,7 +187,7 @@ void AddModsPage::rebuild() {
         if (!first || p.string() == focusedPath_) first = row;
     }
     if (files.empty()) {
-        auto* none = ui::label("No files yet. Copy .zip, .7z, .rar or BCML .bnp files (mods or save files) into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
+        auto* none = ui::label("No files yet. Copy " + inboxKinds() + " into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
         none->setMargins(0, 6, 6, 6);
         list_->addView(none);
     }
@@ -252,7 +261,16 @@ void AddModsPage::showInboxFile(const mm::fs::path& path) {
     pane_->addView(ui::label("Press A to unpack it and see what's inside. It installs for " + std::string(game) +
                                  " (switch game with ZL/ZR); you'll pick options and see any clashes next, like any other install.",
                              16, nvgRGB(0xc8, 0xc8, 0xc8), false));
-    auto* more = ui::label("To add more, copy zip, 7z, rar or BCML .bnp files (mods or save files) into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
+    if (mm::endsWithI(path.filename().string(), ".bnp")) {
+        std::string text = "A BCML package: Patchwork merges it with Breath of the Wild's own files.";
+        if (AppState::get().bcmlSetupNeeded())
+            text += " Before the first one, Patchwork needs to read those files: open it by holding L and R while starting the "
+                    "game (see Settings, BCML packages).";
+        auto* note = ui::label(std::string(ui::icon::info) + "  " + text, 15, ui::accent(), false);
+        note->setMarginTop(12);
+        pane_->addView(note);
+    }
+    auto* more = ui::label("To add more, copy " + inboxKinds() + " into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
                            "(for example with DBI or sys-ftpd). The file stays here after installing; X deletes it.",
                            15, ui::muted(), false);
     more->setMarginTop(14);
@@ -363,7 +381,7 @@ void AddModsPage::showLinkScreen() {
     ui::tappable(box, ui::Tap::Act);  // a tap opens a received link
     auto* top = ui::hbox();
     top->setAlignItems(brls::AlignItems::FLEX_START);
-    top->addView(new QrView("http://" + server_.address()));
+    top->addView(new QrView("http://" + server_.address() + "/"));
     auto* steps = ui::vbox();
     steps->setMarginLeft(24);
     steps->setGrow(1);
@@ -372,7 +390,7 @@ void AddModsPage::showLinkScreen() {
     auto* s1 = ui::label("1. Connect your phone to the same Wi-Fi.\n2. Scan the code, or open this address:", 16, nvgRGB(0xc8, 0xc8, 0xc8), false);
     s1->setMarginTop(10);
     steps->addView(s1);
-    auto* addr = ui::label(server_.address(), 30, ui::accent());
+    auto* addr = ui::label(server_.address(), 22, ui::accent());  // fits a long address with its code
     addr->setMargins(6, 0, 6, 0);
     steps->addView(addr);
     steps->addView(ui::label("3. Paste a mod link and tap Send.", 16, nvgRGB(0xc8, 0xc8, 0xc8), false));
