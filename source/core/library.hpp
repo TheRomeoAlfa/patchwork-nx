@@ -178,6 +178,8 @@ private:
     std::map<std::string, uint32_t> bcmlSizes_;
     std::string bcmlError_;  // why the last merge didn't happen
     bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
+    // Every package in the last merge is still enabled (as installed then): its files may stay.
+    bool bcmlStillUsable() const;
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
     // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.
