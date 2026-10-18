@@ -11,6 +11,8 @@ namespace mm {
 std::string yaz0Decompress(const std::string& data);  // throws on bad data
 // Valid Yaz0 that the game reads, stored without compression (nothing to tune, no bugs).
 std::string yaz0Store(const std::string& data);
+// Real compression (greedy matching): smaller files, slower than yaz0Store.
+std::string yaz0Compress(const std::string& data);
 bool isYaz0(const std::string& data);
 
 // BOTW's resource size table (System/Resource/ResourceSizeTable.product.srsizetable): how

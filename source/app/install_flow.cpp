@@ -6,6 +6,7 @@
 #include "platform.hpp"
 #include "waikuteru.hpp"
 
+#include <ctime>
 #include <set>
 
 namespace app {
@@ -354,6 +355,13 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
             }
             const auto& layout = prep->layout;
             if (layout.kind != mm::PackageKind::Installable) {
+                auto saves = mm::findSaves(prep->extractDir, pending.game, &prep->fileTimes);
+                if (!saves.empty()) {
+                    showSaveList(d, file, prep, std::move(saves));
+                    return;
+                }
+            }
+            if (layout.kind != mm::PackageKind::Installable) {
                 std::string message = layout.problem.empty() ? mm::packageKindMessage(layout.kind) : layout.problem;
                 if (layout.kind == mm::PackageKind::Empty) {
                     // Maybe it's for the other game (common with links and SD card files).
@@ -361,6 +369,9 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                     std::error_code ec;
                     if (mm::fs::exists(work, ec) && mm::detectLayout(work, other, slug).kind == mm::PackageKind::Installable)
                         message = "This looks like a mod for " + std::string(mm::gameInfo(other).displayName) +
+                                  ". Switch game with ZL/ZR, then install it again.";
+                    else if (mm::fs::exists(work, ec) && !mm::findSaves(work, other).empty())
+                        message = "This is a save file for " + std::string(mm::gameInfo(other).displayName) +
                                   ". Switch game with ZL/ZR, then install it again.";
                 }
                 mm::removeTree(work);
@@ -576,7 +587,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 if (!lib.canMergeSizes(r))
                     throw std::runtime_error(
                         "This BCML package needs Breath of the Wild's size table, which Patchwork hasn't read yet. "
-                        "Close Patchwork, then open it by holding R while starting Breath of the Wild, and install again.");
+                        "Close Patchwork, then open it by holding L and R while starting Breath of the Wild, and install again.");
                 lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;
@@ -665,6 +676,326 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
     dialog->addButton("Keep both", [checkConflicts] { checkConflicts({}); });
     dialog->setCancelable(false);
     dialog->open();
+}
+
+// ---------------------------------------------------------------- save files
+
+struct InstallFlow::SaveChoice {
+    std::shared_ptr<mm::PreparedArchive> prep;
+    std::vector<mm::SaveCandidate> saves;
+    size_t index = 0;
+    std::vector<platform::UserProfile> users;
+    size_t user = 0;
+    std::string slot;  // "" = pick a default for the user
+    bool photos = false;
+    const mm::SaveCandidate& save() const { return saves.at(index); }
+};
+
+namespace {
+
+std::string saveName(const mm::SaveCandidate& c, const ModDetails& d) { return c.name.empty() ? d.summary.name : c.name; }
+
+std::string slotLabel(mm::Game game, const std::string& folder) {
+    const auto* s = mm::findSaveSlot(game, folder);
+    return s ? s->label : folder;
+}
+
+}  // namespace
+
+void InstallFlow::showSaveList(const ModDetails& d, const ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
+                               std::vector<mm::SaveCandidate> saves) {
+    auto choice = std::make_shared<SaveChoice>();
+    choice->prep = prep;
+    choice->saves = std::move(saves);
+    if (choice->saves.size() == 1) {
+        showSaveOptions(d, file, choice);
+        return;
+    }
+    active_ = true;
+    clear();
+    auto game = AppState::get().game();
+    pane_->addView(ui::label("Choose a save", 24, ui::text()));
+    bool wholeSave = true;  // every slot of one player's save, rather than a pack of named saves
+    for (const auto& s : choice->saves)
+        if (s.photosRoot != choice->saves[0].photosRoot) wholeSave = false;
+    // In a whole save, start on the latest slot; a pack's saves are in the uploader's order.
+    choice->index = wholeSave ? mm::newestSave(choice->saves) : 0;
+    auto* sub = ui::label(wholeSave ? "This download is a whole save with several slots, from different points of one playthrough. "
+                                      "The latest one is highlighted."
+                                    : "This download holds " + std::to_string(choice->saves.size()) + " saves. Pick the one to install.",
+                          16, ui::muted(), false);
+    sub->setMargins(6, 0, 16, 0);
+    pane_->addView(sub);
+    auto* list = ui::vbox();
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
+    scroll->setContentView(list);
+    list->registerAction("Back", brls::BUTTON_B, [this, prep](brls::View*) {
+        mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+        leave();
+        return true;
+    });
+    pane_->addView(scroll);
+    brls::View* first = nullptr;
+    for (size_t i = 0; i < choice->saves.size(); ++i) {
+        const auto& s = choice->saves[i];
+        auto* row = ui::focusRow();
+        ui::tappable(row);
+        row->addView(ui::label(ui::icon::file, 24, ui::muted()));
+        auto* text = ui::vbox();
+        text->setGrow(1);
+        text->setShrink(1);
+        text->setMarginLeft(12);
+        text->addView(ui::label(wholeSave && !s.slot.empty() ? slotLabel(game, s.slot) : saveName(s, d), 17, ui::text()));
+        std::string detail;
+        if (!wholeSave && !s.slot.empty()) detail = "From " + slotLabel(game, s.slot);
+        if (s.savedTime) detail += (detail.empty() ? "Saved " : " · saved ") + formatDateTime(s.savedTime, false);
+        if (s.masterMode()) detail += (detail.empty() ? "" : " · ") + std::string("Master Mode");
+        if (!detail.empty()) {
+            auto* l = ui::label(detail, 14, ui::muted());
+            l->setMarginTop(3);
+            text->addView(l);
+        }
+        row->addView(text);
+        if (wholeSave && i == choice->index && choice->saves[i].savedTime) {
+            auto* tag = ui::label("Latest", 15, ui::accent());
+            tag->setMarginLeft(10);
+            row->addView(tag);
+        }
+        row->registerClickAction([this, d, file, choice, i](brls::View*) {
+            choice->index = i;
+            choice->slot.clear();
+            showSaveOptions(d, file, choice);
+            return true;
+        });
+        row->updateActionHint(brls::BUTTON_A, "Choose");
+        list->addView(row);
+        if (i == choice->index) first = row;
+    }
+    brls::Application::giveFocus(first);
+}
+
+void InstallFlow::showSaveOptions(const ModDetails& d, const ModFile& file, std::shared_ptr<SaveChoice> choice) {
+    active_ = true;
+    auto& st = AppState::get();
+    auto game = st.game();
+    auto gameName = std::string(mm::gameInfo(game).displayName);
+    auto prep = choice->prep;
+    auto back = [this, d, file, choice, prep] {
+        if (choice->saves.size() > 1) {
+            showSaveList(d, file, prep, choice->saves);
+        } else {
+            mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+            leave();
+        }
+    };
+
+    if (auto blocker = platform::saveBlocker(); !blocker.empty()) {
+        showMessage("Close the game first", blocker, true);
+        return;
+    }
+    if (choice->users.empty()) {
+        std::string why;
+        choice->users = platform::userProfiles(why);
+        if (choice->users.empty()) {
+            showMessage("Can't install this save", why, true);
+            return;
+        }
+    }
+    const auto& save = choice->save();
+    const auto& user = choice->users.at(choice->user);
+
+    // Which slots hold a save for this user. Slots are kept to the save's mode: a Master
+    // Mode save only works in a Master Mode slot.
+    std::string why;
+    auto data = platform::SaveData::open(game, user.id, why);
+    std::vector<mm::SaveSlot> slots;
+    std::vector<bool> inUse;
+    for (const auto& s : mm::saveSlots(game))
+        if (s.masterMode == save.masterMode()) {
+            slots.push_back(s);
+            inUse.push_back(data && mm::slotInUse(data->root(), s.folder));
+        }
+    data.reset();
+    if (choice->slot.empty() || !mm::findSaveSlot(game, choice->slot)) {
+        // Where it came from if that's free, else the first free slot, else where it came from.
+        size_t pick = slots.size();
+        for (size_t i = 0; i < slots.size(); ++i)
+            if (slots[i].folder == save.slot && !inUse[i]) pick = i;
+        for (size_t i = 0; i < slots.size() && pick == slots.size(); ++i)
+            if (!inUse[i]) pick = i;
+        for (size_t i = 0; i < slots.size() && pick == slots.size(); ++i)
+            if (slots[i].folder == save.slot) pick = i;
+        choice->slot = slots[pick == slots.size() ? 0 : pick].folder;
+    }
+    size_t slotIndex = 0;
+    for (size_t i = 0; i < slots.size(); ++i)
+        if (slots[i].folder == choice->slot) slotIndex = i;
+
+    clear();
+    pane_->addView(ui::label("Install save: " + saveName(save, d), 24, ui::text()));
+    auto* sub = ui::label("This is a save file, not a mod: it replaces one of your save slots. Patchwork first backs up all of "
+                          "this profile's " + gameName + " saves to the SD card, so you can put them back from Settings.",
+                          16, ui::muted(), false);
+    sub->setMargins(6, 0, 12, 0);
+    pane_->addView(sub);
+    if (!why.empty()) {
+        auto* note = ui::label(std::string(ui::icon::warning) + "  " + why, 15, ui::warn(), false);
+        note->setMargins(0, 0, 12, 0);
+        pane_->addView(note);
+    }
+    auto* list = ui::vbox();
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setContentView(list);
+    pane_->addView(scroll);
+    list->registerAction("Back", brls::BUTTON_B, [back](brls::View*) {
+        back();
+        return true;
+    });
+
+    std::vector<std::string> names;
+    for (const auto& u : choice->users) names.push_back(u.name);
+    auto* profile = new brls::SelectorCell();
+    profile->init("Profile", names, static_cast<int>(choice->user), [this, d, file, choice](int i) {
+        if (i < 0 || static_cast<size_t>(i) == choice->user) return;
+        choice->user = static_cast<size_t>(i);
+        choice->slot.clear();
+        // Redraw once the dropdown has closed and handed focus back.
+        brls::sync([this, d, file, choice, alive = flowAlive_] {
+            if (*alive) showSaveOptions(d, file, choice);
+        });
+    });
+    list->addView(profile);
+
+    std::vector<std::string> slotNames;
+    for (size_t i = 0; i < slots.size(); ++i)
+        slotNames.push_back(slots[i].label + (!why.empty() ? "" : inUse[i] ? " · has a save" : " · empty"));
+    auto* slotCell = new brls::SelectorCell();
+    slotCell->init("Save into", slotNames, static_cast<int>(slotIndex), [choice, slots](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < slots.size()) choice->slot = slots[i].folder;
+    });
+    list->addView(slotCell);
+    if (save.masterMode()) {
+        auto* l = ui::label("This is a Master Mode save, so it goes into a Master Mode slot.", 14, ui::muted(), false);
+        l->setMargins(10, 4, 4, 4);
+        list->addView(l);
+    }
+
+    if (!save.photoDirs.empty()) {
+        auto* photos = new brls::BooleanCell();
+        photos->init("Also copy the save's photos", choice->photos, [choice](bool on) { choice->photos = on; });
+        list->addView(photos);
+        auto* l = ui::label(game == mm::Game::Totk
+                                ? "Off: your own photos stay. On: the save's album replaces yours, for every slot; without it, "
+                                  "photos in this save's compendium may be blank."
+                                : "Off: your own photos stay. On: the save's album and compendium pictures replace yours, for every "
+                                  "slot; without them, this save's compendium may show blank pictures.",
+                            14, ui::muted(), false);
+        l->setMargins(10, 4, 4, 4);
+        list->addView(l);
+    }
+
+    auto* button = new brls::Button();
+    button->setText("Back up and install");
+    button->setMarginTop(16);
+    button->registerClickAction([this, d, file, choice, slots, inUse, user, why](brls::View*) {
+        if (!why.empty()) {
+            brls::Application::notify(why);
+            return true;
+        }
+        size_t i = 0;
+        while (i < slots.size() && slots[i].folder != choice->slot) ++i;
+        if (i < slots.size() && inUse[i]) {
+            auto* dialog = new brls::Dialog(slots[i].label + " already has a save in it for " + user.name +
+                                            ". It will be replaced; the backup keeps a copy.");
+            dialog->addButton("Cancel", [] {});
+            dialog->addButton("Replace", [this, d, file, choice] { installSave(d, file, choice); });
+            dialog->open();
+        } else {
+            installSave(d, file, choice);
+        }
+        return true;
+    });
+    list->addView(button);
+    brls::Application::giveFocus(button);
+}
+
+void InstallFlow::installSave(const ModDetails& d, const ModFile& file, std::shared_ptr<SaveChoice> choice) {
+    auto& st = AppState::get();
+    auto game = st.game();
+    auto user = choice->users.at(choice->user);
+    auto slot = choice->slot;
+    auto photos = choice->photos;
+    auto save = choice->save();
+    auto prep = choice->prep;
+    auto label = slotLabel(game, slot);
+    auto reason = "Before installing " + saveName(save, d) + " into " + label;
+    setBusy(true);
+    cancel_.reset();  // a save half-written can't be left behind; it's restored on failure instead
+    setWorking("Backing up your saves…", 0);
+    auto alive = flowAlive_;
+    auto update = [this, alive](std::string msg, size_t done, size_t total) {
+        float pct = total ? static_cast<float>(done) / total : 0;
+        brls::sync([this, alive, msg, pct] {
+            if (*alive && workingLabel_) setWorking(msg, pct);
+        });
+    };
+    auto backupsRoot = st.saveBackupsDir();
+    st.runFileJob(
+        [=](mm::Library&) {
+            if (auto blocker = platform::saveBlocker(); !blocker.empty()) throw std::runtime_error(blocker);
+            std::string why;
+            auto data = platform::SaveData::open(game, user.id, why);
+            if (!data) throw std::runtime_error(why);
+            mm::SaveBackup backup{mm::newBackupDir(backupsRoot, game, user.id, std::time(nullptr)), game, user.id, user.name, reason,
+                                  static_cast<int64_t>(std::time(nullptr))};
+            try {
+                mm::backupSave(data->root(), backup.dir / "save", [&](size_t done, size_t total) {
+                    update("Backing up your saves… " + std::to_string(done) + " / " + std::to_string(total), done, total);
+                });
+                mm::writeBackupInfo(backup);
+            } catch (const std::exception& e) {
+                mm::removeTree(backup.dir);
+                throw std::runtime_error(std::string("Couldn't back up your saves, so nothing was changed: ") + e.what());
+            }
+            auto commit = [&] { data->commit(); };
+            try {
+                mm::writeSaveSlot(save, data->root(), slot, photos, commit, [&](size_t done, size_t total) {
+                    update("Installing the save… " + std::to_string(done) + " / " + std::to_string(total), done, total);
+                });
+            } catch (const std::exception& e) {
+                std::string first = e.what();
+                try {
+                    update("Something went wrong. Putting your saves back…", 0, 0);
+                    mm::restoreSave(backup.dir / "save", data->root(), commit);
+                } catch (const std::exception& e2) {
+                    throw std::runtime_error("Installing the save failed (" + first + "), and so did putting your saves back (" +
+                                             e2.what() + "). Restore the backup from Settings → Save backups.");
+                }
+                throw std::runtime_error("Installing the save failed, so your saves were put back as they were: " + first);
+            }
+            mm::removeTree(prep->extractDir);
+            AppState::get().discardPending(file.id);
+        },
+        [this, alive, d, user, label, game, prep](const std::string& error) {
+            if (!*alive) {
+                brls::Application::notify(error.empty() ? "Save installed" : "Installing the save failed");
+                return;
+            }
+            setBusy(false);
+            if (!error.empty()) {
+                mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+                showMessage("Save not installed", error, true);
+                return;
+            }
+            showMessage("Save installed",
+                        "The save is in " + label + " for " + user.name + ". Start " + std::string(mm::gameInfo(game).displayName) +
+                            " with that profile and pick it from Load.\n\nYour previous saves were backed up. To put them back, "
+                            "go to Settings → Save backups.",
+                        false);
+        });
 }
 
 }  // namespace app

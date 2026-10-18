@@ -116,6 +116,8 @@ public:
     std::vector<bool> needsPcTool(const std::vector<mm::gb::ModSummary>& mods);
     // Whether Patchwork has BOTW's original size table (needed for BCML packages), for Settings.
     std::string sizeTableStatus() const;
+    // How far the check at startup is (0..1), or -1 once it's done.
+    float sizeTableProgress() const;
     // Fill in which BCML packages among a mod's files install as-is. Network thread only.
     void checkBcmlFiles(std::vector<mm::gb::ModFile>& files);
     // Turn a pasted link into something installable: a GameBanana or Waikuteru mod page, or
@@ -132,6 +134,7 @@ public:
     mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
     mm::fs::path workDir() const { return dataDir_ / "work"; }
     mm::fs::path inboxDir() const { return dataDir_ / "inbox"; }  // archives copied here by the user
+    mm::fs::path saveBackupsDir() const { return dataDir_ / "save-backups"; }
     // Each install unpacks into its own folder so two attempts can never mix files.
     mm::fs::path workDirFor(int64_t fileId) const { return workDir() / std::to_string(fileId); }
     mm::fs::path archivePathFor(const mm::gb::ModFile& f) const;
@@ -171,7 +174,10 @@ private:
     std::mutex pcMutex_;
     mutable std::mutex statusMutex_;
     std::string sizeTableStatus_ = "Checking…";
-    std::string captureOriginalSizeTable(const mm::fs::path& path);  // file thread
+    float sizeTableProgress_ = 0;
+    void setSizeTableProgress(float p);
+    // File thread. `progress` gets 0..1 while the game's file is read.
+    std::string captureOriginalSizeTable(const mm::fs::path& path, const std::function<void(float)>& progress);
     bool pcLoaded_ = false;
     std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
     std::map<int64_t, bool> bnpInstallable_;               // file id -> needs no merging
@@ -188,6 +194,10 @@ private:
 std::string formatSize(uint64_t bytes);
 std::string formatFileSize(int64_t bytes);  // "size unknown" for 0 / -1
 std::string formatCount(int64_t n);
+// "May 24, 2023 6:50 PM". `inConsoleZone`: a real moment (now, a backup), shown in the
+// console's time zone. Otherwise a time read from an archive: zip times are wall-clock
+// times that libarchive converted with the C library's zone, so convert back the same way.
+std::string formatDateTime(int64_t unixSeconds, bool inConsoleZone = true);
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
 
 }  // namespace app
