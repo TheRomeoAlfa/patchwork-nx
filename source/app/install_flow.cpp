@@ -171,22 +171,42 @@ namespace {
 const std::string kSetupMarker = "\x01" "bcml-setup:";
 }  // namespace
 
-void InstallFlow::showBcmlSetup(bool fromInbox) {
+// What a game file is, in words ("the game's text").
+static std::string describeGameFile(const std::string& path) {
+    if (path.find("Bootup_") != std::string::npos) return "the game's text";
+    if (path.find("Bootup.pack") != std::string::npos) return "the game's data (Bootup.pack)";
+    if (path.find("AocMainField") != std::string::npos || path.find("01007EF00011F001") != std::string::npos) return "the DLC's maps";
+    if (path.find("Map/") != std::string::npos || path.find("TitleBG") != std::string::npos) return "the game's maps";
+    if (path.find("ActorInfo") != std::string::npos) return "the game's actor list";
+    if (path.find("size table") != std::string::npos) return "the game's size table";
+    auto slash = path.find_last_of('/');
+    return "the game's " + (slash == std::string::npos ? path : path.substr(slash + 1));
+}
+
+void InstallFlow::showBcmlSetup(bool fromInbox, const std::string& missing) {
     using A = AppState::GameAccess;
-    auto access = AppState::get().botwAccess();
+    auto& st = AppState::get();
+    auto access = st.botwAccess();
+    bool setUpBefore = st.keptGameFiles() > 0;
+    std::string title = "One-time setup for BCML packages";
     std::string body;
-    if (access == A::ModsOn)
+    if (access == A::ModsOn) {
         body = "Patchwork was opened from Breath of the Wild, but L wasn't held, so mods were on and it couldn't read the "
                "game's own files. Try again holding both buttons:\n\n";
-    else
+    } else if (setUpBefore) {
+        title = "More game files needed";
+        body = "This package needs " + describeGameFile(missing) +
+               ", which Patchwork hasn't read from Breath of the Wild yet. To read it:\n\n";
+    } else {
         body = "This mod is a BCML package. Patchwork merges it with Breath of the Wild's own files, which it reads from "
                "the game itself. To let it:\n\n";
+    }
     body += AppState::bcmlSetupSteps(!fromInbox);
     if (fromInbox) body += "\n4. Install it again from Add mods.";
     body += "\n\nPatchwork keeps copies of the game files on the SD card, so this is only needed again after a game "
             "update, or if another package needs other files.";
     if (!fromInbox) body += " The download is kept; it won't download again.";
-    showMessage("One-time setup for BCML packages", body, false);
+    showMessage(title, body, false);
 }
 
 void InstallFlow::showMessage(const std::string& title, const std::string& body, bool isError) {
@@ -197,7 +217,7 @@ void InstallFlow::showMessage(const std::string& title, const std::string& body,
     box->setGrow(1);
     box->setFocusable(true);
     box->setHideHighlight(true);
-    bool setup = title.rfind("One-time setup", 0) == 0;
+    bool setup = title.rfind("One-time setup", 0) == 0 || title == "More game files needed";
     box->addView(ui::label(std::string(isError ? ui::icon::warning : setup ? ui::icon::info : ui::icon::check) + "  " + title, 24,
                            isError ? ui::warn() : setup ? ui::accent() : ui::ok()));
     auto* b = ui::label(body, 17, ui::text(), false);
@@ -700,7 +720,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                                     "\n\nPlease report this error. The download was kept.", true);
                         return;
                     }
-                    showBcmlSetup(isLocalFile(file));
+                    showBcmlSetup(isLocalFile(file), error.substr(kSetupMarker.size()));
                     return;
                 }
                 if (!error.empty()) {

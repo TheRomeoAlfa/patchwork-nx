@@ -231,6 +231,21 @@ void AppState::init() {
                 brls::Logger::info("BCML merge still waiting: {}", e.what());
             }
         }
+        // Opened with the game's files readable: keep the ones most BCML packages merge with,
+        // so later packages rarely need the L and R step again. Already-kept files are skipped.
+        if (platform::runningAsGame(mm::Game::Botw) && finish.status.find("mod's copy") == std::string::npos) {
+            const std::string c = mm::bcml::kContent, d = mm::bcml::kDlc;
+            for (const auto& path : {c + "Pack/Bootup.pack", c + "Pack/Bootup_" + platform::gameTextLanguage() + ".pack",
+                                     c + "Pack/TitleBG.pack", c + "Actor/ActorInfo.product.sbyml",
+                                     c + "Map/MainField/Static.smubin", d + "Pack/AocMainField.pack",
+                                     d + "Map/MainField/Static.smubin"}) {
+                try {
+                    lib.gameFile(path);
+                } catch (const std::exception& e) {
+                    brls::Logger::warning("couldn't keep {}: {}", path, e.what());
+                }
+            }
+        }
     }, [](const std::string& err) {
         if (!err.empty()) brls::Application::notify("Couldn't read your mod list: " + err);
     });

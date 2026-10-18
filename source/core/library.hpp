@@ -124,6 +124,8 @@ public:
     };
     using GameFileReader = std::function<GameFile(const std::string& path)>;
     void setGameFileReader(GameFileReader reader) { gameFiles_ = std::move(reader); }
+    // One game file through the reader (which keeps a copy the first time it can read it).
+    GameFile gameFile(const std::string& path) const { return gameFiles_ ? gameFiles_(path) : GameFile{}; }
     // The game's text language, for merging BCML packages' text changes.
     void setTextLanguage(std::string language) { textLanguage_ = std::move(language); }
     // Told 0..1 and what's happening while BCML packages are merged (it can take a while);
