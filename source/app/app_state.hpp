@@ -52,6 +52,7 @@ struct LibrarySnapshot {
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
     bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    bool loaded = false;       // false until the mod list has been read at startup
 };
 
 // A mod file that finished downloading but isn't installed yet (failed or abandoned
