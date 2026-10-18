@@ -127,7 +127,11 @@ int main(int argc, char** argv) {
             try {
                 auto names = remote7zListing(http, argv[i]);
                 auto c = checkBnp(names);
-                std::cout << argv[i] << " files=" << names.size() << " " << (c.installable() ? "INSTALLABLE" : "merge") << "\n";
+                std::cout << argv[i] << " files=" << names.size() << " " << (c.installable() ? "INSTALLABLE" : "merge")
+                          << (c.forSwitch ? "" : " wiiu");
+                for (const auto& l : c.mergeLogs) std::cout << " " << l;
+                std::cout << "\n" << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(400));
             } catch (const std::exception& e) {
                 std::cout << argv[i] << " ERROR " << e.what() << "\n";
             }

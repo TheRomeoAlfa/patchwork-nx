@@ -27,6 +27,7 @@ public:
 private:
     void rebuild();
     void showDetails(const std::string& id);
+    void showModPage(const mm::ModRecord& m, brls::Box* content);
     void runJob(const std::string& status, std::function<void(mm::Library&, const mm::ProgressFn&)> job);
     void toggle(const std::string& id);
     void move(const std::string& id, int delta);
@@ -42,12 +43,12 @@ private:
     void onChildFocusGained(brls::View* directChild, brls::View* focusedView) override;
 
     std::string focusedId_;
+    brls::View* focusedRow_ = nullptr;  // the row showing in the pane, for B from the pane
+    std::shared_ptr<bool> detailsToken_ = std::make_shared<bool>(false);  // the details on screen
     bool busy_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     brls::Box* list_ = nullptr;
-    brls::ScrollingFrame* scroll_ = nullptr;
     brls::Box* pane_ = nullptr;
-    brls::Label* count_ = nullptr;
     brls::VoidEvent::Subscription libSub_;
     std::unique_ptr<InstallFlow> flow_;  // finishes downloads that weren't installed
     ui::FocusSink* sink_ = nullptr;

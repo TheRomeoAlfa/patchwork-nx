@@ -101,13 +101,14 @@ void runNext() {
                         if (auto* r = find(c)) return r;
                 return nullptr;
             };
-            if (!stack.empty())
+            if (!stack.empty()) {
                 if (auto* v = find(stack.back()->getContentView())) {
                     brls::Application::giveFocus(v);
                     brls::Logger::info("focus {}: {}", arg, v->describe());
                 } else {
                     brls::Logger::info("focus {}: not found", arg);
                 }
+            }
             brls::delay(300, runNext);
             return;
         }

@@ -26,7 +26,7 @@ endif()
 
 project(patchwork VERSION 0.1.0 LANGUAGES C CXX)
 set(APP_TITLE "Patchwork")
-set(APP_AUTHOR "patchwork-nx")
+set(APP_AUTHOR "TheRomeoAlfa")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,7 +56,7 @@ if(NOT APP_BUILD)
         # Console smoke test (aarch64-none-elf-cmake without PLATFORM_SWITCH).
         add_executable(mm_smoke tools/switch_smoke.cpp)
         target_link_libraries(mm_smoke PRIVATE mmcore)
-        nx_generate_nacp(OUTPUT mm_smoke.nacp NAME "Mod Manager Smoke Test" AUTHOR ${APP_AUTHOR} VERSION ${PROJECT_VERSION})
+        nx_generate_nacp(OUTPUT mm_smoke.nacp NAME "Patchwork Smoke Test" AUTHOR ${APP_AUTHOR} VERSION ${PROJECT_VERSION})
         nx_create_nro(mm_smoke NACP mm_smoke.nacp)
     else()
         file(GLOB TEST_SOURCES tests/*.cpp)

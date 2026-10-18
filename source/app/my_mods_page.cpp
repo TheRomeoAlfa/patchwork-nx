@@ -3,11 +3,20 @@
 #include <ctime>
 
 #include "app_state.hpp"
+#include "platform.hpp"
 #include "compat.hpp"
 #include "install_flow.hpp"
 #include "ui.hpp"
 
 namespace app {
+
+namespace {
+// Shown while a change waits for the job ahead of it on the SD card.
+std::string waitingText() {
+    auto task = AppState::get().backgroundTask();
+    return task.empty() ? "Waiting for the current install to finish…" : "Waiting while Patchwork " + task + "…";
+}
+}  // namespace
 
 MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     setGrow(1);
@@ -19,18 +28,18 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     left->setLineRight(1);
     left->setLineColor(ui::line());
     auto* header = ui::hbox();
-    header->setMargins(0, 6, 10, 6);
+    header->setMargins(0, 28, 10, 6);  // right: lines up with the rows
     header->addView(ui::label("Load order", 22, ui::text()));
     header->addView(ui::grow());
-    count_ = ui::label("top of the list wins", 15, ui::muted());
-    header->addView(count_);
+    header->addView(ui::label("top of the list wins", 15, ui::muted()));
     left->addView(header);
 
     list_ = ui::vbox();
-    scroll_ = new brls::ScrollingFrame();
-    scroll_->setGrow(1);
-    scroll_->setContentView(list_);
-    left->addView(scroll_);
+    list_->setPaddingRight(28);  // keeps rows clear of the scroll bar
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setContentView(list_);
+    left->addView(scroll);
     addView(left);
 
     pane_ = ui::vbox();
@@ -44,7 +53,10 @@ MyModsPage::MyModsPage() : brls::Box(brls::Axis::ROW) {
     flow_ = std::make_unique<InstallFlow>(pane_, sink_);
     flow_->onExit = [this] { rebuild(); };
     libSub_ = AppState::get().libraryChanged()->subscribe([this] {
-        if (!busy_ && !flow_->active()) rebuildWhenSafe();
+        if (!busy_ && !flow_->active())
+            rebuildWhenSafe();
+        else
+            dirty_ = true;  // catch up when the job or the install screen is done
     });
     rebuild();
 }
@@ -63,7 +75,14 @@ void MyModsPage::rebuild() {
     bool hadFocus = ui::focusInside(this) || ui::focusParked();
     ui::parkFocusIfInside(this, sink_);
     list_->clearViews();
+    focusedRow_ = nullptr;
     clearPane();
+    if (!st.snapshot().loaded) {
+        auto* loading = ui::label("Loading your mods…", 16, ui::muted());
+        loading->setMargins(10, 0, 0, 6);
+        list_->addView(loading);
+        return;  // rebuilt when the list arrives
+    }
 
     // Mod files on the card that Patchwork didn't install (a randomizer, manual copies…).
     brls::View* unmanagedRow = nullptr;
@@ -189,8 +208,9 @@ void MyModsPage::rebuild() {
         pill->addView(ui::label(m->enabled ? "On" : "Off", 15, m->enabled ? nvgRGB(0x10, 0x28, 0x2d) : ui::muted()));
         row->addView(pill);
 
-        row->getFocusEvent()->subscribe([this, id](brls::View*) {
+        row->getFocusEvent()->subscribe([this, id, row](brls::View*) {
             focusedId_ = id;
+            focusedRow_ = row;
             if (paneFree()) showDetails(id);
         });
         row->registerClickAction([this, id](brls::View*) {
@@ -246,6 +266,7 @@ void MyModsPage::rebuildWhenSafe() {
 }
 
 void MyModsPage::clearPane() {
+    *detailsToken_ = false;  // late GameBanana details for the old pane are dropped
     ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
 }
@@ -257,6 +278,14 @@ bool MyModsPage::paneFree() {
     flow_->onExit = nullptr;
     flow_ = std::make_unique<InstallFlow>(pane_, sink_);
     flow_->onExit = [this] { rebuild(); };
+    if (dirty_ && !busy_) {
+        // Something was installed meanwhile: show it in the list (next frame, focus is moving).
+        dirty_ = false;
+        auto alive = alive_;
+        brls::sync([this, alive] {
+            if (*alive) rebuild();
+        });
+    }
     return true;
 }
 
@@ -278,6 +307,16 @@ void MyModsPage::showPending(const PendingInstall& p) {
     auto* meta = ui::label(p.file.filename + " · " + formatFileSize(p.file.size), 16, ui::muted());
     meta->setMargins(4, 0, 16, 0);
     pane_->addView(meta);
+    auto& st = AppState::get();
+    bool bcmlSetup = mm::endsWithI(p.file.filename, ".bnp") && st.botwAccess() != AppState::GameAccess::Ready;
+    if (bcmlSetup) {
+        // A BCML package waiting for the one-time setup, most likely.
+        pane_->addView(ui::label("A BCML package, waiting for Patchwork to read Breath of the Wild's files:\n" +
+                                     AppState::bcmlSetupSteps(false) +
+                                     "\n4. Come back here and press A to finish installing.\n\nX deletes the download instead.",
+                                 16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+        return;
+    }
     pane_->addView(ui::label(
         "This file was downloaded but isn't installed yet. The install may have failed, been cancelled, "
         "or the app closed part-way.\n\nPress A to finish installing it (no need to download again), "
@@ -321,14 +360,29 @@ void MyModsPage::showDetails(const std::string& id) {
     clearPane();
     if (!m) return;
 
-    pane_->addView(ui::label(m->name, 26, ui::text()));
-    std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") + std::to_string(m->files.size()) + " files · " +
-                       (m->enabled ? "on" : "off");
+    // Everything scrolls together: move right into the pane to read the mod's description.
+    auto* content = ui::vbox();
+    content->setPadding(0, 22, 20, 0);  // right: keep text clear of the scroll bar
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1);
+    scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
+    scroll->setContentView(content);
+    pane_->addView(scroll);
+    // On the frame: it takes focus itself while the description is still loading.
+    scroll->registerAction("Back to list", brls::BUTTON_B, [this](brls::View*) {
+        if (focusedRow_) brls::Application::giveFocus(focusedRow_);
+        return true;
+    });
+
+    content->addView(ui::label(m->name, 26, ui::text()));
+    bool bcml = !m->bcmlLogs.empty();
+    std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") +
+                       (bcml ? std::string("BCML package") : std::to_string(m->files.size()) + " files") + " · " + (m->enabled ? "on" : "off");
     auto* metaL = ui::label(meta, 16, ui::muted());
     metaL->setMargins(4, 0, 16, 0);
-    pane_->addView(metaL);
+    content->addView(metaL);
 
-    auto addNote = [this](const std::string& text, NVGcolor color, NVGcolor bg) {
+    auto addNote = [content](const std::string& text, NVGcolor color, NVGcolor bg) {
         auto* box = ui::hbox();
         box->setBackgroundColor(bg);
         box->setCornerRadius(4);
@@ -338,7 +392,7 @@ void MyModsPage::showDetails(const std::string& id) {
         l->setGrow(1);
         l->setShrink(1);
         box->addView(l);
-        pane_->addView(box);
+        content->addView(box);
     };
     auto nameOf = [&st](const std::string& modId) {
         auto* other = st.findMod(modId);
@@ -368,6 +422,17 @@ void MyModsPage::showDetails(const std::string& id) {
         addNote(std::string(ui::icon::warning) + "  Also patches the game code like " + names + ". Using both may crash the game.", ui::warn(), ui::warnBg());
     }
 
+    if (bcml) {
+        if (m->enabled && st.snapshot().bcmlWaiting)
+            addNote(std::string(ui::icon::warning) + "  Not merged yet: Patchwork needs to read some of Breath of the Wild's own files first.\n" +
+                        AppState::bcmlSetupSteps(false),
+                    ui::warn(), ui::warnBg());
+        else
+            addNote(std::string(ui::icon::info) + "  Merged with the game's own files. Patchwork merges again whenever a BCML package is "
+                                                  "turned on or off or moved in the list.",
+                    ui::accent(), ui::accentDim());
+    }
+
     const auto& installed = st.gameVersion(m->game);
     if (mm::checkCompat(installed, m->gameVersionsNamed) == mm::Compat::Mismatch) {
         std::string named;
@@ -377,7 +442,10 @@ void MyModsPage::showDetails(const std::string& id) {
 
     char date[32] = "";
     std::time_t t = static_cast<std::time_t>(m->installedAt);
-    if (t) std::strftime(date, sizeof date, "%b %d, %Y", std::localtime(&t));
+    if (t) {
+        auto tm = platform::localTime(t);  // the console's time zone (newlib's localtime is UTC there)
+        std::strftime(date, sizeof date, "%b %d, %Y", &tm);
+    }
     std::string info = "Installed " + std::string(date);
     if (!m->sourceFile.empty()) info += "\nFile: " + m->sourceFile;
     if (!m->version.empty()) info += "\nMod version: " + m->version;
@@ -388,7 +456,78 @@ void MyModsPage::showDetails(const std::string& id) {
     }
     auto* infoL = ui::label(info, 16, ui::muted(), false);
     infoL->setMarginTop(8);
-    pane_->addView(infoL);
+    content->addView(infoL);
+    showModPage(*m, content);
+}
+
+// The mod's picture and description from its page (GameBanana or Waikuteru), below the details.
+void MyModsPage::showModPage(const mm::ModRecord& m, brls::Box* content) {
+    bool gb = m.sourceKey.rfind("gb:", 0) == 0 && m.gamebananaModId;
+    if (!gb && m.sourceKey.rfind("wk:", 0) != 0) return;  // imported or from a link: no page
+    mm::gb::ModSummary summary;
+    summary.id = m.gamebananaModId;
+    summary.sourceKey = m.sourceKey;
+    summary.name = m.name;
+    summary.author = m.author;
+    summary.profileUrl = m.profileUrl;
+
+    auto* heading = ui::label(std::string("About this mod · ") + (gb ? "GameBanana" : "Waikuteru"), 16, ui::muted());
+    heading->setMargins(22, 0, 8, 0);
+    content->addView(heading);
+    auto* body = ui::vbox();
+    body->addView(new brls::ProgressSpinner());
+    content->addView(body);
+
+    auto token = std::make_shared<bool>(true);
+    detailsToken_ = token;
+    auto alive = alive_;
+    auto wanted = [alive, token] { return *alive && *token; };
+    auto fill = [body, wanted](const mm::gb::ModDetails& d) {
+        if (!wanted()) return;
+        body->clearViews();  // only the spinner: focus can't be in it
+        if (!d.screenshotUrls.empty()) {
+            auto* hero = new brls::Image();
+            hero->setHeight(240);
+            hero->setCornerRadius(6);
+            hero->setBackgroundColor(ui::thumbBg());
+            hero->setScalingType(brls::ImageScalingType::FILL);
+            hero->setClipsToBounds(true);
+            hero->setMarginBottom(10);
+            body->addView(hero);
+            AppState::get().loadImage(hero, d.screenshotUrls[0], wanted);
+        }
+        auto paras = paragraphs(stripHtml(d.descriptionHtml, 12000));
+        if (paras.size() > 1) body->addView(ui::label("Press → to read the full description", 16, ui::muted()));
+        for (size_t i = 0; i < paras.size(); ++i) {
+            // One focusable chunk per paragraph, so it can be scrolled through.
+            auto* chunk = ui::vbox();
+            chunk->setFocusable(true);
+            chunk->setHideHighlightBackground(true);
+            chunk->setHighlightPadding(4);
+            chunk->setMarginTop(i == 0 ? 10 : 8);
+            chunk->addView(ui::label(paras[i], 16, nvgRGB(0xc8, 0xc8, 0xc8), false));
+            body->addView(chunk);
+        }
+    };
+    if (auto d = AppState::get().cachedDetails(m.sourceKey)) {
+        fill(*d);
+        return;
+    }
+    AppState::get().runNetwork([summary, fill, wanted, body] {
+        try {
+            auto d = AppState::get().fetchDetails(summary);
+            brls::sync([d, fill] {
+                AppState::get().cacheDetails(d);
+                fill(d);
+            });
+        } catch (const std::exception& e) {
+            brls::sync([wanted, body] {
+                if (!wanted()) return;
+                body->clearViews();
+                body->addView(ui::label("Couldn't load the mod's page. Check your internet connection.", 16, ui::muted(), false));
+            });
+        }
+    });
 }
 
 void MyModsPage::runJob(const std::string& status, std::function<void(mm::Library&, const mm::ProgressFn&)> job) {
@@ -397,7 +536,7 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     AppState::get().setInstallBusy(true);  // also blocks switching game
     clearPane();
     auto busy = ui::busyBox(status,
-                            AppState::get().fileJobRunning() ? "Waiting for the current install to finish…" : "Copying files on the SD card. Please wait.",
+                            AppState::get().fileJobRunning() ? waitingText() : "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
                             "Please wait until the files are copied");
     auto* box = busy.box;
     pane_->addView(box);
@@ -409,21 +548,56 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     brls::Application::giveFocus(box);
 
     auto shown = std::make_shared<int>(-1);
-    mm::ProgressFn progress = [this, alive, busy, shown](size_t done, size_t total, const std::string&) {
+    mm::ProgressFn progress = [this, alive, busy, shown, status](size_t done, size_t total, const std::string&) {
         if (!total) return;
         int step = static_cast<int>(done * 50 / total);  // ~2% steps
         if (step == *shown && done != total) return;
         *shown = step;
-        brls::sync([this, alive, busy, done, total]() mutable {
-            if (*alive && busy_) busy.update(done, total);
+        brls::sync([this, alive, busy, done, total, status]() mutable {
+            if (!*alive || !busy_) return;
+            busy.status->setText(status);  // after a merge's progress
+            busy.update(done, total);
         });
     };
-    AppState::get().runFileJob([job = std::move(job), progress](mm::Library& lib) { job(lib, progress); },
+    auto lastPct = std::make_shared<int>(-1);
+    auto lastWhat = std::make_shared<std::string>();
+    auto mergeProgress = [this, alive, busy, lastPct, lastWhat, status](float f, const std::string& what) {
+        int pct = static_cast<int>(f * 100);
+        if (pct == *lastPct && what == *lastWhat) return;
+        *lastPct = pct;
+        *lastWhat = what;
+        brls::sync([this, alive, busy, pct, f, what, status] {
+            if (!*alive || !busy_) return;
+            // The BCML packages that are on are merged again (on, off or moved alike).
+            busy.status->setText(status);
+            busy.bar->setVisibility(brls::Visibility::VISIBLE);
+            busy.bar->setProgress(f);
+            busy.count->setText("Updating merged files… " + std::to_string(pct) + "% · " + what);
+        });
+    };
+    AppState::get().runFileJob([job = std::move(job), progress, mergeProgress](mm::Library& lib) {
+        lib.setMergeProgress(mergeProgress);
+        struct StopProgress {
+            mm::Library& lib;
+            ~StopProgress() { lib.setMergeProgress({}); }
+        } stopProgress{lib};
+        job(lib, progress);
+    },
                                [this, alive](const std::string& error) {
         AppState::get().setInstallBusy(false);
         if (!*alive) return;
         busy_ = false;
-        if (!error.empty()) brls::Application::notify("Something went wrong: " + error);
+        if (!error.empty() && error.find("hasn't read yet") != std::string::npos) {
+            // A BCML merge needs game files: explain the setup rather than show the raw error.
+            // The change itself is kept; only the merge waits (BCML packages are off the SD meanwhile).
+            auto* dialog = new brls::Dialog("Done, but your BCML packages have to be merged again with Breath of the Wild's own "
+                                            "files, which Patchwork hasn't read yet. Until then they're off the SD card. To read them:\n\n" +
+                                            AppState::bcmlSetupSteps(false) + "\n\nThe packages are merged as soon as Patchwork opens that way.");
+            dialog->addButton("OK", [] {});
+            dialog->open();
+        } else if (!error.empty()) {
+            brls::Application::notify("Something went wrong: " + error);
+        }
         rebuildWhenSafe();
     });
 }

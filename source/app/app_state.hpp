@@ -28,7 +28,6 @@ public:
     explicit WorkQueue(int threads);
     ~WorkQueue();
     void post(std::function<void()> job);
-    bool idle() const { return active_ == 0; }
 
 private:
     std::vector<std::thread> threads_;
@@ -51,6 +50,8 @@ struct LibrarySnapshot {
         uint64_t bytes = 0;
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
+    bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    bool loaded = false;       // false until the mod list has been read at startup
 };
 
 // A mod file that finished downloading but isn't installed yet (failed or abandoned
@@ -65,7 +66,7 @@ struct PendingInstall {
 struct Settings {
     // Hide mods GameBanana treats as NSFW. Not saved: every launch starts hidden, and the
     // setting itself only appears after holding L + R + minus on the Settings page.
-    bool hideNsfw = true;
+    std::atomic<bool> hideNsfw{true};  // also read on the network thread
     bool nsfwSettingRevealed = false;
     // Atmosphère mod-loader crash reports already told about; null until the first check,
     // so reports from before Patchwork was installed aren't announced.
@@ -93,6 +94,8 @@ public:
     // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
     void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
     bool fileJobRunning() const { return fileJobs_ > 0; }
+    // What a background job (not started by the user) is doing, for "waiting" messages; "" if none.
+    std::string backgroundTask() const;
     // An install flow is downloading/unpacking/copying: page and game switches wait for it.
     void setInstallBusy(bool busy) { installBusy_ += busy ? 1 : -1; }
     bool installBusy() const { return installBusy_ > 0; }
@@ -116,6 +119,22 @@ public:
     std::vector<bool> needsPcTool(const std::vector<mm::gb::ModSummary>& mods);
     // Whether Patchwork has BOTW's original size table (needed for BCML packages), for Settings.
     std::string sizeTableStatus() const;
+    // Can Patchwork read BOTW's own files right now (for merging BCML packages)?
+    enum class GameAccess {
+        NotFromGame,  // opened from the Album / another title
+        ModsOn,       // opened by holding R on BOTW, but without L: LayeredFS hands over mods' files
+        Ready,        // opened by holding L and R on BOTW
+    };
+    GameAccess botwAccess() const;
+    // How many of the game's files Patchwork has kept for merging.
+    size_t keptGameFiles() const;
+    // Downloaded BCML packages that aren't installed yet.
+    std::vector<std::string> pendingBcmlNames() const;
+    // BCML packages will ask for the setup: Patchwork can't read the game now and has none of
+    // its files yet.
+    bool bcmlSetupNeeded() const { return botwAccess() != GameAccess::Ready && keptGameFiles() == 0; }
+    // The steps to let Patchwork read the game's files, for messages.
+    static std::string bcmlSetupSteps(bool thenFinishInMyMods);
     // How far the check at startup is (0..1), or -1 once it's done.
     float sizeTableProgress() const;
     // Fill in which BCML packages among a mod's files install as-is. Network thread only.
@@ -174,13 +193,15 @@ private:
     std::mutex pcMutex_;
     mutable std::mutex statusMutex_;
     std::string sizeTableStatus_ = "Checking…";
+    std::string backgroundTask_;  // guarded by statusMutex_
+    bool modsWereOn_ = false;     // file thread: the startup check got a mod's copy of the size table
     float sizeTableProgress_ = 0;
     void setSizeTableProgress(float p);
     // File thread. `progress` gets 0..1 while the game's file is read.
     std::string captureOriginalSizeTable(const mm::fs::path& path, const std::function<void(float)>& progress);
     bool pcLoaded_ = false;
     std::map<int64_t, std::pair<int64_t, bool>> pcOnly_;  // mod id -> (date modified, PC-only)
-    std::map<int64_t, bool> bnpInstallable_;               // file id -> needs no merging
+    std::map<int64_t, std::vector<std::string>> bnpLogs_;  // file id -> BnpCheck::summary()
     void loadPcCacheLocked();
     void savePcCacheLocked();
     bool bnpInstallable(const mm::gb::ModFile& f);  // cached; false if it can't be checked
@@ -199,5 +220,7 @@ std::string formatCount(int64_t n);
 // times that libarchive converted with the C library's zone, so convert back the same way.
 std::string formatDateTime(int64_t unixSeconds, bool inConsoleZone = true);
 std::string stripHtml(const std::string& html, size_t maxLen = 600);
+// Break a description into chunks short enough to scroll through one at a time.
+std::vector<std::string> paragraphs(const std::string& text, size_t maxLen = 360);
 
 }  // namespace app

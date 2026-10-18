@@ -27,15 +27,19 @@ std::string gameVersion(mm::Game game);
 
 uint64_t freeSpaceBytes();
 
-// Memory this process uses now, and what it may use at most (0 when unknown). On desktop:
-// the peak resident size, and 0.
-uint64_t memoryUsedBytes();
-uint64_t memoryTotalBytes();
 
 std::string userAgent();
 
 // Certificate bundle shipped with the app ("" = system store).
 std::string caBundle();
+
+// Read one of BOTW's DLC files (path inside the DLC's romfs). `notInGame` is set when the DLC
+// isn't installed or has no such file. On desktop: from $MM_GAME_ROMFS_BOTW_DLC.
+bool readDlcFile(const std::string& romfsPath, std::string& out, std::string& why, bool* notInGame = nullptr);
+// Whether BOTW's DLC is installed: 1 yes, 0 no, -1 couldn't tell. On desktop: $MM_GAME_ROMFS_BOTW_DLC set.
+int botwDlcInstalled();
+// Why the DLC couldn't be opened the last time it was tried ("" if it could).
+std::string lastDlcError();
 
 // A data file shipped with the app (romfs on Switch, ./resources on desktop).
 mm::fs::path resourcePath(const std::string& name);
@@ -45,14 +49,23 @@ mm::fs::path resourcePath(const std::string& name);
 // while starting it). The files come with mods applied unless L was held too, which turns
 // Atmosphère's LayeredFS off for that launch; update included either way. On desktop: from $MM_GAME_ROMFS_BOTW / $MM_GAME_ROMFS_TOTK. Returns false with
 // a reason when it can't.
+// `notInGame` is set when the game's files could be opened but this one isn't among them.
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
-                  const std::function<void(uint64_t done, uint64_t total)>& progress = {});
+                  const std::function<void(uint64_t done, uint64_t total)>& progress = {}, bool* notInGame = nullptr);
+
+// The language BOTW shows its text in, as its message packs name it ("USen", "EUfr"…), from
+// the console's language. On desktop: $MM_GAME_LANG, default "USen".
+std::string gameTextLanguage();
+
+// Whether Patchwork runs in place of the game (opened by holding R while starting it). On
+// desktop: when $MM_GAME_ROMFS_BOTW / _TOTK is set.
+bool runningAsGame(mm::Game game);
 
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.
 std::tm localTime(int64_t unixSeconds);
 
-// User profiles on the console. On desktop: $MM_USERS ("Ryan,Kid"), default "Player".
+// User profiles on the console. On desktop: $MM_USERS ("Alex,Sam"), default "Player".
 struct UserProfile {
     std::string id;    // stable, for backups
     std::string name;
@@ -79,6 +92,7 @@ public:
 private:
     SaveData() = default;
     mm::fs::path root_;
+    [[maybe_unused]] bool mounted_ = false;  // only unmount what this object mounted (Switch)
 };
 
 }  // namespace platform

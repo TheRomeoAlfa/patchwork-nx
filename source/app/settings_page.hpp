@@ -19,12 +19,7 @@ private:
     void revealNsfwSetting();
     void fillBackups();
     void restoreBackup(const mm::SaveBackup& backup);
-    void runBcmlTestNow();
-    void showBcmlTitleCell();
-
-    brls::Label* bcmlReport_ = nullptr;
-    brls::DetailCell* bcmlTitle_ = nullptr;
-    brls::View* bcmlRun_ = nullptr;
+    void recopyMods(brls::View* cell);
 
     brls::ScrollingFrame* scroll_ = nullptr;
     brls::Box* backups_ = nullptr;        // rows of save backups, rebuilt after changes

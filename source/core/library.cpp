@@ -5,6 +5,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "bcml.hpp"
 #include "nlohmann/json.hpp"
 #include "sizetable.hpp"
 
@@ -33,6 +34,7 @@ json toJson(const ModRecord& m) {
         {"priority", m.priority},
         {"files", m.files},
         {"resourceSizes", m.resourceSizes},
+        {"bcmlLogs", m.bcmlLogs},
     };
 }
 
@@ -56,6 +58,7 @@ ModRecord fromJson(const json& j) {
     m.priority = j.value("priority", 0);
     m.files = j.value("files", std::vector<std::string>{});
     m.resourceSizes = j.value("resourceSizes", std::map<std::string, uint32_t>{});
+    m.bcmlLogs = j.value("bcmlLogs", std::vector<std::string>{});
     return m;
 }
 
@@ -75,6 +78,11 @@ void replaceFile(const fs::path& from, const fs::path& to);  // below
 
 const std::string kSizeTableKey = toLower(kBotwSizeTable);
 constexpr const char* kMergedPrefix = "*merged:";
+constexpr const char* kBcmlPrefix = "*bcml:";
+const std::string kContentsPrefix = "atmosphere/contents/";
+// Owner of a target recorded before its file is written (see apply()).
+constexpr const char* kWriting = "*writing";
+constexpr size_t kBatch = 50;  // files written between state saves
 
 }  // namespace
 
@@ -113,6 +121,9 @@ bool Library::load() {
     }
     for (const auto& m : j.value("mods", json::array())) mods_.push_back(fromJson(m));
     deployed_ = j.value("deployed", std::map<std::string, std::string>{});
+    bcmlKey_ = j.value("bcmlKey", "");
+    bcmlOutputs_ = j.value("bcmlOutputs", std::vector<std::string>{});
+    bcmlSizes_ = j.value("bcmlSizes", std::map<std::string, uint32_t>{});
     auto backups = j.value("backedUp", json::object());
     for (const auto& [k, v] : backups.items()) {
         // Old format was {target: true}.
@@ -129,6 +140,9 @@ void Library::save() const {
     for (const auto& m : mods_) j["mods"].push_back(toJson(m));
     j["deployed"] = deployed_;
     j["backedUp"] = backedUp_;
+    j["bcmlKey"] = bcmlKey_;
+    j["bcmlOutputs"] = bcmlOutputs_;
+    j["bcmlSizes"] = bcmlSizes_;
     writeFileAtomic(dataDir_ / "state.json", j.dump(1));
 }
 
@@ -157,9 +171,9 @@ ModRecord* Library::findMut(const std::string& id) {
 }
 
 const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& files, bool enable,
-                              const ProgressFn& progress) {
+                              const ProgressFn& progress, const std::vector<FileMapping>& internal) {
     if (record.id.empty()) throw std::invalid_argument("mod id is empty");
-    if (files.empty()) throw std::invalid_argument("mod has no files");
+    if (files.empty() && internal.empty()) throw std::invalid_argument("mod has no files");
 
     // 1. Copy into a staging folder. Until this succeeds neither the library nor the SD
     //    card changes, so a failed copy (SD full, bad archive) leaves no trace.
@@ -171,6 +185,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     std::string err;
     if (!removeTree(staging, &err) || !removeTree(old, &err)) throw std::runtime_error(err);
     record.files.clear();
+    bool replacedWasOn = false;  // replacing an enabled copy: it's turned off during the swap
     try {
         size_t done = 0;
         for (const auto& f : files) {
@@ -180,12 +195,17 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             record.files.push_back(f.target);
             ++done;
         }
+        for (const auto& f : internal) {
+            if (!isSafeRelativePath(f.target)) throw std::runtime_error("unsafe path: " + f.target);
+            copyFileCreatingDirs(f.source, staging / fs::path(f.target));
+        }
 
         // 2. Swap it in. Replacing an existing copy (update/reinstall): take that off the SD
         //    first, then move its library folder aside so it can be restored if the swap fails.
         std::optional<int> keepPriority;
         if (auto* existing = findMut(record.id)) {
             keepPriority = existing->priority;
+            replacedWasOn = existing->enabled;
             existing->enabled = false;
             apply(progress);
         }
@@ -210,6 +230,18 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
         }
     } catch (...) {
         removeTree(staging);
+        // The old copy is still the library's (the swap didn't happen): turn it back on.
+        if (auto* existing = findMut(record.id); existing && replacedWasOn && !existing->enabled) {
+            existing->enabled = true;
+            try {
+                apply();
+            } catch (...) {
+                try {
+                    save();
+                } catch (...) {
+                }
+            }
+        }
         throw;
     }
     if (!record.installedAt) record.installedAt = static_cast<int64_t>(std::time(nullptr));
@@ -223,6 +255,16 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     if (enable) {
         try {
             apply(progress);
+            const auto* added = find(id);
+            if (added && !added->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
+        } catch (const BcmlMergeError& e) {
+            findMut(id)->enabled = false;
+            try {
+                apply();
+            } catch (...) {
+            }
+            save();
+            throw;
         } catch (const std::exception& e) {
             findMut(id)->enabled = false;
             try {
@@ -242,8 +284,10 @@ void Library::setEnabled(const std::string& id, bool enabled, const ProgressFn& 
     if (!m) throw std::invalid_argument("unknown mod " + id);
     if (m->enabled == enabled) return;
     m->enabled = enabled;
+    bool bcml = !m->bcmlLogs.empty();
     save();
     apply(progress);
+    if (bcml && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
 void Library::remove(const std::string& id, const ProgressFn& progress) {
@@ -319,6 +363,7 @@ void Library::move(const std::string& id, int delta, const ProgressFn& progress)
     renumber(ordered);
     save();
     apply(progress);
+    if (!target->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
 std::map<std::string, std::string> Library::desiredDeployment() const {
@@ -330,6 +375,7 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     std::map<std::string, Owner> owners;  // key -> winner
     for (const auto& m : mods_) {
         if (!m.enabled) continue;
+        if (!m.bcmlLogs.empty() && !bcmlMerged(m)) continue;  // its partial packs mustn't reach the game
         for (const auto& t : m.files) {
             auto key = targetKey(t);
             auto it = owners.find(key);
@@ -338,6 +384,18 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     }
     std::map<std::string, std::string> out;
     for (auto& [key, o] : owners) out[o.target] = o.id;
+    // Files the BCML merge produced cover every mod's copy (partial packs, ActorInfo…).
+    if (!bcmlKey_.empty()) {
+        auto owner = kBcmlPrefix + std::to_string(stableId(bcmlKey_));
+        for (const auto& t : bcmlOutputs_) {
+            for (auto it = out.begin(); it != out.end(); ++it)
+                if (targetKey(it->first) == targetKey(t)) {
+                    out.erase(it);
+                    break;
+                }
+            out[t] = owner;
+        }
+    }
     auto merged = sizeTableOwner();
     if (!merged.empty()) {
         for (auto it = out.begin(); it != out.end(); ++it)
@@ -375,18 +433,21 @@ std::string Library::sizeTableOwner() const {
     }
     bool original = hasOriginalSizeTableOnCard();
     tables += original;
+    if (!bcmlSizes_.empty()) sizes = true;
     if (!sizes && tables < 2) return "";
     std::sort(contributing.begin(), contributing.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
     for (const auto* m : contributing) inputs += m->id + "@" + std::to_string(m->installedAt) + ";";
     std::error_code ec;
     if (original) inputs += "card;";
+    if (!bcmlSizes_.empty()) inputs += "bcml:" + bcmlKey_ + ";";
     if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec))
         inputs += "game@" + std::to_string(fs::file_size(originalSizeTable_, ec)) + ";";
     return kMergedPrefix + std::to_string(stableId(inputs));
 }
 
 bool Library::canMergeSizes(const ModRecord& mod) const {
-    if (mod.resourceSizes.empty()) return true;
+    // Packages that need merging get size entries for their merged files too.
+    if (mod.resourceSizes.empty() && mod.bcmlLogs.empty()) return true;
     std::error_code ec;
     if (!originalSizeTable_.empty() && fs::exists(originalSizeTable_, ec)) return true;
     if (hasOriginalSizeTableOnCard()) return true;
@@ -413,6 +474,7 @@ void Library::writeMergedSizeTable(const fs::path& sdPath) const {
             if (targetKey(t) == kSizeTableKey) tables.push_back(readFile(modDir(*m) / fs::path(t)));
         if (!m->resourceSizes.empty()) sizes.push_back(m->resourceSizes);
     }
+    if (!bcmlSizes_.empty()) sizes.push_back(bcmlSizes_);  // the merged files' sizes, last
     if (tables.empty())
         throw std::runtime_error("BOTW's size table is needed to install this mod. Open Patchwork once by holding L and R "
                                  "while starting Breath of the Wild so it can read it.");
@@ -420,6 +482,127 @@ void Library::writeMergedSizeTable(const fs::path& sdPath) const {
     auto staged = dataDir_ / "merged" / fs::path(kBotwSizeTable);
     writeFileAtomic(staged, merged);
     replaceFile(staged, sdPath);
+}
+
+namespace {
+
+class ReaderGameFiles : public bcml::GameFiles {
+public:
+    explicit ReaderGameFiles(const Library::GameFileReader& r) : r_(r) {}
+    std::optional<std::string> read(const std::string& path) override {
+        if (!r_) return std::nullopt;
+        auto f = r_(path);
+        if (f.state != Library::GameFile::State::Found) return std::nullopt;
+        return std::move(f.data);
+    }
+
+private:
+    const Library::GameFileReader& r_;
+};
+
+}  // namespace
+
+namespace {
+
+// The packages in a merge key ("id@installedAt;…;lang=USen"), without the language.
+std::set<std::string> keyPackages(const std::string& key) {
+    std::set<std::string> out;
+    size_t start = 0;
+    for (size_t end; (end = key.find(';', start)) != std::string::npos; start = end + 1) out.insert(key.substr(start, end - start));
+    return out;  // the trailing "lang=…" has no ';' after it
+}
+
+}  // namespace
+
+bool Library::bcmlMerged(const ModRecord& m) const {
+    return keyPackages(bcmlKey_).count(m.id + "@" + std::to_string(m.installedAt)) > 0;
+}
+
+bool Library::bcmlStillUsable() const {
+    auto wanted = keyPackages(bcmlKey());
+    for (const auto& p : keyPackages(bcmlKey_))
+        if (!wanted.count(p)) return false;
+    return true;
+}
+
+std::string Library::bcmlKey() const {
+    std::vector<const ModRecord*> pkgs;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Botw && !m.bcmlLogs.empty()) pkgs.push_back(&m);
+    std::sort(pkgs.begin(), pkgs.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    std::string key;
+    for (const auto* m : pkgs) key += m->id + "@" + std::to_string(m->installedAt) + ";";
+    if (!key.empty()) key += "lang=" + textLanguage_;
+    return key;
+}
+
+void Library::refreshBcml() {
+    auto key = bcmlKey();
+    if (key == bcmlKey_) return;
+    auto staging = dataDir_ / "bcml-merged";
+    if (key.empty()) {
+        bcmlKey_.clear();
+        bcmlOutputs_.clear();
+        bcmlSizes_.clear();
+        removeTree(staging);
+        removeTree(fs::path(staging) += ".new");
+        removeTree(fs::path(staging) += ".old");
+        return;
+    }
+    std::vector<bcml::Package> pkgs;
+    std::vector<const ModRecord*> sorted;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Botw && !m.bcmlLogs.empty()) sorted.push_back(&m);
+    std::sort(sorted.begin(), sorted.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    for (const auto* m : sorted) {
+        bcml::Package p{m->id, modDir(*m) / "atmosphere" / "contents", {}};
+        for (const auto& d : m->bcmlLogs) p.logDirs.push_back(modDir(*m) / "bcml" / d);
+        pkgs.push_back(std::move(p));
+    }
+    ReaderGameFiles game(gameFiles_);
+    bcml::Options options;
+    options.language = textLanguage_;
+    if (mergeProgress_) options.progress = [this](float f, const std::string& what) { mergeProgress_(0.9f * f, what); };
+    auto result = bcml::merge(pkgs, game, options);
+    // Written next to the last merge's files and swapped in once all are there, so a failed
+    // write leaves the last merge as it was.
+    auto incoming = staging, previous = staging;
+    incoming += ".new";
+    previous += ".old";
+    std::string err;
+    if (!removeTree(incoming, &err) || !removeTree(previous, &err)) throw std::runtime_error(err);
+    std::vector<std::string> outputs;
+    for (const auto& [path, data] : result.files) {
+        // merge() only produces these; they become paths on the SD card.
+        if (!bcml::isPackagePath(path)) throw std::logic_error("BCML merge produced a path outside the game: " + path);
+        writeFileAtomic(incoming / fs::path(path), data);
+        outputs.push_back(kContentsPrefix + path);
+        if (mergeProgress_) mergeProgress_(0.9f + 0.1f * outputs.size() / result.files.size(), "Saving the merged files");
+    }
+    // Forget the last merge before its files go: if this is interrupted the next apply()
+    // merges again instead of deploying files that don't match the state.
+    bcmlKey_.clear();
+    save();
+    if (fs::exists(staging)) fs::rename(staging, previous);
+    if (!result.files.empty()) fs::rename(incoming, staging);
+    removeTree(previous);
+    removeTree(incoming);
+    bcmlKey_ = key;
+    bcmlOutputs_ = std::move(outputs);
+    bcmlSizes_ = std::move(result.sizes);
+    save();
+}
+
+std::vector<std::string> Library::missingGameFiles(const std::vector<fs::path>& logDirs) const {
+    std::vector<std::string> out;
+    bcml::Options options;
+    options.language = textLanguage_;
+    for (const auto& path : bcml::gameFilesNeeded({{"new", {}, logDirs}}, options)) {
+        // A new pack the game doesn't have is fine; everything else must be readable.
+        if (gameFiles_ && gameFiles_(path).state != GameFile::State::Unavailable) continue;
+        out.push_back(path);
+    }
+    return out;
 }
 
 namespace {
@@ -449,14 +632,32 @@ void replaceFile(const fs::path& from, const fs::path& to) {
 
 // Make the SD card match the enabled mods. Written so an interruption at any point (power
 // loss, crash, full card) leaves something a later apply() can finish:
-// - a target is recorded as deployed *before* its file is written, so a failed write is
-//   cleaned up by the next apply;
-// - an original is backed up before being overwritten, and an existing backup is never
-//   overwritten (it's the real original from an earlier, interrupted run);
+// - files are written in batches; before each, the originals they cover are backed up and
+//   the targets are recorded and saved as ours (owner kWriting), so after an interrupted
+//   write the next apply rewrites or removes them, and never backs up our own file as the
+//   user's;
+// - an existing backup is never overwritten (it's the real original from an earlier,
+//   interrupted run);
 // - a backup is only deleted after it has been copied back, and a missing backup means it
 //   was already restored.
-// State is saved every 50 files and at the end.
+// State is also saved every kBatch removals and at the end.
 void Library::apply(const ProgressFn& progress) {
+    // A merge that can't run (game files missing) doesn't stop the rest: the packages it
+    // concerns just stay off the SD card for now.
+    try {
+        refreshBcml();
+        bcmlError_.clear();
+    } catch (const std::exception& e) {
+        bcmlError_ = e.what();
+        // The last merge stays on the card while it only lacks packages turned on since (they
+        // wait). If it includes one that's now off, removed or reinstalled, it would keep that
+        // package's changes in the game: take every merged file off until a merge succeeds.
+        if (!bcmlStillUsable()) {
+            bcmlKey_.clear();
+            bcmlOutputs_.clear();
+            bcmlSizes_.clear();
+        }
+    }
     auto desired = desiredDeployment();
 
     std::map<std::string, std::string> desiredByKey, deployedByKey;  // key -> actual target
@@ -474,7 +675,7 @@ void Library::apply(const ProgressFn& progress) {
 
     size_t total = toRemove.size() + toWrite.size(), done = 0, sinceSave = 0;
     auto checkpoint = [&] {
-        if (++sinceSave >= 50) {
+        if (++sinceSave >= kBatch) {
             save();
             sinceSave = 0;
         }
@@ -498,28 +699,41 @@ void Library::apply(const ProgressFn& progress) {
             ++done;
             checkpoint();
         }
-        for (const auto& t : toWrite) {
-            if (progress) progress(done, total, t);
-            const auto& id = desired.at(t);
-            const auto* m = find(id);
-            auto sdPath = sdRoot_ / fs::path(t);
-            auto key = targetKey(t);
-            auto existing = deployedByKey.find(key);
-            std::error_code ec;
-            if (existing == deployedByKey.end() && fs::exists(sdPath, ec) && !backedUp_.count(key)) {
-                // A file we didn't put there: keep it so disabling the mod restores it.
-                auto bkPath = backupPath(t);
-                if (!fs::exists(bkPath, ec)) copyFileCreatingDirs(sdPath, bkPath);
-                backedUp_[key] = t;
+        for (size_t batch = 0; batch < toWrite.size(); batch += kBatch) {
+            size_t end = std::min(toWrite.size(), batch + kBatch);
+            // Before writing a batch: back up the user's originals, then record the targets as
+            // ours with no owner yet (kWriting), and save. If writing is interrupted, the next
+            // apply() rewrites or removes them and never mistakes our file for an original.
+            for (size_t i = batch; i < end; ++i) {
+                const auto& t = toWrite[i];
+                auto sdPath = sdRoot_ / fs::path(t);
+                auto key = targetKey(t);
+                auto existing = deployedByKey.find(key);
+                std::error_code ec;
+                if (existing == deployedByKey.end() && fs::exists(sdPath, ec) && !backedUp_.count(key)) {
+                    // A file we didn't put there: keep it so disabling the mod restores it.
+                    auto bkPath = backupPath(t);
+                    if (!fs::exists(bkPath, ec)) copyFileCreatingDirs(sdPath, bkPath);
+                    backedUp_[key] = t;
+                }
+                if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
+                deployed_[t] = kWriting;
             }
-            if (existing != deployedByKey.end() && existing->second != t) deployed_.erase(existing->second);
-            if (id.rfind(kMergedPrefix, 0) == 0)
-                writeMergedSizeTable(sdPath);
-            else
-                replaceFile(modDir(*m) / fs::path(t), sdPath);
-            deployed_[t] = id;
-            ++done;
-            checkpoint();
+            save();
+            for (size_t i = batch; i < end; ++i) {
+                const auto& t = toWrite[i];
+                if (progress) progress(done, total, t);
+                const auto& id = desired.at(t);
+                auto sdPath = sdRoot_ / fs::path(t);
+                if (id.rfind(kMergedPrefix, 0) == 0)
+                    writeMergedSizeTable(sdPath);
+                else if (id.rfind(kBcmlPrefix, 0) == 0)
+                    replaceFile(dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size())), sdPath);
+                else
+                    replaceFile(modDir(*find(id)) / fs::path(t), sdPath);
+                deployed_[t] = id;
+                ++done;
+            }
         }
     } catch (...) {
         save();  // record what actually got done so a retry continues from here

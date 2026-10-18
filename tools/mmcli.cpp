@@ -18,7 +18,15 @@
 #include "library.hpp"
 #include "saves.hpp"
 #include "sarc.hpp"
+#include "yaml.hpp"
+#include "byml.hpp"
+#include "aamp.hpp"
+#include "msbt.hpp"
+#include "rstbcalc.hpp"
+#include "nlohmann/json.hpp"
+#include "sizetable.hpp"
 #include <chrono>
+#include <functional>
 
 using namespace mm;
 
@@ -103,6 +111,89 @@ int main(int argc, char** argv) {
             std::cout << "installed " << rec.id << " with " << rec.files.size() << " files\n";
             removeTree(prep.extractDir);
             fs::remove(dl);
+        } else if (cmd == "rstbcheck") {  // dev: compare our size calculation with a package's rstb.json
+            fs::path root = args.at(0);
+            auto log = nlohmann::json::parse(readFile(root / "logs" / "rstb.json"));
+            std::map<std::string, uint32_t> ours;
+            std::function<void(const std::string&, const std::string&, bool)> walk = [&](const std::string& name, const std::string& raw, bool nested) {
+                ours[sizeTableName(name)] = resourceSize(name, raw);
+                std::string data = isYaz0(raw) ? yaz0Decompress(raw) : raw;
+                if (data.compare(0, 4, "SARC") == 0)
+                    for (const auto& f : Sarc::parse(data).files) walk(f.name, f.data, true);
+                (void)nested;
+            };
+            for (const char* tid : {"01007EF00011E000", "01007EF00011F001"}) {
+                auto base = root / tid / "romfs";
+                std::error_code ec;
+                for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end; it.increment(ec))
+                    if (it->is_regular_file()) walk(it->path().lexically_relative(base).generic_string(), readFile(it->path()), false);
+            }
+            std::map<std::string, std::pair<int, int>> byExt;  // ext -> (match, total)
+            for (const auto& [canon, v] : log.items()) {
+                auto it = ours.find(canon);
+                if (it == ours.end()) continue;
+                auto dot = canon.rfind('.');
+                auto ext = canon.substr(dot);
+                auto& e = byExt[ext];
+                ++e.second;
+                if (it->second == v.get<uint32_t>()) ++e.first;
+                else if (e.second - e.first <= 2) std::cout << "  " << canon << ": ours " << it->second << ", log " << v.get<uint32_t>() << "\n";
+            }
+            for (const auto& [ext, e] : byExt) std::cout << ext << " " << e.first << "/" << e.second << "\n";
+        } else if (cmd == "roundtrip") {  // dev: parse + write a BYML/SARC file (or files inside a SARC) and compare
+            std::function<void(const std::string&, const std::string&)> check = [&](const std::string& name, const std::string& raw) {
+                std::string data = isYaz0(raw) ? yaz0Decompress(raw) : raw;
+                if (data.compare(0, 2, "YB") == 0) {
+                    auto doc = byml::parse(data);
+                    auto out = byml::write(doc);
+                    bool same = byml::parse(out).root == doc.root;
+                    std::cout << (same ? "ok  " : "BAD ") << (out == data ? "identical " : "differs   ") << data.size() << " -> " << out.size() << "  " << name << "\n";
+                } else if (data.compare(0, 4, "AAMP") == 0) {
+                    try {
+                        auto pio = aamp::parse(data);
+                        auto out = aamp::write(pio);
+                        auto back = aamp::parse(out);
+                        bool same = back.root == pio.root && back.type == pio.type && back.version == pio.version;
+                        std::cout << (same ? "ok  " : "BAD ") << (out == data ? "identical " : "differs   ") << data.size() << " -> " << out.size() << "  " << name << "\n";
+                    } catch (const std::exception& e) {
+                        std::cout << "ERR " << e.what() << "  " << name << "\n";
+                    }
+                } else if (data.compare(0, 8, "MsgStdBn") == 0) {
+                    try {
+                        auto f = msbt::parse(data);
+                        auto out = msbt::write(f);
+                        auto back = msbt::parse(out);
+                        bool same = back.messages.size() == f.messages.size();
+                        for (size_t k = 0; same && k < f.messages.size(); ++k)
+                            same = back.messages[k].first == f.messages[k].first && back.messages[k].second.text == f.messages[k].second.text;
+                        std::cout << (same ? "ok  " : "BAD ") << (out == data ? "identical " : "differs   ") << data.size() << " -> " << out.size() << "  " << name
+                                  << " (" << f.messages.size() << " msgs, attr " << f.attrSize << ")\n";
+                    } catch (const std::exception& e) {
+                        std::cout << "ERR " << e.what() << "  " << name << "\n";
+                    }
+                } else if (data.compare(0, 4, "SARC") == 0) {
+                    for (const auto& f : Sarc::parse(data).files) check(name + "//" + f.name, f.data);
+                }
+            };
+            for (const auto& a : args) check(a, readFile(a));
+        } else if (cmd == "yaml") {  // dev: parse a YAML file and print its shape
+            std::function<void(const yaml::Node&, int)> dump = [&](const yaml::Node& n, int depth) {
+                if (depth > 3) return;
+                std::string pad(size_t(depth) * 2, ' ');
+                if (n.kind == yaml::Node::Kind::Map) {
+                    std::cout << pad << n.tag << "{" << n.map.size() << "}\n";
+                    for (size_t i = 0; i < n.map.size() && i < 3; ++i) {
+                        std::cout << pad << " " << n.map[i].first << ":\n";
+                        dump(n.map[i].second, depth + 1);
+                    }
+                } else if (n.kind == yaml::Node::Kind::Seq) {
+                    std::cout << pad << n.tag << "[" << n.items.size() << "]\n";
+                    for (size_t i = 0; i < n.items.size() && i < 2; ++i) dump(n.items[i], depth + 1);
+                } else {
+                    std::cout << pad << n.tag << (n.quoted ? " '" : " ") << n.value.substr(0, 60) << "\n";
+                }
+            };
+            dump(yaml::parse(readFile(args.at(0))), 0);
         } else if (cmd == "sarcmerge") {
             std::vector<std::string> in;
             for (size_t i = 1; i < args.size(); ++i) in.push_back(readFile(args[i]));

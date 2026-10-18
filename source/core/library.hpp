@@ -32,6 +32,9 @@ struct ModRecord {
     std::vector<std::string> files;  // targets, relative to SD root
     // BCML packages: resource sizes merged into BOTW's size table (romfs path -> bytes, 0 = remove).
     std::map<std::string, uint32_t> resourceSizes;
+    // BCML packages that need merging: folders under <mod>/bcml holding the package's logs
+    // (the main ones first, then the chosen options'). Empty for everything else.
+    std::vector<std::string> bcmlLogs;
 };
 
 // BOTW's resource size table. Patchwork merges it from every enabled mod instead of letting
@@ -60,6 +63,12 @@ struct UnmanagedFiles {
 
 using ProgressFn = std::function<void(size_t done, size_t total, const std::string& current)>;
 
+// A change involving a BCML package couldn't be merged (usually: game files not read yet).
+// The library is consistent; the package's files stay off the SD card until it can be.
+struct BcmlMergeError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 // Owns the mod library on the SD card and keeps the deployed LayeredFS files in
 // sync with which mods are enabled. Layout under `dataDir`:
 //   state.json                       records + what is deployed
@@ -79,8 +88,10 @@ public:
 
     // Copy `files` into the library under `record.id` (replacing an existing mod with the
     // same id, keeping its priority) and optionally enable it. Returns the stored record.
+    // `internal` files are kept with the mod but never copied to the SD card (targets
+    // relative to the mod's library folder, e.g. "bcml/0/packs.json").
     const ModRecord& add(ModRecord record, const std::vector<FileMapping>& files, bool enable,
-                         const ProgressFn& progress = {});
+                         const ProgressFn& progress = {}, const std::vector<FileMapping>& internal = {});
 
     void setEnabled(const std::string& id, bool enabled, const ProgressFn& progress = {});
     void remove(const std::string& id, const ProgressFn& progress = {});
@@ -105,6 +116,25 @@ public:
 
     // The game's own size table, read from the console; the base for BCML packages' sizes.
     void setOriginalSizeTable(fs::path path) { originalSizeTable_ = std::move(path); }
+    // Reads the game's own files ("01007EF00011E000/romfs/Pack/Bootup.pack"), for merging BCML
+    // packages.
+    struct GameFile {
+        enum class State { Found, Absent, Unavailable } state = State::Unavailable;  // Absent: the game has no such file
+        std::string data;
+    };
+    using GameFileReader = std::function<GameFile(const std::string& path)>;
+    void setGameFileReader(GameFileReader reader) { gameFiles_ = std::move(reader); }
+    // One game file through the reader (which keeps a copy the first time it can read it).
+    GameFile gameFile(const std::string& path) const { return gameFiles_ ? gameFiles_(path) : GameFile{}; }
+    // The game's text language, for merging BCML packages' text changes.
+    void setTextLanguage(std::string language) { textLanguage_ = std::move(language); }
+    // Told 0..1 and what's happening while BCML packages are merged (it can take a while);
+    // empty to stop.
+    using MergeProgressFn = std::function<void(float, const std::string&)>;
+    void setMergeProgress(MergeProgressFn progress) { mergeProgress_ = std::move(progress); }
+    // Game files merging would need for a package with these log folders, that can't be read
+    // now (package-style paths). Files the game doesn't have don't count.
+    std::vector<std::string> missingGameFiles(const std::vector<fs::path>& logDirs) const;
     // False if enabling this mod would need a size table to build on and there's none: not the
     // game's original, not one already on the SD card, and no enabled mod ships one.
     bool canMergeSizes(const ModRecord& mod) const;
@@ -122,10 +152,34 @@ private:
     // Owner id for the merged size table, or "" if no merging is needed. The id changes
     // whenever the inputs do, so apply() rebuilds it.
     std::string sizeTableOwner() const;
+    // Re-merge the enabled BCML packages if they changed since the last merge. Throws when a
+    // game file is missing.
+    void refreshBcml();
+    std::string bcmlKey() const;
+public:
+    // Enabled BCML packages that haven't been merged yet (a game file was missing). Their files
+    // stay off the SD card until they are; bcmlError() says why.
+    bool bcmlPending() const { return bcmlKey() != bcmlKey_; }
+    // Merge BCML packages again on the next apply() (the game files they read changed).
+    void invalidateBcml() { bcmlKey_.clear(); }
+    const std::string& bcmlError() const { return bcmlError_; }
+private:
     void writeMergedSizeTable(const fs::path& sdPath) const;
     bool hasOriginalSizeTableOnCard() const;
 
     fs::path sdRoot_, dataDir_, originalSizeTable_;
+    GameFileReader gameFiles_;
+    std::string textLanguage_ = "USen";
+    MergeProgressFn mergeProgress_;
+    // The last BCML merge: its inputs, the SD targets it produced (staged under
+    // <dataDir>/bcml-merged) and their size table entries.
+    std::string bcmlKey_;
+    std::vector<std::string> bcmlOutputs_;
+    std::map<std::string, uint32_t> bcmlSizes_;
+    std::string bcmlError_;  // why the last merge didn't happen
+    bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
+    // Every package in the last merge is still enabled (as installed then): its files may stay.
+    bool bcmlStillUsable() const;
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
     // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.

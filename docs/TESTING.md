@@ -21,9 +21,9 @@
 | Browse | Read a full description (→, ↓, B back); preview survives install/back |
 | Browse | No internet: error + "Try again"; WebP thumbnails |
 | Install | Single-file zip; multi-option 7z (pre-selects the option for your game version); "All versions" file recommended; replace an installed version (Replace / Keep both) |
-| Install | BCML `.bnp` refused with explanation; cancel a big download; navigation/ZL/ZR/+ blocked while busy |
+| Install | BCML `.bnp` merged (BOTW) or refused with an explanation (TOTK, BCML 2 format); cancel a big download; navigation/ZL/ZR/+ blocked while busy |
 | Install | Failed unpack keeps the download; finish it from My mods; files and temp folders cleaned up |
-| My mods | On/off, move up/down, remove (dialog), import files already on SD, stop managing |
+| My mods | On/off, move up/down, remove (dialog), import files already on SD, stop managing; the mod's page (→, B back) |
 | Settings | NSFW toggle persists; delete unfinished downloads; re-copy mods |
 | Restart | Library, settings and game choice survive a restart |
 | Waikuteru | Source switch (L/R); BOTW list = 12 Switch mods, TOTK = 5; preview image, credit; Wii U file refused; install a small mod |
@@ -46,11 +46,12 @@ Run these after any release build; they cover what the desktop build can't.
 5. **Turn it off** in My mods, start the game: weapons break again.
 6. **Large mod** (Wolf Link, ~116 MB): watch memory/speed; cancel once with B, then install
    fully. Remove it afterwards.
-7. **Files already on SD** (BOTW randomizer): My mods shows the entry; import only if you
-   have the free space it lists.
+7. **Files already on SD** (e.g. a randomizer copied by hand): My mods shows the entry;
+   import only if you have the free space it lists.
 8. **Send a link from your phone:** Add mods → Send a link. Scan the QR code (or type the
-   address) on a phone on the same Wi-Fi; paste a GameBanana or Waikuteru link; the Switch
-   shows "Link received". Press B and check the address stops responding.
+   address, including the code after the /) on a phone on the same Wi-Fi; paste a GameBanana
+   or Waikuteru link; the Switch shows "Link received". The address without the code answers
+   "Not found". Press B and check the address stops responding.
 9. **Waikuteru:** Browse → R. Install No Fall Damage (BOTW) and check it in-game.
 10. **Power/HOME during a copy** (optional, on a test mod): reopen the app; Settings →
    Re-copy enabled mods; nothing half-installed remains.
@@ -70,25 +71,33 @@ Run these after any release build; they cover what the desktop build can't.
 16. **Size table warning (TOTK):** install a mod whose files include
    `ResourceSizeTable.Product.<version>.rsizetable.zs` but not your version's (e.g. mod
    455219 on 1.2.1): a warning names the versions it supports; Cancel is the default.
-17. **PC-only mods hidden:** BOTW Browse doesn't list mods whose only files are .bnp (e.g.
-   FastSwim, 372295). The first visit to a page takes a moment longer; later visits are
-   instant (switch/patchwork/pc-only-cache.json). Entering 372295 as a mod number explains
-   that it needs BCML on a PC.
-18. **BOTW size table (needed for BCML packages):** hold **L and R** while starting Breath of
-   the Wild, then start Patchwork from the Homebrew Menu. Settings → Storage → "BOTW size
-   table" should say "Read from game 1.6.0" (a bar shows while it reads). Holding only R gives
-   "Got a mod's copy · hold L too" when a mod (e.g. the Randomizer) has its own table. If it
-   says "Unreadable" or "Couldn't check", report it.
-   Opening Patchwork from the Album afterwards keeps the saved copy.
+17. **PC-only mods hidden:** Browse doesn't list mods whose only files are packages Patchwork
+   can't merge (TKMM `.tkcl` for TOTK, BCML 2's old format for BOTW). The first visit to a
+   page takes a moment longer; later visits are instant (switch/patchwork/pc-only-cache.json).
+   Entering such a mod's number explains which PC tool it needs.
+18. **BOTW game files:** with Breath of the Wild selected, Settings starts with "BCML packages".
+   Hold **L and R** while starting Breath of the Wild, then start Patchwork from the Homebrew
+   Menu: "Size table" says "Read from game <version>" (a bar shows while it reads), "Game files"
+   says "Can read now", and "Expansion Pass (DLC)" matches whether you have the DLC. Holding
+   only R gives "Mods were on: hold L too" when a mod has its own size table. Opening Patchwork
+   from the Album afterwards keeps the saved copies. With TOTK selected, the section isn't shown.
 19. **BCML package that installs as-is:** enter mod number 586246 (Unofficial Linkle 3.0
    Armor Icons). Pick the **.bnp** file (not the UKMM zip): it shows "BCML package · installs
    here". Install, start the game, open the inventory's Armor tab: the armor icons show
    Linkle instead of Link. Turn the mod off: the icons are back to normal.
-20. **BCML package that needs merging** (e.g. FastSwim, 372295): not listed in Browse; the
-   number says it needs BCML on a PC.
-21. **Size table merging with the Randomizer:** with your BOTW Randomizer files on the card,
-   install a BCML package: the game still starts and the Randomizer works. Turn the package
-   off: the Randomizer's own size table is restored.
+20. **BCML merges, one per kind** (each confirmed on hardware with BOTW 1.6.0 and the DLC):
+   | Kind | Mod (number) | Check in the game |
+   |---|---|---|
+   | packs | [LINKLE] Title Screen NX (423509) | the title screen shows Linkle |
+   | parameters (deepmerge) | Infinite Running (358443), Super Jump (560284) | sprinting doesn't drain stamina; jumps go much higher |
+   | game data | 99 slots for all weapons (305388) | the weapon inventory grows past its usual pages |
+   | maps (DLC) | Early Travel Medallion (448012) | the chest outside Oman Au Shrine holds the Travel Medallion |
+   | text | Hestu's S*** (423545) | Korok Seeds are renamed (English text) |
+   | drops | More Ores from Mine Nodes (542133) | ore deposits drop more |
+21. **Size table merging with a mod that has its own table:** with a mod that ships
+   `ResourceSizeTable.product.srsizetable` (e.g. a randomizer) on the card, install a BCML
+   package: the game still starts and that mod still works. Turn the package off: the mod's
+   own size table is restored.
 22. **Save file (TOTK):** close TOTK first (HOME, X). Install Shrines Unlocked Save File
    (number 445614). Pick your profile; it suggests the first empty slot. Leave photos off,
    press "Back up and install". Start TOTK, Load: the save is there with the shrines unlocked,
@@ -105,8 +114,27 @@ Run these after any release build; they cover what the desktop build can't.
    dates and highlights the latest. A BOTW Master Mode save (e.g. 582966's master mode file)
    only offers Master Mode slots; check it loads in Master Mode.
 
-27. **BCML merge test (for full BCML support):** hold **L and R** while starting Breath of the
-   Wild, open Patchwork, Settings → Testing → "BCML merge test" → Run. It downloads two small
-   packages and shows timings and memory (also saved to switch/patchwork/bcml-test/report.txt).
-   Then "Merged Linkle title screen" → Put in game, start BOTW normally: the title screen shows
-   Linkle. Back in Patchwork, "Remove from game".
+27. **BCML packages with nothing to copy:** packages that only change merged data install:
+   99 slots for all weapons (305388, game data) and Early Travel Medallion (448012, map).
+28. **BCML setup, as a new user would meet it:** on a card without switch/patchwork/original,
+   open Patchwork from the Album (no buttons held) with BOTW selected. Settings starts with
+   "BCML packages": Game files "Not read yet". Enter mod number
+   423509 ([LINKLE] Title Screen NX): its .bnp says "BCML package · one-time setup". Install it:
+   a blue "One-time setup for BCML packages" screen lists the steps. Follow them (hold L and R
+   starting BOTW, open Patchwork): a message offers "Open My mods"; choose Finish installing.
+   Start BOTW normally: the title screen shows Linkle. Turn it off: the normal one is back.
+29. **Game files kept:** after step 28, open Patchwork from the Album (no buttons held) and
+   install another merging package (e.g. 321704 Early Master Cycle): it installs without asking
+   for L and R if it only needs files already read; otherwise "More game files needed" says
+   which kind (e.g. "the game's text") and to relaunch with L and R.
+30. **Text, actor info, shops (armor mods):** install a Linkle armor package that changes
+   texts and shops (e.g. 340011 LL Upgradeable Armor Rebalance). In the game, check an armor
+   name/description and a shop that sells it. If the game crashes at load, report it with the
+   mod list.
+31. **Maps (DLC or not):** install a package with map changes (e.g. 358261 Crafting Project).
+   Check that the game loads into the overworld, and note whether you have the DLC.
+32. **Order and turning off:** with two merging packages on, move one up/down in My mods and
+   turn one off: each change re-merges (the progress screen shows it), and the game still loads.
+33. **Merge progress:** installing or turning a BCML package on/off shows a bar with a
+   percentage and what it's reading; "Press B to cancel" turns into "Don't close Patchwork or
+   turn off the Switch" once the change can't be stopped.

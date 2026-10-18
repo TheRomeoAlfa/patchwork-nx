@@ -26,11 +26,12 @@ struct Sarc {
 
 bool isSarc(const std::string& data);  // plain or Yaz0-compressed
 
-// BCML's pack merge: start from the first archive (the game's own) and lay each later one
-// (mods, lowest priority first) over it. A file a mod has wins; archives nested inside are
-// merged the same way, file by file, and Yaz0-compressed again when their name starts with
-// ".s" (".sblarc", ".sbactorpack"; not ".sarc"). `compress` picks real compression for those
-// (smaller) or stored (faster).
-std::string mergeSarcs(const std::vector<std::string>& archives, bool compress = true);
+// BCML's pack merge: start from the game's own archive (the first, when `firstIsGame`) and
+// lay the mods' copies over it, lowest priority first. For each file the highest-priority
+// copy that differs from the game's wins (an unchanged copy in a complete archive doesn't
+// undo another mod's change). Archives nested inside are merged the same way, file by file,
+// and compressed again when the game's copy was (`compress`: real Yaz0 compression, smaller;
+// otherwise stored, faster).
+std::string mergeSarcs(const std::vector<std::string>& archives, bool compress = true, bool firstIsGame = true);
 
 }  // namespace mm

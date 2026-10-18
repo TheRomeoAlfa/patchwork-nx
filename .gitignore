@@ -10,3 +10,10 @@ build-switch/
 build-desktop/
 build-asan/
 qa-out/
+build-*/
+cmake-build-*/
+compile_commands.json
+.cache/
+.vscode/
+.idea/
+.claude/

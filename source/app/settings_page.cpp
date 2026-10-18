@@ -3,7 +3,6 @@
 #include <ctime>
 
 #include "app_state.hpp"
-#include "bcml_test.hpp"
 #include "debug_script.hpp"
 #include "platform.hpp"
 #include "sysmodules.hpp"
@@ -36,7 +35,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
 
     auto section = [content](const std::string& title) {
         auto* l = ui::label(title, 16, ui::muted());
-        l->setMargins(18, 0, 8, 4);
+        l->setMargins(30, 0, 8, 4);
         content->addView(l);
         return l;
     };
@@ -63,6 +62,56 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
             if (heldMs_ >= 3000) revealNsfwSetting();
         });
         holdTimer_.start(100);
+    }
+
+    // BCML packages: the one-time setup (reading the game's files) and its state (BCML is
+    // Breath of the Wild only).
+    if (AppState::get().game() == mm::Game::Botw) {
+        section("BCML packages · Breath of the Wild");
+        auto* files = new brls::DetailCell();
+        files->setText("Game files");
+        {
+            auto& st = AppState::get();
+            using A = AppState::GameAccess;
+            auto kept = st.keptGameFiles();
+            auto access = st.botwAccess();
+            files->setDetailText(access == A::Ready    ? (kept ? "Can read now · " + std::to_string(kept) + " kept" : "Can read now")
+                                 : access == A::ModsOn ? "Mods were on: hold L too"
+                                 : kept                ? std::to_string(kept) + " kept on the SD card"
+                                                       : "Not read yet");
+        }
+        content->addView(files);
+        auto* dlc = new brls::DetailCell();
+        dlc->setText("Expansion Pass (DLC)");
+        int dlcInstalled = platform::botwDlcInstalled();
+        dlc->setDetailText(dlcInstalled == 1 ? "Installed" : dlcInstalled == 0 ? "Not installed" : "Couldn't tell");
+        content->addView(dlc);
+        auto* sizes = new brls::DetailCell();
+        sizes->setText("Size table");
+        sizes->setDetailText(AppState::get().sizeTableStatus());
+        content->addView(sizes);
+        auto* sizesBar = new ui::ProgressBar(300);
+        sizesBar->setMargins(10, 4, 0, 4);
+        content->addView(sizesBar);
+        auto showSizes = [sizes, sizesBar] {
+            float p = AppState::get().sizeTableProgress();
+            sizes->setDetailText(AppState::get().sizeTableStatus());
+            sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+            if (p >= 0) sizesBar->setProgress(p);
+            return p >= 0;
+        };
+        if (showSizes()) {
+            sizeTimer_.setCallback([this, showSizes] {
+                if (!showSizes()) sizeTimer_.stop();
+            });
+            sizeTimer_.start(150);
+        }
+        auto* bcmlHow = ui::label("Most BCML packages (.bnp) are merged with the game's own files, which Patchwork reads from the game "
+                                  "itself. Before installing your first one (and after a game update):\n" +
+                                      AppState::bcmlSetupSteps(false) + "\nThen install BCML packages as usual. Copies of the files are kept on the SD card.",
+                                  14, ui::muted(), false);
+        bcmlHow->setMargins(10, 4, 4, 4);
+        content->addView(bcmlHow);
     }
 
     section("Background add-ons");
@@ -136,99 +185,25 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     auto* repair = new brls::DetailCell();
     repair->setText("Re-copy enabled mods to the SD card");
     repair->setDetailText("Fixes missing files");
-    repair->registerClickAction([](brls::View*) {
-        brls::Application::notify("Checking mod files…");
-        AppState::get().runFileJob([](mm::Library& lib) { lib.apply(); }, [](const std::string& error) {
-            brls::Application::notify(error.empty() ? "Mod files are up to date" : "Repair failed: " + error);
-        });
+    repair->registerClickAction([this, repair](brls::View*) {
+        recopyMods(repair);
         return true;
     });
     content->addView(repair);
 
-    auto* sizes = new brls::DetailCell();
-    sizes->setText("BOTW size table");
-    sizes->setDetailText(AppState::get().sizeTableStatus());
-    content->addView(sizes);
-    auto* sizesBar = new ui::ProgressBar(300);
-    sizesBar->setMargins(10, 4, 0, 4);
-    content->addView(sizesBar);
-    auto showSizes = [sizes, sizesBar] {
-        float p = AppState::get().sizeTableProgress();
-        sizes->setDetailText(AppState::get().sizeTableStatus());
-        sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-        if (p >= 0) sizesBar->setProgress(p);
-        return p >= 0;
-    };
-    if (showSizes()) {
-        sizeTimer_.setCallback([this, showSizes] {
-            if (!showSizes()) sizeTimer_.stop();
-        });
-        sizeTimer_.start(150);
-    }
-    auto* sizesNote = ui::label("Needed to install BCML packages (.bnp). To read it, hold L and R while starting Breath of the "
-                                "Wild: R opens the Homebrew Menu (start Patchwork from there) and L turns mods off for that "
-                                "launch, so Patchwork sees the game's own copy rather than a mod's.",
-                                14, ui::muted(), false);
-    sizesNote->setMargins(10, 4, 4, 4);
-    content->addView(sizesNote);
 
     auto* where = new brls::DetailCell();
     where->setText("Mod library folder");
     where->setDetailText("SD:/switch/patchwork");
     content->addView(where);
 
-    section("Testing");
-    auto* bcml = new brls::DetailCell();
-    bcml->setText("BCML merge test");
-    bcml->setDetailText("Run");
-    bcml->registerClickAction([this](brls::View*) {
-        runBcmlTestNow();
-        return true;
-    });
-    content->addView(bcml);
-    bcmlRun_ = bcml;
-    auto* bcmlNote = ui::label("Measures how fast this Switch can merge BCML packages into the game's own files (for full BCML "
-                               "support). Open Patchwork by holding L and R while starting Breath of the Wild first. Downloads "
-                               "two small packages; installs nothing. Takes a minute or two.",
-                               14, ui::muted(), false);
-    bcmlNote->setMargins(10, 4, 4, 4);
-    content->addView(bcmlNote);
-    bcmlReport_ = ui::label("", 14, ui::text(), false);
-    bcmlReport_->setMargins(6, 4, 4, 4);
-    content->addView(bcmlReport_);
-    try {
-        auto saved = AppState::get().dataDir() / "bcml-test" / "report.txt";
-        std::error_code ec;
-        if (mm::fs::exists(saved, ec)) bcmlReport_->setText("Last run:\n" + mm::readFile(saved));
-    } catch (...) {
-    }
-    if (bcmlReport_->getFullText().empty()) bcmlReport_->setVisibility(brls::Visibility::GONE);
-    bcmlTitle_ = new brls::DetailCell();
-    bcmlTitle_->setText("Merged Linkle title screen");
-    bcmlTitle_->registerClickAction([this](brls::View*) {
-        try {
-            if (bcmlTitleInGame()) {
-                removeBcmlTitleFromGame();
-                brls::Application::notify("Title screen test removed");
-            } else {
-                putBcmlTitleInGame();
-                brls::Application::notify("Start Breath of the Wild normally to see the title screen");
-            }
-        } catch (const std::exception& e) {
-            brls::Application::notify(e.what());
-        }
-        showBcmlTitleCell();
-        return true;
-    });
-    content->addView(bcmlTitle_);
-    showBcmlTitleCell();
-
     section("About");
     auto* about = ui::label(
         std::string(APP_TITLE) + " " + APP_VERSION + ", a mod manager for Breath of the Wild and Tears of the Kingdom." +
             "\nMods are downloaded from GameBanana and belong to their authors. Installed mods go into "
             "atmosphere/contents and are only active while running Atmosphère.\n"
-            "BCML packages that need merging and TKMM packages (PC tools) can't be installed here.",
+            "BCML packages (.bnp) are merged with Breath of the Wild's own files right here; TKMM packages (.tkcl) need a PC.\n"
+            "Free software under the GNU GPL v3. Source code and third-party licenses: github.com/TheRomeoAlfa/patchwork-nx",
         16, ui::muted(), false);
     about->setMargins(4, 4, 0, 4);
     content->addView(about);
@@ -348,47 +323,56 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
         });
 }
 
-void SettingsPage::showBcmlTitleCell() {
-    bool ready = bcmlTitleReady();
-    if (!ready && ui::focusInside(bcmlTitle_)) brls::Application::giveFocus(bcmlRun_);
-    bcmlTitle_->setVisibility(ready ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-    bcmlTitle_->setDetailText(bcmlTitleInGame() ? "Remove from game" : "Put in game");
-}
-
-void SettingsPage::runBcmlTestNow() {
+// Like any change in My mods: it can re-merge BCML packages, so it can take a while and
+// mustn't be interrupted.
+void SettingsPage::recopyMods(brls::View* cell) {
     auto& st = AppState::get();
     if (st.installBusy()) {
         brls::Application::notify("Wait for the current change to finish");
         return;
     }
     st.setInstallBusy(true);
-    auto busy = ui::busyBox("Starting…", "Measuring. This takes a minute or two.", "Please wait until the test finishes");
+    auto busy = ui::busyBox("Re-copying enabled mods…", "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
+                            "Please wait until the files are copied");
     scroll_->setVisibility(brls::Visibility::GONE);
     addView(busy.box);
     brls::Application::giveFocus(busy.box);
     auto alive = alive_;
-    auto report = std::make_shared<std::string>();
     st.runFileJob(
-        [busy, alive, report](mm::Library&) {
-            *report = runBcmlTest([busy, alive](const std::string& step, float f) {
-                brls::sync([busy, alive, step, f] {
+        [busy, alive](mm::Library& lib) {
+            lib.setMergeProgress([busy, alive](float f, const std::string& what) {
+                brls::sync([busy, alive, f, what] {
                     if (!*alive) return;
-                    busy.status->setText(step);
                     busy.bar->setVisibility(brls::Visibility::VISIBLE);
                     busy.bar->setProgress(f);
+                    busy.count->setText("Updating merged files… " + std::to_string(static_cast<int>(f * 100)) + "% · " + what);
                 });
             });
+            struct StopProgress {
+                mm::Library& lib;
+                ~StopProgress() { lib.setMergeProgress({}); }
+            } stopProgress{lib};
+            lib.apply([busy, alive](size_t done, size_t total, const std::string&) mutable {
+                brls::sync([busy, alive, done, total]() mutable {
+                    if (*alive) busy.update(done, total);
+                });
+            });
+            if (lib.bcmlPending()) throw std::runtime_error("\x01" + lib.bcmlError());  // copied, but not merged
         },
-        [this, alive, box = busy.box, report](const std::string& error) {
+        [this, alive, cell, box = busy.box](const std::string& error) {
             AppState::get().setInstallBusy(false);
             if (!*alive) return;
             scroll_->setVisibility(brls::Visibility::VISIBLE);
-            brls::Application::giveFocus(bcmlRun_);
+            brls::Application::giveFocus(cell);
             removeView(box);
-            bcmlReport_->setVisibility(brls::Visibility::VISIBLE);
-            bcmlReport_->setText(error.empty() ? *report : "The test stopped: " + error);
-            showBcmlTitleCell();
-            brls::Application::notify(error.empty() ? "Test finished" : "Test stopped");
+            if (error.empty()) {
+                brls::Application::notify("Mod files are up to date");
+            } else {
+                auto* dialog = new brls::Dialog(error[0] == '\x01' ? "Your mods were copied, but some BCML packages couldn't be merged: " + error.substr(1)
+                                                                   : "Re-copying failed: " + error);
+                dialog->addButton("OK", [] {});
+                dialog->open();
+            }
         });
 }
 

@@ -18,7 +18,7 @@ private:
     void showPage(Page page);
     void switchGame();
     void checkModLoaderCrashes();
-    bool focusInside(brls::View* container) const;
+    void checkBcmlSetup();
 
     Page page_ = Page::Browse;
     Sidebar* sidebar_ = nullptr;
