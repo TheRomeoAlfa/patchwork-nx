@@ -52,7 +52,8 @@ struct Result {
 
 struct Options {
     std::string language = "USen";  // the game's text language (Bootup_<language>.pack)
-    std::function<void(float)> progress;  // 0..1, called between steps (optional)
+    // 0..1 and what's happening ("Reading Pack/TitleBG.pack"), as the merge goes (optional).
+    std::function<void(float, const std::string&)> progress;
 };
 
 // Packages lowest priority first. Throws if a game file it needs can't be read (the message

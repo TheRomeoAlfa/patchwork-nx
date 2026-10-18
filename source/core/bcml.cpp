@@ -59,6 +59,7 @@ struct Context {
     Result& result;
     Options options;
     std::map<std::string, std::optional<std::string>> gameCache;
+    std::function<void(const std::string&)> onRead;  // before each game file is read
     // Archives being edited (the merged pack if there is one, else the game's), by path.
     struct Pack {
         Sarc sarc;
@@ -70,7 +71,10 @@ struct Context {
 
     const std::optional<std::string>& gameFileOpt(const std::string& path) {
         auto it = gameCache.find(path);
-        if (it == gameCache.end()) it = gameCache.emplace(path, game.read(path)).first;
+        if (it == gameCache.end()) {
+            if (onRead) onRead(path);
+            it = gameCache.emplace(path, game.read(path)).first;
+        }
         return it->second;
     }
     // A file inside archives: {"…/Pack/Bootup.pack", "GameData/gamedata.ssarc"}. With `create`,
@@ -1290,20 +1294,34 @@ std::set<std::string> gameFilesNeeded(const std::vector<Package>& packages, cons
 
 Result merge(const std::vector<Package>& lowestFirst, GameFiles& game, const Options& options) {
     Result result;
-    Context c{lowestFirst, game, result, options, {}, {}, {}};
-    // Rough shares of the time: the merges read the game's files, packing recompresses the
-    // big archives, sizes parse every merged file.
+    Context c{lowestFirst, game, result, options, {}, {}, {}, {}};
+    // Rough shares of the time: the merges read the game's files (most of the first half),
+    // packing recompresses the big archives, sizes parse every merged file.
+    float last = 0;
+    std::string what = "Reading the packages";
     auto report = [&](float f) {
-        if (options.progress) options.progress(f);
+        last = std::max(last, f);
+        if (options.progress) options.progress(last, what);
+    };
+    size_t needed = 0, reads = 0;
+    if (options.progress) needed = gameFilesNeeded(lowestFirst, options).size();
+    c.onRead = [&](const std::string& path) {
+        what = "Reading " + fs::path(path).filename().string();
+        if (needed) report(0.5f * std::min(1.0f, float(reads) / needed));
+        ++reads;
     };
     void (*const steps[])(Context&) = {mergePacks,   deepMerge, mergeDrops,      mergeShops,    mergeAsLists,  mergeTexts,
                                        mergeActorInfo, mergeMaps, mergeMainStatic, mergeGameData, mergeSaveData, mergeEventInfo};
     report(0);
     for (size_t i = 0; i < std::size(steps); ++i) {
         steps[i](c);
+        what = "Merging";
         report(0.5f * (i + 1) / std::size(steps));
     }
+    what = "Packing the merged files";
     c.closeAll([&](float f) { report(0.5f + 0.35f * f); });
+    what = "Working out file sizes";
+    report(0.85f);
     computeSizes(c);
     report(1);
     // BCML drops the merged messages' entry: the game then sizes them from the file itself.

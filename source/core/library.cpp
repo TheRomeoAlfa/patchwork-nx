@@ -524,7 +524,7 @@ void Library::refreshBcml() {
     ReaderGameFiles game(gameFiles_);
     bcml::Options options;
     options.language = textLanguage_;
-    if (mergeProgress_) options.progress = [this](float f) { mergeProgress_(0.9f * f); };
+    if (mergeProgress_) options.progress = [this](float f, const std::string& what) { mergeProgress_(0.9f * f, what); };
     auto result = bcml::merge(pkgs, game, options);
     std::string err;
     if (!removeTree(staging, &err)) throw std::runtime_error(err);
@@ -532,7 +532,7 @@ void Library::refreshBcml() {
     for (const auto& [path, data] : result.files) {
         writeFileAtomic(staging / fs::path(path), data);
         outputs.push_back(kContentsPrefix + path);
-        if (mergeProgress_) mergeProgress_(0.9f + 0.1f * outputs.size() / result.files.size());
+        if (mergeProgress_) mergeProgress_(0.9f + 0.1f * outputs.size() / result.files.size(), "Saving the merged files");
     }
     bcmlKey_ = key;
     bcmlOutputs_ = std::move(outputs);

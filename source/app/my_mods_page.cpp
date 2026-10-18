@@ -437,7 +437,7 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
     AppState::get().setInstallBusy(true);  // also blocks switching game
     clearPane();
     auto busy = ui::busyBox(status,
-                            AppState::get().fileJobRunning() ? "Waiting for the current install to finish…" : "Copying files on the SD card. Please wait.",
+                            AppState::get().fileJobRunning() ? "Waiting for the current install to finish…" : "Please wait. Don't close Patchwork or turn off the Switch until this finishes.",
                             "Please wait until the files are copied");
     auto* box = busy.box;
     pane_->addView(box);
@@ -461,16 +461,18 @@ void MyModsPage::runJob(const std::string& status, std::function<void(mm::Librar
         });
     };
     auto lastPct = std::make_shared<int>(-1);
-    auto mergeProgress = [this, alive, busy, lastPct](float f) {
+    auto lastWhat = std::make_shared<std::string>();
+    auto mergeProgress = [this, alive, busy, lastPct, lastWhat](float f, const std::string& what) {
         int pct = static_cast<int>(f * 100);
-        if (pct == *lastPct) return;
+        if (pct == *lastPct && what == *lastWhat) return;
         *lastPct = pct;
-        brls::sync([this, alive, busy, pct, f] {
+        *lastWhat = what;
+        brls::sync([this, alive, busy, pct, f, what] {
             if (!*alive || !busy_) return;
             busy.status->setText("Merging BCML packages with the game's files… " + std::to_string(pct) + "%");
             busy.bar->setVisibility(brls::Visibility::VISIBLE);
             busy.bar->setProgress(f);
-            busy.count->setText("");
+            busy.count->setText(what);
         });
     };
     AppState::get().runFileJob([job = std::move(job), progress, mergeProgress](mm::Library& lib) {
