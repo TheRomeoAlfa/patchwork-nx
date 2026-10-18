@@ -170,3 +170,156 @@ TEST("bcml: new animation defines don't take a number already used") {
     CHECK_EQ(defs->object(aamp::hash("ASDefine_2"))->find("Filename")->data, std::string("Mod_Run"));  // …with the mod's file
     CHECK_EQ(defs->object(aamp::hash("ASDefine_3"))->find("Name")->data, std::string("Dance"));
 }
+
+// ---------------------------------------------------------------- library
+
+#include "library.hpp"
+#include "nlohmann/json.hpp"
+
+namespace {
+
+const std::string kTitle = "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
+const std::string kInfo = "atmosphere/contents/01007EF00011E000/romfs/Actor/ActorInfo.product.sbyml";
+const std::string kThing = "atmosphere/contents/01007EF00011E000/romfs/Actor/Pack/Thing.sbactorpack";
+
+// A BOTW library whose game files can be made unreadable, with two kinds of package: one
+// changing Title.pack (packs.json), one changing ActorInfo (needs the game's copy).
+struct BcmlFixture {
+    t::TempDir d;
+    fs::path sd = d.path / "sd", data = d.path / "sd/switch/patchwork", game = d.path / "game";
+    bool available = true;
+    Library lib{sd, data};
+
+    BcmlFixture() {
+        put(game / "01007EF00011E000/romfs/Pack/Title.pack", sarcOf({{"a.txt", "game a"}}));
+        put(game / "01007EF00011E000/romfs/Actor/ActorInfo.product.sbyml", emptyActorInfo());
+        put(data / "original/botw/ResourceSizeTable.product.srsizetable", yaz0Store(SizeTable().write()));
+        lib.load();
+        lib.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
+        lib.setGameFileReader([this](const std::string& p) {
+            if (!available) return Library::GameFile{};
+            auto f = bcml::FolderGameFiles(game).read(p);
+            return f ? Library::GameFile{Library::GameFile::State::Found, *f} : Library::GameFile{Library::GameFile::State::Absent, {}};
+        });
+    }
+    void addTitle(const std::string& id, bool enable = true, int64_t installedAt = 0) {
+        auto src = d.path / id;
+        put(src / "Title.pack", sarcOf({{"a.txt", id}}));
+        put(src / "logs/packs.json", R"({"Pack/Title.pack": "01007EF00011E000/romfs/Pack/Title.pack"})");
+        ModRecord r;
+        r.id = id;
+        r.game = Game::Botw;
+        r.bcmlLogs = {"0"};
+        r.installedAt = installedAt;
+        lib.add(r, {{src / "Title.pack", kTitle}}, enable, {}, {{src / "logs/packs.json", "bcml/0/packs.json"}});
+    }
+    void addActor(const std::string& id, bool enable = true, int64_t installedAt = 0) {
+        auto src = d.path / id;
+        put(src / "Thing.sbactorpack", "partial pack");
+        put(src / "logs/actorinfo.yml", "'1': {instSize: 5}\n");
+        ModRecord r;
+        r.id = id;
+        r.game = Game::Botw;
+        r.bcmlLogs = {"0"};
+        r.installedAt = installedAt;
+        lib.add(r, {{src / "Thing.sbactorpack", kThing}}, enable, {}, {{src / "logs/actorinfo.yml", "bcml/0/actorinfo.yml"}});
+    }
+};
+
+}  // namespace
+
+TEST("bcml: turning off a merged package while game files can't be read takes its changes off the card") {
+    BcmlFixture f;
+    f.addActor("a");
+    f.addTitle("b");
+    CHECK(fs::exists(f.sd / kTitle) && fs::exists(f.sd / kInfo) && fs::exists(f.sd / kThing));
+    CHECK(!fs::exists(f.data / "bcml-merged.new") && !fs::exists(f.data / "bcml-merged.old"));
+
+    f.available = false;  // merging a alone needs the game's ActorInfo
+    bool waited = false;
+    try {
+        f.lib.setEnabled("b", false);
+    } catch (const BcmlMergeError&) {
+        waited = true;
+    }
+    CHECK(waited);
+    CHECK(f.lib.bcmlPending());
+    CHECK(!fs::exists(f.sd / kTitle));  // b's merged change is gone…
+    CHECK(!fs::exists(f.sd / kInfo));   // …and a waits for its own merge
+    CHECK(!fs::exists(f.sd / kThing));
+
+    f.available = true;
+    f.lib.apply();
+    CHECK(!f.lib.bcmlPending());
+    CHECK(fs::exists(f.sd / kInfo) && fs::exists(f.sd / kThing));
+    CHECK(!fs::exists(f.sd / kTitle));
+}
+
+TEST("bcml: a package isn't taken as merged because its id ends another's") {
+    BcmlFixture f;
+    f.addTitle("ba", true, 100);
+    f.available = false;
+    f.addActor("a", false, 100);  // "a@100;" is inside "ba@100;"
+    bool waited = false;
+    try {
+        f.lib.setEnabled("a", true);
+    } catch (const BcmlMergeError&) {
+        waited = true;
+    }
+    CHECK(waited);
+    CHECK(!fs::exists(f.sd / kThing));  // its partial pack stays off the card
+    CHECK(fs::exists(f.sd / kTitle));   // the merge that didn't include it stays
+}
+
+TEST("library: a write interrupted before it was recorded isn't taken for the user's file") {
+    t::TempDir d;
+    auto sd = d.path / "sd", data = d.path / "sd/data";
+    const std::string target = "atmosphere/contents/0100F2C0115B6000/romfs/a.bin";
+    put(d.path / "src/a.bin", "MOD");
+    {
+        Library lib(sd, data);
+        lib.load();
+        ModRecord r;
+        r.id = "m";
+        r.game = Game::Totk;
+        lib.add(r, {{d.path / "src/a.bin", target}}, true);
+    }
+    // As left by a power loss while the file was being written: recorded as being written,
+    // the file half there.
+    auto state = nlohmann::json::parse(readFile(data / "state.json"));
+    CHECK_EQ(state["deployed"][target].get<std::string>(), std::string("m"));
+    state["deployed"][target] = "*writing";
+    writeFileAtomic(data / "state.json", state.dump());
+    put(sd / target, "MO");
+    {
+        Library lib(sd, data);
+        lib.load();
+        lib.apply();
+        CHECK_EQ(readFile(sd / target), std::string("MOD"));
+        lib.setEnabled("m", false);
+        CHECK(!fs::exists(sd / target));
+        CHECK(lib.unmanagedFiles(Game::Totk).targets.empty());
+    }
+    // A write that fails is recorded too, so the next apply finishes or undoes it.
+    {
+        Library lib(sd, data);
+        lib.load();
+        fs::remove(data / "library/totk/m" / target);
+        bool threw = false;
+        try {
+            lib.setEnabled("m", true);
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        CHECK(threw);
+        state = nlohmann::json::parse(readFile(data / "state.json"));
+        CHECK(state["deployed"].contains(target));
+        put(data / "library/totk/m" / target, "MOD");
+        lib.apply();
+        CHECK_EQ(readFile(sd / target), std::string("MOD"));
+        lib.setEnabled("m", false);
+        CHECK(!fs::exists(sd / target));
+        CHECK(lib.unmanagedFiles(Game::Totk).targets.empty());
+        CHECK(!fs::exists(data / "backup" / target));
+    }
+}
