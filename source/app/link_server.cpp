@@ -10,6 +10,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <csignal>
+#include <cstdlib>
+#include <random>
 #include <vector>
 
 #ifdef __SWITCH__
@@ -37,10 +40,24 @@ button{width:100%;margin-top:12px;font-size:16px;padding:12px;border:0;border-ra
 .err{background:#fcebeb;color:#791f1f;padding:10px;border-radius:8px;font-size:14px;margin-top:16px}
 ul{color:#666;font-size:13px;padding-left:18px}</style></head><body>
 <h1>Patchwork</h1><p>Send a mod to your Switch</p>
-<form method="post" action="/send"><input name="url" type="url" placeholder="Paste a link…" required autofocus>
+<form method="post" action="send"><input name="url" type="url" placeholder="Paste a link…" required autofocus>
 <button type="submit">Send to Switch</button></form>%STATUS%
 <ul><li>Direct links to .zip, .7z or .rar files</li><li>Waikuteru mod pages</li><li>GameBanana mod pages</li></ul>
 <p>Then look at your Switch: nothing is installed until you confirm there.</p></body></html>)HTML";
+
+// Six letters/digits that can't be confused when typed (no 0/o, 1/l/i).
+std::string randomToken() {
+    static const char kChars[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::string t;
+#ifdef __SWITCH__
+    for (int i = 0; i < 6; ++i) t += kChars[randomGet64() % (sizeof kChars - 1)];
+#else
+    if (const char* fixed = std::getenv("MM_LINK_TOKEN")) return fixed;  // desktop QA scripts
+    std::random_device rd;
+    for (int i = 0; i < 6; ++i) t += kChars[rd() % (sizeof kChars - 1)];
+#endif
+    return t;
+}
 
 std::string page(const std::string& status) {
     std::string html = kPage;
@@ -72,8 +89,9 @@ void sendAll(int fd, const std::string& data) {
     }
 }
 
-void respond(int fd, const char* status, const std::string& body) {
+void respond(int fd, const char* status, const std::string& body, const std::string& location = {}) {
     std::string head = std::string("HTTP/1.1 ") + status +
+                       (location.empty() ? "" : "\r\nLocation: " + location) +
                        "\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: " +
                        std::to_string(body.size()) + "\r\n\r\n";
     sendAll(fd, head + body);
@@ -152,7 +170,11 @@ bool LinkServer::start(std::function<void(const std::string&)> onLink, std::func
         error_ = "Couldn't start the link page (ports 8080-8089 are busy).";
         return false;
     }
-    address_ = ip + ":" + std::to_string(port);
+#ifndef __SWITCH__
+    std::signal(SIGPIPE, SIG_IGN);  // a phone closing the page mid-reply must not end the app
+#endif
+    token_ = randomToken();
+    address_ = ip + ":" + std::to_string(port) + "/" + token_;
     stop_ = false;
     running_ = true;
     thread_ = std::thread([this] { loop(); });
@@ -245,7 +267,8 @@ void LinkServer::loop() {
 }
 
 void LinkServer::handle(int client, const std::string& req, size_t headerEnd) {
-    if (req.rfind("POST /send", 0) == 0) {
+    const std::string base = "/" + token_;
+    if (req.rfind("POST " + base + "/send", 0) == 0) {
         auto body = req.substr(headerEnd + 4);
         std::string url;
         for (size_t start = 0; start <= body.size();) {
@@ -266,13 +289,18 @@ void LinkServer::handle(int client, const std::string& req, size_t headerEnd) {
         respond(client, "200 OK", page("<div class=\"ok\">Sent: " + escapeHtml(url) + "<br>Check your Switch.</div>"));
         return;
     }
-    if (req.rfind("GET / ", 0) == 0 || req.rfind("GET /?", 0) == 0) {
+    // The form posts to "send" relative to the page, so the page lives at "/<code>/".
+    if (req.rfind("GET " + base + " ", 0) == 0) {
+        respond(client, "301 Moved Permanently", "", base + "/");
+        return;
+    }
+    if (req.rfind("GET " + base + "/ ", 0) == 0 || req.rfind("GET " + base + "/?", 0) == 0) {
         ++visits_;
         if (onVisit_) onVisit_();
         respond(client, "200 OK", page(""));
         return;
     }
-    respond(client, "404 Not Found", page(""));
+    respond(client, "404 Not Found", "<!doctype html><meta charset=\"utf-8\"><p>Not found. Open the address shown on your Switch, including the code after the /.</p>");
 }
 
 }  // namespace app
