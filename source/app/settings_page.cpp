@@ -35,7 +35,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
 
     auto section = [content](const std::string& title) {
         auto* l = ui::label(title, 16, ui::muted());
-        l->setMargins(18, 0, 8, 4);
+        l->setMargins(30, 0, 8, 4);
         content->addView(l);
         return l;
     };
@@ -64,52 +64,55 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         holdTimer_.start(100);
     }
 
-    // BCML packages: the one-time setup (reading the game's files) and its state.
-    section("BCML packages · Breath of the Wild");
-    auto* files = new brls::DetailCell();
-    files->setText("Game files");
-    {
-        auto& st = AppState::get();
-        using A = AppState::GameAccess;
-        auto kept = st.keptGameFiles();
-        auto access = st.botwAccess();
-        files->setDetailText(access == A::Ready    ? (kept ? "Can read now · " + std::to_string(kept) + " kept" : "Can read now")
-                             : access == A::ModsOn ? "Mods were on: hold L too"
-                             : kept                ? std::to_string(kept) + " kept on the SD card"
-                                                   : "Not read yet");
-    }
-    content->addView(files);
-    auto* dlc = new brls::DetailCell();
-    dlc->setText("Expansion Pass (DLC)");
-    int dlcInstalled = platform::botwDlcInstalled();
-    dlc->setDetailText(dlcInstalled == 1 ? "Installed" : dlcInstalled == 0 ? "Not installed" : "Couldn't tell");
-    content->addView(dlc);
-    auto* sizes = new brls::DetailCell();
-    sizes->setText("Size table");
-    sizes->setDetailText(AppState::get().sizeTableStatus());
-    content->addView(sizes);
-    auto* sizesBar = new ui::ProgressBar(300);
-    sizesBar->setMargins(10, 4, 0, 4);
-    content->addView(sizesBar);
-    auto showSizes = [sizes, sizesBar] {
-        float p = AppState::get().sizeTableProgress();
+    // BCML packages: the one-time setup (reading the game's files) and its state (BCML is
+    // Breath of the Wild only).
+    if (AppState::get().game() == mm::Game::Botw) {
+        section("BCML packages · Breath of the Wild");
+        auto* files = new brls::DetailCell();
+        files->setText("Game files");
+        {
+            auto& st = AppState::get();
+            using A = AppState::GameAccess;
+            auto kept = st.keptGameFiles();
+            auto access = st.botwAccess();
+            files->setDetailText(access == A::Ready    ? (kept ? "Can read now · " + std::to_string(kept) + " kept" : "Can read now")
+                                 : access == A::ModsOn ? "Mods were on: hold L too"
+                                 : kept                ? std::to_string(kept) + " kept on the SD card"
+                                                       : "Not read yet");
+        }
+        content->addView(files);
+        auto* dlc = new brls::DetailCell();
+        dlc->setText("Expansion Pass (DLC)");
+        int dlcInstalled = platform::botwDlcInstalled();
+        dlc->setDetailText(dlcInstalled == 1 ? "Installed" : dlcInstalled == 0 ? "Not installed" : "Couldn't tell");
+        content->addView(dlc);
+        auto* sizes = new brls::DetailCell();
+        sizes->setText("Size table");
         sizes->setDetailText(AppState::get().sizeTableStatus());
-        sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-        if (p >= 0) sizesBar->setProgress(p);
-        return p >= 0;
-    };
-    if (showSizes()) {
-        sizeTimer_.setCallback([this, showSizes] {
-            if (!showSizes()) sizeTimer_.stop();
-        });
-        sizeTimer_.start(150);
+        content->addView(sizes);
+        auto* sizesBar = new ui::ProgressBar(300);
+        sizesBar->setMargins(10, 4, 0, 4);
+        content->addView(sizesBar);
+        auto showSizes = [sizes, sizesBar] {
+            float p = AppState::get().sizeTableProgress();
+            sizes->setDetailText(AppState::get().sizeTableStatus());
+            sizesBar->setVisibility(p >= 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+            if (p >= 0) sizesBar->setProgress(p);
+            return p >= 0;
+        };
+        if (showSizes()) {
+            sizeTimer_.setCallback([this, showSizes] {
+                if (!showSizes()) sizeTimer_.stop();
+            });
+            sizeTimer_.start(150);
+        }
+        auto* bcmlHow = ui::label("Most BCML packages (.bnp) are merged with the game's own files, which Patchwork reads from the game "
+                                  "itself. Before installing your first one (and after a game update):\n" +
+                                      AppState::bcmlSetupSteps(false) + "\nThen install BCML packages as usual. Copies of the files are kept on the SD card.",
+                                  14, ui::muted(), false);
+        bcmlHow->setMargins(10, 4, 4, 4);
+        content->addView(bcmlHow);
     }
-    auto* bcmlHow = ui::label("Most BCML packages (.bnp) are merged with the game's own files, which Patchwork reads from the game "
-                              "itself. Before installing your first one (and after a game update):\n" +
-                                  AppState::bcmlSetupSteps(false) + "\nThen install BCML packages as usual. Copies of the files are kept on the SD card.",
-                              14, ui::muted(), false);
-    bcmlHow->setMargins(10, 4, 4, 4);
-    content->addView(bcmlHow);
 
     section("Background add-ons");
     auto modules = mm::listSysmodules(platform::sdRoot());

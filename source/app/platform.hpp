@@ -69,7 +69,7 @@ bool runningAsGame(mm::Game game);
 // Switch (it gives UTC), so this asks the system.
 std::tm localTime(int64_t unixSeconds);
 
-// User profiles on the console. On desktop: $MM_USERS ("Ryan,Kid"), default "Player".
+// User profiles on the console. On desktop: $MM_USERS ("Alex,Sam"), default "Player".
 struct UserProfile {
     std::string id;    // stable, for backups
     std::string name;

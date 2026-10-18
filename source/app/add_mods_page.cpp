@@ -11,6 +11,14 @@
 namespace app {
 
 namespace {
+// What the inbox takes for the selected game (BCML packages are Breath of the Wild only).
+std::string inboxKinds() {
+    return AppState::get().game() == mm::Game::Botw ? ".zip, .7z, .rar or BCML .bnp files (mods or save files)"
+                                                    : ".zip, .7z or .rar files (mods or save files)";
+}
+}  // namespace
+
+namespace {
 
 // Draws a QR code for a short text (the link page's address).
 class QrView : public brls::Box {
@@ -179,7 +187,7 @@ void AddModsPage::rebuild() {
         if (!first || p.string() == focusedPath_) first = row;
     }
     if (files.empty()) {
-        auto* none = ui::label("No files yet. Copy .zip, .7z, .rar or BCML .bnp files (mods or save files) into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
+        auto* none = ui::label("No files yet. Copy " + inboxKinds() + " into switch/patchwork/inbox on the SD card.", 15, ui::muted(), false);
         none->setMargins(0, 6, 6, 6);
         list_->addView(none);
     }
@@ -262,7 +270,7 @@ void AddModsPage::showInboxFile(const mm::fs::path& path) {
         note->setMarginTop(12);
         pane_->addView(note);
     }
-    auto* more = ui::label("To add more, copy zip, 7z, rar or BCML .bnp files (mods or save files) into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
+    auto* more = ui::label("To add more, copy " + inboxKinds() + " into switch/patchwork/inbox on the SD card, from a PC or over USB/FTP "
                            "(for example with DBI or sys-ftpd). The file stays here after installing; X deletes it.",
                            15, ui::muted(), false);
     more->setMarginTop(14);
