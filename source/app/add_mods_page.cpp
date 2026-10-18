@@ -381,7 +381,7 @@ void AddModsPage::showLinkScreen() {
     ui::tappable(box, ui::Tap::Act);  // a tap opens a received link
     auto* top = ui::hbox();
     top->setAlignItems(brls::AlignItems::FLEX_START);
-    top->addView(new QrView("http://" + server_.address()));
+    top->addView(new QrView("http://" + server_.address() + "/"));
     auto* steps = ui::vbox();
     steps->setMarginLeft(24);
     steps->setGrow(1);
@@ -390,7 +390,7 @@ void AddModsPage::showLinkScreen() {
     auto* s1 = ui::label("1. Connect your phone to the same Wi-Fi.\n2. Scan the code, or open this address:", 16, nvgRGB(0xc8, 0xc8, 0xc8), false);
     s1->setMarginTop(10);
     steps->addView(s1);
-    auto* addr = ui::label(server_.address(), 30, ui::accent());
+    auto* addr = ui::label(server_.address(), 22, ui::accent());  // fits a long address with its code
     addr->setMargins(6, 0, 6, 0);
     steps->addView(addr);
     steps->addView(ui::label("3. Paste a mod link and tap Send.", 16, nvgRGB(0xc8, 0xc8, 0xc8), false));

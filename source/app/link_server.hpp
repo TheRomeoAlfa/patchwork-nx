@@ -22,7 +22,9 @@ public:
     bool start(std::function<void(const std::string& url)> onLink, std::function<void()> onVisit = {});
     void stop();
     bool running() const { return running_; }
-    const std::string& address() const { return address_; }  // "192.168.1.20:8080"
+    // "192.168.1.20:8080/k7q2xa": the page only answers under its random code, so only
+    // someone who can see the Switch's screen can send a link.
+    const std::string& address() const { return address_; }
     const std::string& error() const { return error_; }  // why start() failed
     int visits() const { return visits_; }
     std::string status() const;  // last network error while running, or ""
@@ -40,7 +42,7 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<bool> running_{false};
     int fd_ = -1;
-    std::string address_, error_;
+    std::string address_, error_, token_;
 };
 
 // The console's (or computer's) address on the local network, or "" if not connected.
