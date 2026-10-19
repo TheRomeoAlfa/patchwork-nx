@@ -15,6 +15,30 @@ reorder and remove them, all from the console. No PC needed, including for most 
 Patchwork is an unofficial fan project. It isn't affiliated with or endorsed by Nintendo, GameBanana or
 Waikuteru. *The Legend of Zelda* is a trademark of Nintendo. Mods belong to their authors.
 
+## ⚠️ Warnings
+
+Read these before using Patchwork:
+
+- **Use at your own risk.** Patchwork is free software with no warranty (see the [license](LICENSE)). Mods
+  change how your games run; a bad or incompatible mod can crash the game or make it fail to start.
+- **Back up your saves and your SD card.** Mods can damage save files, and installing a save file from
+  GameBanana replaces the save in the slot you pick. Patchwork backs up a profile's saves before installing
+  a save file, but keep your own backup too (for example with JKSV or Checkpoint).
+- **Going online with custom firmware can get your console banned by Nintendo.** Patchwork only talks to
+  GameBanana and Waikuteru's site, but running homebrew and mods while connected to Nintendo's servers is
+  risky. Many people use an emuMMC (emuNAND) and block Nintendo's servers (for example with 90DNS) while
+  modding. Don't play online with mods.
+- **BCML merging on the console is new.** It's been tested with packages of every common kind, but not
+  with every package or combination. If the game won't start after installing a BCML package, turn it off
+  in My mods; turning packages off and removing them puts the game's files back.
+- **Game updates can break mods.** Mods are made for specific game versions; Patchwork warns when a file
+  names a different version, but can't always tell. After updating Breath of the Wild, open Patchwork once
+  with L and R held so BCML packages are merged with the new files.
+- **Background add-ons** (Settings) turn Atmosphère sysmodules on and off. Only change ones you know; some
+  homebrew depends on them.
+- Mods are downloaded from GameBanana and Waikuteru and belong to their authors. Patchwork doesn't check
+  what a mod does; only install mods you trust.
+
 ## Features
 
 - **Browse and search** GameBanana with a live preview of each mod, and see an installed mod's page again in My mods
