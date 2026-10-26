@@ -55,6 +55,9 @@ std::string gameVersion(mm::Game game) {
 }
 
 uint64_t freeSpaceBytes() {
+#ifndef __SWITCH__
+    if (const char* env = std::getenv("MM_FREE_SPACE")) return std::strtoull(env, nullptr, 10);  // QA: pretend the card is this full
+#endif
     struct statvfs st {};
     auto root = sdRoot().string();
     if (statvfs(root.c_str(), &st) != 0) return 0;

@@ -84,9 +84,34 @@ const std::string kContentsPrefix = "atmosphere/contents/";
 constexpr const char* kWriting = "*writing";
 constexpr size_t kBatch = 50;  // files written between state saves
 
+// Space a file takes on the card. FAT hands out whole clusters: 32 KB on SD cards the Switch
+// formats as FAT32 (exFAT uses more; the margin below absorbs some of that).
+constexpr uint64_t kCluster = 32 * 1024;
+// Kept free on top of the files themselves: state saves, the merged size table, folders.
+constexpr uint64_t kSpaceMargin = 32ull << 20;
+
+uint64_t sizeOnCard(const fs::path& p) {
+    std::error_code ec;
+    if (!fs::is_regular_file(p, ec)) return 0;
+    auto size = fs::file_size(p, ec);
+    return ec ? 0 : (size + kCluster - 1) / kCluster * kCluster;
+}
+
 }  // namespace
 
+NotEnoughSpaceError::NotEnoughSpaceError(uint64_t needed, uint64_t free, const std::string& advice)
+    : std::runtime_error("Not enough free space on the SD card: this needs about " + formatSize(needed) + " and there's " +
+                         formatSize(free) + " free. " + advice),
+      needed(needed),
+      free(free) {}
+
 Library::Library(fs::path sdRoot, fs::path dataDir) : sdRoot_(std::move(sdRoot)), dataDir_(std::move(dataDir)) {}
+
+void Library::checkSpace(uint64_t needed, const std::string& advice) const {
+    if (!freeSpace_) return;
+    uint64_t free = freeSpace_();
+    if (free && needed > free) throw NotEnoughSpaceError(needed, free, advice);
+}
 
 bool Library::load() {
     mods_.clear();
@@ -174,6 +199,25 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
                               const ProgressFn& progress, const std::vector<FileMapping>& internal) {
     if (record.id.empty()) throw std::invalid_argument("mod id is empty");
     if (files.empty() && internal.empty()) throw std::invalid_argument("mod has no files");
+
+    // 0. Room for the library copy and, if it's turned on, the copy in the game's folder
+    //    (less what it replaces there). Checked first so a big mod doesn't fill the card.
+    if (freeSpace_) {
+        std::set<std::string> ours;
+        for (const auto& [t, id] : deployed_) ours.insert(targetKey(t));
+        uint64_t need = kSpaceMargin;
+        for (const auto& f : internal) need += sizeOnCard(f.source);
+        for (const auto& f : files) {
+            auto size = sizeOnCard(f.source);
+            need += size;
+            if (!enable || !isSafeRelativePath(f.target)) continue;
+            auto old = sizeOnCard(sdRoot_ / fs::path(f.target));
+            auto key = targetKey(f.target);
+            if (old && !ours.count(key) && !backedUp_.count(key)) need += old;  // the original's backup
+            need += size > old ? size - old : 0;
+        }
+        checkSpace(need, "Remove some mods or other files and try again.");
+    }
 
     // 1. Copy into a staging folder. Until this succeeds neither the library nor the SD
     //    card changes, so a failed copy (SD full, bad archive) leaves no trace.
@@ -265,6 +309,10 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             }
             save();
             throw;
+        } catch (const NotEnoughSpaceError& e) {
+            findMut(id)->enabled = false;
+            save();  // apply() stopped before changing anything
+            throw NotEnoughSpaceError(e.needed, e.free, "The mod is saved but turned off; free up space, then turn it on in My mods.");
         } catch (const std::exception& e) {
             findMut(id)->enabled = false;
             try {
@@ -272,8 +320,11 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             } catch (...) {
             }
             save();
-            throw std::runtime_error(std::string("couldn't copy the files to the SD card (") + e.what() +
-                                     "). The mod is saved but turned off; free up space, then turn it on in My mods.");
+            std::string why = e.what();
+            if (auto* fe = dynamic_cast<const fs::filesystem_error*>(&e); fe && fe->code() == std::errc::no_space_on_device)
+                why = "the SD card is full";
+            throw std::runtime_error("couldn't copy the files to the SD card (" + why +
+                                     "). The mod is saved but turned off; turn it on in My mods to try again.");
         }
     }
     return *find(id);
@@ -286,7 +337,13 @@ void Library::setEnabled(const std::string& id, bool enabled, const ProgressFn& 
     m->enabled = enabled;
     bool bcml = !m->bcmlLogs.empty();
     save();
-    apply(progress);
+    try {
+        apply(progress);
+    } catch (const NotEnoughSpaceError&) {
+        findMut(id)->enabled = !enabled;  // nothing was written: put it back as it was
+        save();
+        throw;
+    }
     if (bcml && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
@@ -358,11 +415,18 @@ void Library::move(const std::string& id, int delta, const ProgressFn& progress)
     auto idx = static_cast<long>(it - ordered.begin());
     auto newIdx = std::clamp(idx - delta, 0L, static_cast<long>(ordered.size()) - 1);  // +1 = toward front
     if (newIdx == idx) return;
+    auto before = ordered;
     ordered.erase(ordered.begin() + idx);
     ordered.insert(ordered.begin() + newIdx, target);
     renumber(ordered);
     save();
-    apply(progress);
+    try {
+        apply(progress);
+    } catch (const NotEnoughSpaceError&) {
+        renumber(before);  // nothing was written: keep the old order
+        save();
+        throw;
+    }
     if (!target->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
 }
 
@@ -673,6 +737,36 @@ void Library::apply(const ProgressFn& progress) {
         if (it == deployedByKey.end() || deployed_.at(it->second) != id) toWrite.push_back(t);
     }
 
+    // Where each target's content comes from (none for the merged size table, built in place).
+    auto sourceOf = [&](const std::string& t, const std::string& id) -> fs::path {
+        if (id.rfind(kMergedPrefix, 0) == 0) return {};
+        if (id.rfind(kBcmlPrefix, 0) == 0) return dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size()));
+        return modDir(*find(id)) / fs::path(t);
+    };
+
+    // Check there's room before changing anything, so a full card can't stop this half-way.
+    // Removals run first and free space; originals we haven't backed up yet get copied; a
+    // replaced file briefly exists twice (see replaceFile).
+    if (freeSpace_) {
+        uint64_t need = 0, freed = 0, largest = 0;
+        for (const auto& t : toRemove)
+            if (!backedUp_.count(targetKey(t))) freed += sizeOnCard(sdRoot_ / fs::path(t));
+        for (const auto& t : toWrite) {
+            const auto& id = desired.at(t);
+            auto sdPath = sdRoot_ / fs::path(t);
+            auto key = targetKey(t);
+            auto old = sizeOnCard(sdPath);
+            auto src = sourceOf(t, id);
+            auto size = src.empty() ? std::max(old, sizeOnCard(originalSizeTable_)) : sizeOnCard(src);
+            if (old && !deployedByKey.count(key) && !backedUp_.count(key) && !fs::exists(backupPath(t))) need += old;
+            need += size > old ? size - old : 0;
+            largest = std::max(largest, std::min(size, old));
+        }
+        need += largest;
+        // Turning mods off or rearranging them without needing more room is never refused.
+        if (need > freed) checkSpace(need - freed + kSpaceMargin, "Remove some mods or other files and try again.");
+    }
+
     size_t total = toRemove.size() + toWrite.size(), done = 0, sinceSave = 0;
     auto checkpoint = [&] {
         if (++sinceSave >= kBatch) {
@@ -727,10 +821,8 @@ void Library::apply(const ProgressFn& progress) {
                 auto sdPath = sdRoot_ / fs::path(t);
                 if (id.rfind(kMergedPrefix, 0) == 0)
                     writeMergedSizeTable(sdPath);
-                else if (id.rfind(kBcmlPrefix, 0) == 0)
-                    replaceFile(dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size())), sdPath);
                 else
-                    replaceFile(modDir(*find(id)) / fs::path(t), sdPath);
+                    replaceFile(sourceOf(t, id), sdPath);
                 deployed_[t] = id;
                 ++done;
             }

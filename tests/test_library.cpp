@@ -278,3 +278,86 @@ TEST("library: stop managing hands the current file over without bringing back a
     f.lib.importUnmanaged(Game::Botw, "Existing");
     CHECK_EQ(read(f.sd / (botw + "x")), "m:" + botw + "x");
 }
+
+TEST("library: an install that doesn't fit is refused before anything is written") {
+    Fixture f;
+    uint64_t free = 10ull << 20;  // less than the safety margin
+    f.lib.setFreeSpace([&] { return free; });
+    bool refused = false;
+    try {
+        f.addMod("a", {kRomfs + "Actor/x.pack"});
+    } catch (const NotEnoughSpaceError& e) {
+        refused = true;
+        CHECK_EQ(e.free, free);
+        CHECK(e.needed > free);
+        CHECK(std::string(e.what()).find("Not enough free space") != std::string::npos);
+    }
+    CHECK(refused);
+    CHECK(f.lib.find("a") == nullptr);
+    CHECK(!fs::exists(f.sd / "switch/mm/library/totk/a.incoming"));
+    CHECK(!fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+
+    free = 1ull << 30;
+    f.addMod("a", {kRomfs + "Actor/x.pack"});
+    CHECK(fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+}
+
+TEST("library: turning a mod on needs room; turning one off never does") {
+    Fixture f;
+    uint64_t free = 1ull << 30;
+    f.lib.setFreeSpace([&] { return free; });
+    f.addMod("a", {kRomfs + "Actor/x.pack"}, false);
+    free = 1ull << 20;
+    bool refused = false;
+    try {
+        f.lib.setEnabled("a", true);
+    } catch (const NotEnoughSpaceError&) {
+        refused = true;
+    }
+    CHECK(refused);
+    CHECK(!fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+
+    free = 1ull << 30;
+    f.lib.setEnabled("a", true);
+    CHECK(fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+    free = 1;  // full card
+    f.lib.setEnabled("a", false);
+    CHECK(!fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+}
+
+TEST("library: no room for the game-folder copy keeps the mod, turned off, with advice") {
+    Fixture f;
+    // add()'s own check sees unknown free space (0) and lets the library copy through; the
+    // check in apply() then refuses the copy to the game's folder.
+    int calls = 0;
+    f.lib.setFreeSpace([&]() -> uint64_t { return ++calls == 1 ? 0 : 1ull << 20; });
+    std::string msg;
+    try {
+        f.addMod("a", {kRomfs + "Actor/x.pack"}, true);
+    } catch (const NotEnoughSpaceError& e) {
+        msg = e.what();
+    }
+    CHECK(msg.find("turn it on in My mods") != std::string::npos);
+    const auto* m = f.lib.find("a");
+    CHECK(m != nullptr);
+    if (m) CHECK(!m->enabled);
+    CHECK(!fs::exists(f.sd / (kRomfs + "Actor/x.pack")));
+}
+
+TEST("library: a reorder that doesn't fit keeps the old order") {
+    Fixture f;
+    f.addMod("a", {kRomfs + "shared"});
+    f.addMod("b", {kRomfs + "shared"});  // b wins
+    // Make a's copy much bigger so swapping the winner needs room.
+    write(f.sd / "switch/mm/library/totk/a" / (kRomfs + "shared"), std::string(4 << 20, 'x'));
+    f.lib.setFreeSpace([] { return uint64_t(1) << 20; });
+    bool refused = false;
+    try {
+        f.lib.move("a", +1);
+    } catch (const NotEnoughSpaceError&) {
+        refused = true;
+    }
+    CHECK(refused);
+    CHECK_EQ(f.lib.mods(Game::Totk).front()->id, std::string("b"));
+    CHECK_EQ(read(f.sd / (kRomfs + "shared")), "b:" + kRomfs + "shared");
+}
