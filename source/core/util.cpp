@@ -174,6 +174,17 @@ void copyFileCreatingDirs(const fs::path& from, const fs::path& to) {
     }
 }
 
+std::string formatSize(uint64_t bytes) {
+    char buf[32];
+    if (bytes >= (1ull << 30))
+        std::snprintf(buf, sizeof buf, "%.1f GB", bytes / double(1ull << 30));
+    else if (bytes >= (1ull << 20))
+        std::snprintf(buf, sizeof buf, "%.1f MB", bytes / double(1ull << 20));
+    else
+        std::snprintf(buf, sizeof buf, "%llu KB", static_cast<unsigned long long>((bytes + 1023) / 1024));
+    return buf;
+}
+
 int64_t stableId(std::string_view s) {
     uint64_t h = 1469598103934665603ull;
     for (unsigned char c : s) {

@@ -169,15 +169,24 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     };
     cache->setText("Delete unfinished downloads");
     cache->setDetailText(formatSize(cacheDirs()));
-    cache->registerClickAction([cache, cacheDirs](brls::View*) {
-        if (AppState::get().fileJobRunning()) {
+    cache->registerClickAction([cache, cacheDirs, alive = alive_](brls::View*) {
+        auto& st = AppState::get();
+        if (st.fileJobRunning()) {
             brls::Application::notify("Wait for the current install to finish");
             return true;
         }
-        mm::removeTree(AppState::get().downloadsDir());
-        mm::removeTree(AppState::get().workDir());
-        cache->setDetailText(formatSize(cacheDirs()));
-        brls::Application::notify("Leftover downloads deleted");
+        cache->setDetailText("Deleting…");
+        // As a file job: big downloads take a while to delete, and finishing one refreshes
+        // the free space shown in the sidebar.
+        st.runFileJob(
+            [](mm::Library&) {
+                mm::removeTree(AppState::get().downloadsDir());
+                mm::removeTree(AppState::get().workDir());
+            },
+            [cache, cacheDirs, alive](const std::string&) {
+                if (*alive) cache->setDetailText(formatSize(cacheDirs()));
+                brls::Application::notify("Leftover downloads deleted");
+            });
         return true;
     });
     content->addView(cache);

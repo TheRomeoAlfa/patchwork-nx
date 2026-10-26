@@ -140,6 +140,7 @@ void AppState::init() {
             dlcFound = true;
         }
     }
+    library_->setFreeSpace(platform::freeSpaceBytes);
     library_->setTextLanguage(platform::gameTextLanguage());
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
@@ -784,16 +785,7 @@ void AppState::discardPending(int64_t fileId) const {
 
 std::string formatFileSize(int64_t bytes) { return bytes > 0 ? formatSize(static_cast<uint64_t>(bytes)) : "size unknown"; }
 
-std::string formatSize(uint64_t bytes) {
-    char buf[32];
-    if (bytes >= (1ull << 30))
-        std::snprintf(buf, sizeof buf, "%.1f GB", bytes / double(1ull << 30));
-    else if (bytes >= (1ull << 20))
-        std::snprintf(buf, sizeof buf, "%.1f MB", bytes / double(1ull << 20));
-    else
-        std::snprintf(buf, sizeof buf, "%llu KB", static_cast<unsigned long long>((bytes + 1023) / 1024));
-    return buf;
-}
+std::string formatSize(uint64_t bytes) { return mm::formatSize(bytes); }
 
 std::string formatCount(int64_t n) {
     char buf[32];
