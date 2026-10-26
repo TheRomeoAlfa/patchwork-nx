@@ -56,19 +56,23 @@ WorkQueue::WorkQueue(int threads) {
         });
 }
 
-WorkQueue::~WorkQueue() {
+WorkQueue::~WorkQueue() { stop(); }
+
+void WorkQueue::stop() {
     {
         std::lock_guard lock(mutex_);
         stop_ = true;
         jobs_.clear();
     }
     cv_.notify_all();
-    for (auto& t : threads_) t.join();
+    for (auto& t : threads_)
+        if (t.joinable()) t.join();
 }
 
 void WorkQueue::post(std::function<void()> job) {
     {
         std::lock_guard lock(mutex_);
+        if (stop_) return;
         jobs_.push_back(std::move(job));
     }
     cv_.notify_one();
@@ -77,8 +81,8 @@ void WorkQueue::post(std::function<void()> job) {
 // ------------------------------------------------------------------ AppState
 
 AppState& AppState::get() {
-    // Never destroyed: background downloads may still be finishing while the app exits, and
-    // they must not find their locks and caches gone.
+    // Never destroyed: shutdown() ends the background threads, and nothing else needs
+    // cleaning up at exit.
     static auto* instance = new AppState();
     return *instance;
 }
@@ -241,7 +245,13 @@ void AppState::init() {
         }, {});
 }
 
-void AppState::shutdown() { saveSettings(); }
+void AppState::shutdown() {
+    saveSettings();
+    // Network jobs end at their next progress check; a file job (an install) is left to finish.
+    if (http_) http_->cancelAll();
+    net_.stop();
+    files_.stop();
+}
 
 AppState::GameAccess AppState::botwAccess() const {
     if (!platform::runningAsGame(mm::Game::Botw)) return GameAccess::NotFromGame;

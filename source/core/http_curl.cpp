@@ -26,9 +26,16 @@ size_t writeToFile(char* ptr, size_t size, size_t nmemb, void* userdata) {
     return std::fwrite(ptr, size, nmemb, static_cast<FILE*>(userdata)) * size;
 }
 
+// Called about once a second, also while connecting, so cancelAll() stops every request quickly.
+struct Progress {
+    const std::atomic<bool>* cancelled;
+    const DownloadProgressFn* fn = nullptr;
+};
+
 int progressCb(void* userdata, curl_off_t dltotal, curl_off_t dlnow, curl_off_t, curl_off_t) {
-    auto* fn = static_cast<const DownloadProgressFn*>(userdata);
-    if (*fn && !(*fn)(static_cast<uint64_t>(dlnow), static_cast<uint64_t>(dltotal))) return 1;  // abort
+    auto* p = static_cast<const Progress*>(userdata);
+    if (*p->cancelled) return 1;  // abort
+    if (p->fn && *p->fn && !(*p->fn)(static_cast<uint64_t>(dlnow), static_cast<uint64_t>(dltotal))) return 1;
     return 0;
 }
 
@@ -51,10 +58,15 @@ CURLSH* sharedState() {
 
 using CurlPtr = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 
-CurlPtr makeHandle(const std::string& url, const std::string& userAgent, const std::string& caBundle) {
+// `progress` must outlive the handle.
+CurlPtr makeHandle(const std::string& url, const std::string& userAgent, const std::string& caBundle, const Progress& progress) {
+    if (*progress.cancelled) throw std::runtime_error("cancelled");
     CurlPtr h(curl_easy_init(), curl_easy_cleanup);
     if (!h) throw std::runtime_error("curl_easy_init failed");
     curl_easy_setopt(h.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(h.get(), CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h.get(), CURLOPT_XFERINFOFUNCTION, progressCb);
+    curl_easy_setopt(h.get(), CURLOPT_XFERINFODATA, &progress);
     curl_easy_setopt(h.get(), CURLOPT_SHARE, sharedState());
     curl_easy_setopt(h.get(), CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(h.get(), CURLOPT_FOLLOWLOCATION, 1L);
@@ -105,7 +117,8 @@ CurlHttpClient::CurlHttpClient(std::string userAgent, std::string caBundle)
 CurlHttpClient::~CurlHttpClient() = default;
 
 std::string CurlHttpClient::get(const std::string& url) {
-    auto h = makeHandle(url, userAgent_, caBundle_);
+    Progress prog{&cancelled_};
+    auto h = makeHandle(url, userAgent_, caBundle_, prog);
     std::string body;
     curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, appendToString);
     curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, &body);
@@ -126,18 +139,16 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
         std::error_code ec;
         fs::remove(part, ec);
     };
+    Progress prog{&cancelled_, &progress};
     CurlPtr h(nullptr, curl_easy_cleanup);
     try {
-        h = makeHandle(url, userAgent_, caBundle_);
+        h = makeHandle(url, userAgent_, caBundle_, prog);
     } catch (...) {
         cleanup();
         throw;
     }
     curl_easy_setopt(h.get(), CURLOPT_WRITEFUNCTION, writeToFile);
     curl_easy_setopt(h.get(), CURLOPT_WRITEDATA, f);
-    curl_easy_setopt(h.get(), CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(h.get(), CURLOPT_XFERINFOFUNCTION, progressCb);
-    curl_easy_setopt(h.get(), CURLOPT_XFERINFODATA, &progress);
     try {
         perform(h.get(), url);
     } catch (...) {
@@ -159,7 +170,8 @@ std::string CurlHttpClient::getRange(const std::string& url, uint64_t from, uint
         std::string body;
         size_t limit;
     } st{{}, static_cast<size_t>(to - from + 1)};
-    auto h = makeHandle(url, userAgent_, caBundle_);
+    Progress prog{&cancelled_};
+    auto h = makeHandle(url, userAgent_, caBundle_, prog);
     auto range = std::to_string(from) + "-" + std::to_string(to);
     curl_easy_setopt(h.get(), CURLOPT_RANGE, range.c_str());
     curl_easy_setopt(h.get(), CURLOPT_TIMEOUT, 30L);
@@ -192,7 +204,8 @@ int64_t CurlHttpClient::contentLength(const std::string& url) {
         int64_t total = -1, length = -1;
         size_t received = 0;
     } st;
-    auto h = makeHandle(url, userAgent_, caBundle_);
+    Progress prog{&cancelled_};
+    auto h = makeHandle(url, userAgent_, caBundle_, prog);
     curl_easy_setopt(h.get(), CURLOPT_RANGE, "0-0");
     curl_easy_setopt(h.get(), CURLOPT_TIMEOUT, 20L);
     curl_easy_setopt(h.get(), CURLOPT_HEADERDATA, &st);
