@@ -27,6 +27,9 @@ class WorkQueue {
 public:
     explicit WorkQueue(int threads);
     ~WorkQueue();
+    // Drop the waiting jobs, wait for the running ones and end the threads. Jobs posted
+    // afterwards are dropped too.
+    void stop();
     void post(std::function<void()> job);
 
 private:
@@ -78,6 +81,8 @@ public:
     static AppState& get();
 
     void init();
+    // Before main() returns: stops the background threads, so none is still running while
+    // static objects they use (borealis, curl, regexes) are destroyed.
     void shutdown();
 
     // ---- current game

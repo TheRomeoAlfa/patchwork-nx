@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <stdexcept>
@@ -37,6 +38,8 @@ public:
     // Bytes [from, to] of a URL. Throws if the server doesn't support ranges. `finalUrl`
     // receives where redirects led, so follow-up ranges can skip them.
     virtual std::string getRange(const std::string& url, uint64_t from, uint64_t to, std::string* finalUrl = nullptr) = 0;
+    // Make every running and later request fail soon (the app is quitting). Any thread.
+    virtual void cancelAll() {}
 };
 
 // libcurl implementation (works on macOS and on Switch via devkitPro's switch-curl).
@@ -50,10 +53,12 @@ public:
     void download(const std::string& url, const fs::path& dest, const DownloadProgressFn& progress = {}) override;
     int64_t contentLength(const std::string& url) override;
     std::string getRange(const std::string& url, uint64_t from, uint64_t to, std::string* finalUrl = nullptr) override;
+    void cancelAll() override { cancelled_ = true; }
 
 private:
     std::string userAgent_;
     std::string caBundle_;
+    std::atomic<bool> cancelled_{false};
 };
 
 std::string urlEncode(const std::string& s);
