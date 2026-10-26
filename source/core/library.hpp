@@ -69,6 +69,13 @@ struct BcmlMergeError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+// The SD card doesn't have room for a change, worked out before anything was written; nothing
+// changed. what() is a message for the user.
+struct NotEnoughSpaceError : std::runtime_error {
+    NotEnoughSpaceError(uint64_t needed, uint64_t free, const std::string& advice);
+    uint64_t needed, free;
+};
+
 // Owns the mod library on the SD card and keeps the deployed LayeredFS files in
 // sync with which mods are enabled. Layout under `dataDir`:
 //   state.json                       records + what is deployed
@@ -139,6 +146,11 @@ public:
     // game's original, not one already on the SD card, and no enabled mod ships one.
     bool canMergeSizes(const ModRecord& mod) const;
 
+    // Free bytes on the SD card (0 = unknown). When set, add() and apply() check there's room
+    // before writing and throw NotEnoughSpaceError instead of filling the card part-way.
+    using FreeSpaceFn = std::function<uint64_t()>;
+    void setFreeSpace(FreeSpaceFn fn) { freeSpace_ = std::move(fn); }
+
     const fs::path& sdRoot() const { return sdRoot_; }
     const fs::path& dataDir() const { return dataDir_; }
 
@@ -165,12 +177,14 @@ public:
     const std::string& bcmlError() const { return bcmlError_; }
 private:
     void writeMergedSizeTable(const fs::path& sdPath) const;
+    void checkSpace(uint64_t needed, const std::string& advice) const;
     bool hasOriginalSizeTableOnCard() const;
 
     fs::path sdRoot_, dataDir_, originalSizeTable_;
     GameFileReader gameFiles_;
     std::string textLanguage_ = "USen";
     MergeProgressFn mergeProgress_;
+    FreeSpaceFn freeSpace_;
     // The last BCML merge: its inputs, the SD targets it produced (staged under
     // <dataDir>/bcml-merged) and their size table entries.
     std::string bcmlKey_;

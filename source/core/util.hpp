@@ -41,6 +41,9 @@ void pruneEmptyDirs(const fs::path& dir, const fs::path& stopAt);
 // Copy a file, creating parent directories. Throws on failure.
 void copyFileCreatingDirs(const fs::path& from, const fs::path& to);
 
+// "1.4 GB", "12.0 MB", "300 KB".
+std::string formatSize(uint64_t bytes);
+
 // Stable positive 63-bit id for a string (FNV-1a), used for files that have no numeric id.
 int64_t stableId(std::string_view s);
 std::string urlDecode(std::string_view s);

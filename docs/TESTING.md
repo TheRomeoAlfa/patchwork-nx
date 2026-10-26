@@ -23,6 +23,7 @@
 | Install | Single-file zip; multi-option 7z (pre-selects the option for your game version); "All versions" file recommended; replace an installed version (Replace / Keep both) |
 | Install | BCML `.bnp` merged (BOTW) or refused with an explanation (TOTK, BCML 2 format); cancel a big download; navigation/ZL/ZR/+ blocked while busy |
 | Install | Failed unpack keeps the download; finish it from My mods; files and temp folders cleaned up |
+| Install | Not enough space (`MM_FREE_SPACE=<bytes>`): a small zip that unpacks big is refused before anything is copied; turning a mod on is refused and it stays off; turning one off always works |
 | My mods | On/off, move up/down, remove (dialog), import files already on SD, stop managing; the mod's page (→, B back) |
 | Settings | NSFW toggle persists; delete unfinished downloads; re-copy mods |
 | Restart | Library, settings and game choice survive a restart |
@@ -55,37 +56,41 @@ Run these after any release build; they cover what the desktop build can't.
 9. **Waikuteru:** Browse → R. Install No Fall Damage (BOTW) and check it in-game.
 10. **Power/HOME during a copy** (optional, on a test mod): reopen the app; Settings →
    Re-copy enabled mods; nothing half-installed remains.
-11. **Touch:** tap the sidebar, the GameBanana/Waikuteru tabs, and a mod (first tap selects,
+11. **Nearly full card:** with less free space than a big mod needs (e.g. BOTW Randomizer),
+   installing it says "Not enough free space" with how much it needs, and nothing is left in
+   atmosphere/contents. Settings → Delete unfinished downloads updates the free space under the
+   sidebar.
+12. **Touch:** tap the sidebar, the GameBanana/Waikuteru tabs, and a mod (first tap selects,
    second tap installs). Turn a mod off by tapping it twice in My mods; taps elsewhere are
    ignored while files copy.
-12. **Background add-ons:** Settings → Background add-ons lists your sysmodules with their real
+13. **Background add-ons:** Settings → Background add-ons lists your sysmodules with their real
    on/off state. Turn one off, restart: it no longer runs. Turn it back on, restart: it runs.
-13. **Crash notice:** after Atmosphère shows the 010041544D530000 error on a game launch,
+14. **Crash notice:** after Atmosphère shows the 010041544D530000 error on a game launch,
    reopen Patchwork: it explains the cause and opens Settings. It doesn't appear again for
    the same crash.
-14. **Mod number:** Add mods → Enter a mod number → type a number from a GameBanana link for
+15. **Mod number:** Add mods → Enter a mod number → type a number from a GameBanana link for
    your game: the install screen opens. Also type the number into Search. A number for the
    other game says to switch game; a made-up number says there's no such mod.
-15. **Hidden NSFW setting:** Settings shows no Browsing section. Hold L + R + − for 3 seconds:
+16. **Hidden NSFW setting:** Settings shows no Browsing section. Hold L + R + − for 3 seconds:
    "Hide NSFW mods" appears. Turn it off, restart Patchwork: it's hidden and on again.
-16. **Size table warning (TOTK):** install a mod whose files include
+17. **Size table warning (TOTK):** install a mod whose files include
    `ResourceSizeTable.Product.<version>.rsizetable.zs` but not your version's (e.g. mod
    455219 on 1.2.1): a warning names the versions it supports; Cancel is the default.
-17. **PC-only mods hidden:** Browse doesn't list mods whose only files are packages Patchwork
+18. **PC-only mods hidden:** Browse doesn't list mods whose only files are packages Patchwork
    can't merge (TKMM `.tkcl` for TOTK, BCML 2's old format for BOTW). The first visit to a
    page takes a moment longer; later visits are instant (switch/patchwork/pc-only-cache.json).
    Entering such a mod's number explains which PC tool it needs.
-18. **BOTW game files:** with Breath of the Wild selected, Settings starts with "BCML packages".
+19. **BOTW game files:** with Breath of the Wild selected, Settings starts with "BCML packages".
    Hold **L and R** while starting Breath of the Wild, then start Patchwork from the Homebrew
    Menu: "Size table" says "Read from game <version>" (a bar shows while it reads), "Game files"
    says "Can read now", and "Expansion Pass (DLC)" matches whether you have the DLC. Holding
    only R gives "Mods were on: hold L too" when a mod has its own size table. Opening Patchwork
    from the Album afterwards keeps the saved copies. With TOTK selected, the section isn't shown.
-19. **BCML package that installs as-is:** enter mod number 586246 (Unofficial Linkle 3.0
+20. **BCML package that installs as-is:** enter mod number 586246 (Unofficial Linkle 3.0
    Armor Icons). Pick the **.bnp** file (not the UKMM zip): it shows "BCML package · installs
    here". Install, start the game, open the inventory's Armor tab: the armor icons show
    Linkle instead of Link. Turn the mod off: the icons are back to normal.
-20. **BCML merges, one per kind** (each confirmed on hardware with BOTW 1.6.0 and the DLC):
+21. **BCML merges, one per kind** (each confirmed on hardware with BOTW 1.6.0 and the DLC):
    | Kind | Mod (number) | Check in the game |
    |---|---|---|
    | packs | [LINKLE] Title Screen NX (423509) | the title screen shows Linkle |
@@ -94,47 +99,47 @@ Run these after any release build; they cover what the desktop build can't.
    | maps (DLC) | Early Travel Medallion (448012) | the chest outside Oman Au Shrine holds the Travel Medallion |
    | text | Hestu's S*** (423545) | Korok Seeds are renamed (English text) |
    | drops | More Ores from Mine Nodes (542133) | ore deposits drop more |
-21. **Size table merging with a mod that has its own table:** with a mod that ships
+22. **Size table merging with a mod that has its own table:** with a mod that ships
    `ResourceSizeTable.product.srsizetable` (e.g. a randomizer) on the card, install a BCML
    package: the game still starts and that mod still works. Turn the package off: the mod's
    own size table is restored.
-22. **Save file (TOTK):** close TOTK first (HOME, X). Install Shrines Unlocked Save File
+23. **Save file (TOTK):** close TOTK first (HOME, X). Install Shrines Unlocked Save File
    (number 445614). Pick your profile; it suggests the first empty slot. Leave photos off,
    press "Back up and install". Start TOTK, Load: the save is there with the shrines unlocked,
    and your own saves and photos are untouched.
-23. **Save backups:** Settings → Save backups lists the backup from step 22. Restore it: the
+24. **Save backups:** Settings → Save backups lists the backup from step 23. Restore it: the
    installed save is gone and your saves are as before; a second backup ("Before restoring…")
    appears. X on a backup deletes it.
-24. **Game open:** with TOTK suspended in the background, try installing a save: Patchwork asks
+25. **Game open:** with TOTK suspended in the background, try installing a save: Patchwork asks
    you to close the game first and changes nothing.
-25. **Photos toggle:** install a save with "Also copy the save's photos" on (e.g. 445614 again,
+26. **Photos toggle:** install a save with "Also copy the save's photos" on (e.g. 445614 again,
    into another slot): the in-game album shows the save's photos. Restore the backup to get
    yours back.
-26. **Whole-save downloads:** a download with all six slots (e.g. 447106) lists them with their
+27. **Whole-save downloads:** a download with all six slots (e.g. 447106) lists them with their
    dates and highlights the latest. A BOTW Master Mode save (e.g. 582966's master mode file)
    only offers Master Mode slots; check it loads in Master Mode.
 
-27. **BCML packages with nothing to copy:** packages that only change merged data install:
+28. **BCML packages with nothing to copy:** packages that only change merged data install:
    99 slots for all weapons (305388, game data) and Early Travel Medallion (448012, map).
-28. **BCML setup, as a new user would meet it:** on a card without switch/patchwork/original,
+29. **BCML setup, as a new user would meet it:** on a card without switch/patchwork/original,
    open Patchwork from the Album (no buttons held) with BOTW selected. Settings starts with
    "BCML packages": Game files "Not read yet". Enter mod number
    423509 ([LINKLE] Title Screen NX): its .bnp says "BCML package · one-time setup". Install it:
    a blue "One-time setup for BCML packages" screen lists the steps. Follow them (hold L and R
    starting BOTW, open Patchwork): a message offers "Open My mods"; choose Finish installing.
    Start BOTW normally: the title screen shows Linkle. Turn it off: the normal one is back.
-29. **Game files kept:** after step 28, open Patchwork from the Album (no buttons held) and
+30. **Game files kept:** after step 29, open Patchwork from the Album (no buttons held) and
    install another merging package (e.g. 321704 Early Master Cycle): it installs without asking
    for L and R if it only needs files already read; otherwise "More game files needed" says
    which kind (e.g. "the game's text") and to relaunch with L and R.
-30. **Text, actor info, shops (armor mods):** install a Linkle armor package that changes
+31. **Text, actor info, shops (armor mods):** install a Linkle armor package that changes
    texts and shops (e.g. 340011 LL Upgradeable Armor Rebalance). In the game, check an armor
    name/description and a shop that sells it. If the game crashes at load, report it with the
    mod list.
-31. **Maps (DLC or not):** install a package with map changes (e.g. 358261 Crafting Project).
+32. **Maps (DLC or not):** install a package with map changes (e.g. 358261 Crafting Project).
    Check that the game loads into the overworld, and note whether you have the DLC.
-32. **Order and turning off:** with two merging packages on, move one up/down in My mods and
+33. **Order and turning off:** with two merging packages on, move one up/down in My mods and
    turn one off: each change re-merges (the progress screen shows it), and the game still loads.
-33. **Merge progress:** installing or turning a BCML package on/off shows a bar with a
+34. **Merge progress:** installing or turning a BCML package on/off shows a bar with a
    percentage and what it's reading; "Press B to cancel" turns into "Don't close Patchwork or
    turn off the Switch" once the change can't be stopped.
