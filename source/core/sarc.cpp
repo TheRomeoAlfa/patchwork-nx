@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 #include <numeric>
+#include <unordered_map>
 #include <stdexcept>
 
 #include "sizetable.hpp"
@@ -11,12 +12,12 @@ namespace mm {
 
 namespace {
 
-uint16_t rd16(const std::string& d, size_t at, bool le) {
+uint16_t rd16(std::string_view d, size_t at, bool le) {
     if (at + 2 > d.size()) throw std::runtime_error("bad SARC (out of range)");
     uint8_t a = uint8_t(d[at]), b = uint8_t(d[at + 1]);
     return le ? uint16_t(a | (b << 8)) : uint16_t((a << 8) | b);
 }
-uint32_t rd32(const std::string& d, size_t at, bool le) {
+uint32_t rd32(std::string_view d, size_t at, bool le) {
     if (at + 4 > d.size()) throw std::runtime_error("bad SARC (out of range)");
     uint32_t v = 0;
     for (int i = 0; i < 4; ++i) v |= uint32_t(uint8_t(d[at + i])) << (le ? 8 * i : 8 * (3 - i));
@@ -72,19 +73,20 @@ bool isSpecial(const std::string& name) {
 
 }  // namespace
 
-bool isSarc(const std::string& data) {
+bool isSarc(std::string_view data) {
     if (data.size() >= 4 && data.compare(0, 4, "SARC") == 0) return true;
     // Yaz0: the first four bytes are always stored literally (nothing to refer back to yet),
     // right after the first flag byte.
     return isYaz0(data) && data.size() >= 21 && (uint8_t(data[16]) & 0xF0) == 0xF0 && data.compare(17, 4, "SARC") == 0;
 }
 
-Sarc Sarc::parse(const std::string& raw) {
-    auto data = isYaz0(raw) ? yaz0Decompress(raw) : raw;
+namespace {
+
+// Reads a plain SARC's file table: `each(name, offset, size)` per file, in archive order.
+template <typename F>
+bool readSarc(std::string_view data, F each) {
     if (data.size() < 0x20 || data.compare(0, 4, "SARC") != 0) throw std::runtime_error("not a SARC archive");
-    Sarc s;
-    s.littleEndian = uint8_t(data[6]) == 0xFF && uint8_t(data[7]) == 0xFE;
-    bool le = s.littleEndian;
+    bool le = uint8_t(data[6]) == 0xFF && uint8_t(data[7]) == 0xFE;
     uint16_t headerSize = rd16(data, 4, le);
     uint32_t dataOffset = rd32(data, 0xC, le);
     size_t sfat = headerSize;
@@ -102,19 +104,36 @@ Sarc Sarc::parse(const std::string& raw) {
         if (dataOffset + size_t(end) > data.size() || start > end) throw std::runtime_error("bad SARC (file out of range)");
         if (end - start > budget) throw std::runtime_error("bad SARC (overlapping files)");
         budget -= end - start;
-        SarcFile f;
+        std::string name;
         if (attr & 0x01000000) {
             size_t at = names + size_t(attr & 0xffff) * 4;
             auto zero = data.find('\0', at);
-            if (at >= data.size() || zero == std::string::npos) throw std::runtime_error("bad SARC (name)");
-            f.name = data.substr(at, zero - at);
+            if (at >= data.size() || zero == std::string_view::npos) throw std::runtime_error("bad SARC (name)");
+            name = std::string(data.substr(at, zero - at));
         } else {
-            f.name = "0x" + std::to_string(rd32(data, n, le));  // unnamed: keyed by hash only
+            name = "0x" + std::to_string(rd32(data, n, le));  // unnamed: keyed by hash only
         }
-        f.data = data.substr(dataOffset + start, end - start);
-        s.files.push_back(std::move(f));
+        each(std::move(name), dataOffset + size_t(start), size_t(end - start));
     }
+    return le;
+}
+
+}  // namespace
+
+Sarc Sarc::parse(const std::string& raw) {
+    std::string decompressed;
+    const std::string& data = isYaz0(raw) ? (decompressed = yaz0Decompress(raw)) : raw;  // no copy of plain archives
+    Sarc s;
+    s.littleEndian = readSarc(data, [&](std::string name, size_t at, size_t size) {
+        s.files.push_back({std::move(name), data.substr(at, size)});
+    });
     return s;
+}
+
+std::vector<SarcView> sarcView(std::string_view data) {
+    std::vector<SarcView> out;
+    readSarc(data, [&](std::string name, size_t at, size_t size) { out.push_back({std::move(name), data.substr(at, size)}); });
+    return out;
 }
 
 const SarcFile* Sarc::find(const std::string& name) const {
@@ -245,6 +264,38 @@ std::string mergeSarcs(const std::vector<std::string>& archives, bool compress, 
             out.files.push_back({name, yaz ? (compress ? yaz0Compress(merged) : yaz0Store(merged)) : merged});
         } else {
             out.files.push_back({name, *chosen});
+        }
+    }
+    return out.write();
+}
+
+std::string layerSarc(std::string_view game, std::string current, std::string_view top) {
+    std::string gamePlain, topPlain;
+    if (isYaz0(game)) game = gamePlain = yaz0Decompress(std::string(game));
+    if (isYaz0(top)) top = topPlain = yaz0Decompress(std::string(top));
+    std::unordered_map<std::string, std::string_view> original;
+    for (const auto& f : sarcView(game)) original.emplace(f.name, f.data);
+    Sarc out = Sarc::parse(current);
+    std::string().swap(current);  // parsed: let the big copy go
+    std::unordered_map<std::string, size_t> index;
+    for (size_t i = 0; i < out.files.size(); ++i) index.emplace(out.files[i].name, i);
+    auto plain = [](std::string_view d) { return isYaz0(d) ? yaz0Decompress(std::string(d)) : std::string(d); };
+    for (const auto& f : sarcView(top)) {
+        auto g = original.find(f.name);
+        if (g != original.end() && (g->second == f.data || (isYaz0(g->second) && isYaz0(f.data) && plain(g->second) == plain(f.data))))
+            continue;  // the mod left it as the game has it
+        auto at = index.find(f.name);
+        if (at == index.end()) {
+            index.emplace(f.name, out.files.size());
+            out.files.push_back({f.name, std::string(f.data)});
+            continue;
+        }
+        auto& mine = out.files[at->second].data;
+        if (g != original.end() && isSarc(g->second) && isSarc(f.data) && isSarc(mine)) {
+            auto merged = layerSarc(g->second, std::move(mine), f.data);
+            mine = isYaz0(f.data) ? yaz0Compress(merged) : std::move(merged);
+        } else {
+            mine = std::string(f.data);
         }
     }
     return out.write();

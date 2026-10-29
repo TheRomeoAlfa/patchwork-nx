@@ -188,6 +188,15 @@ bool runningAsGame(mm::Game game) {
 #endif
 }
 
+bool fullMemory() {
+#ifdef __SWITCH__
+    AppletType at = appletGetAppletType();
+    return at == AppletType_Application || at == AppletType_SystemApplication;
+#else
+    return std::getenv("MM_APPLET") == nullptr;
+#endif
+}
+
 std::string gameTextLanguage() {
 #ifdef __SWITCH__
     std::string lang = "USen";

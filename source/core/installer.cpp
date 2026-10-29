@@ -5,8 +5,68 @@
 #include <stdexcept>
 
 #include "bnp.hpp"
+#include "nlohmann/json.hpp"
 
 namespace mm {
+
+namespace {
+
+// A BCML package's info.json can list its options: add-ons ("multi", each with a default) and
+// "pick one" groups ("single"). BCML offers only those and always installs the package itself,
+// so folders the list doesn't name are left out. Without a list, every folder stays an option.
+void applyBnpOptions(const fs::path& workDir, LayoutResult& layout) {
+    nlohmann::json options;
+    try {
+        options = nlohmann::json::parse(readFile(workDir / "info.json")).at("options");
+    } catch (const std::exception&) {
+        return;
+    }
+    if (!options.is_object()) return;
+    std::vector<size_t> order;
+    auto take = [&](const nlohmann::json& opt) -> Variant* {
+        if (!opt.is_object() || !opt.value("folder", nlohmann::json()).is_string()) return nullptr;
+        auto name = "options/" + opt["folder"].get<std::string>();
+        for (size_t i = 0; i < layout.variants.size(); ++i)
+            if (layout.variants[i].name == name && std::find(order.begin(), order.end(), i) == order.end()) {
+                order.push_back(i);
+                auto& v = layout.variants[i];
+                v.label = opt.value("name", nlohmann::json()).is_string() ? opt["name"].get<std::string>() : opt["folder"].get<std::string>();
+                return &v;
+            }
+        return nullptr;
+    };
+    for (size_t i = 0; i < layout.variants.size(); ++i)
+        if (layout.variants[i].name == "Main") {
+            layout.variants[i].always = true;
+            order.push_back(i);
+        }
+    if (options.contains("multi") && options["multi"].is_array())
+        for (const auto& opt : options["multi"])
+            if (auto* v = take(opt)) v->preselected = opt.value("default", nlohmann::json()).is_boolean() && opt["default"].get<bool>();
+    int group = 0;
+    if (options.contains("single") && options["single"].is_array())
+        for (const auto& g : options["single"]) {
+            if (!g.is_object() || !g.value("options", nlohmann::json()).is_array()) continue;
+            bool required = g.value("required", nlohmann::json()).is_boolean() && g["required"].get<bool>();
+            std::string name = g.value("name", nlohmann::json()).is_string() ? g["name"].get<std::string>() : "";
+            bool first = true;
+            for (const auto& opt : g["options"])
+                if (auto* v = take(opt)) {
+                    v->group = group;
+                    v->groupName = name;
+                    v->required = required;
+                    v->preselected = required && first;  // as BCML: a required group starts on its first option
+                    first = false;
+                }
+            ++group;
+        }
+    if (order.empty()) return;
+    std::vector<Variant> kept;
+    for (auto i : order) kept.push_back(std::move(layout.variants[i]));
+    layout.variants = std::move(kept);
+}
+
+}  // namespace
 
 PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir, Game game, const std::string& modSlug,
                                const ExtractProgressFn& progress) {
@@ -51,7 +111,7 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
             std::sort(names.begin() + 1, names.end());
             for (const auto& name : names) {
                 auto root = name == "Main" ? workDir : workDir / fs::path(name);
-                if (!hasVariant(name) && mergesSomething(root / "logs")) p.layout.variants.push_back({name, {}, {}, {}});
+                if (!hasVariant(name) && mergesSomething(root / "logs")) { Variant v; v.name = name; p.layout.variants.push_back(std::move(v)); }
             }
             if (!p.layout.variants.empty()) p.layout.kind = PackageKind::Installable;
         }
@@ -62,6 +122,7 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
             std::error_code ec;
             if (!check.mergeLogs.empty() && fs::is_directory(root / "logs", ec)) v.bcmlLogs = root / "logs";
         }
+        applyBnpOptions(workDir, p.layout);
         return p;
     }
     if (endsWithI(archive.filename().string(), ".tkcl")) {

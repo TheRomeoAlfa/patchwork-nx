@@ -203,6 +203,7 @@ TEST("bcml: a missing game file is named") {
 }
 
 #include "library.hpp"
+#include "nlohmann/json.hpp"
 
 TEST("bcml: the library deploys merged files instead of a package's partial packs") {
     t::TempDir d;
@@ -250,11 +251,71 @@ TEST("bcml: the library deploys merged files instead of a package's partial pack
     CHECK(fs::exists(data / "library/botw/linkle-title/bcml/0/packs.json"));
     CHECK(!fs::exists(sd / "bcml"));
 
+    // A second package merged into the same pack isn't a conflict; neither is a zip mod's
+    // whole copy, which the merge starts from instead of the game's.
+    put(src / "Title2.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{"blyt/Title.bflyt", "other layout"}}))}}));
+    ModRecord r2 = r;
+    r2.id = "other-title";
+    r2.name = "Other title";
+    lib.add(r2, {{src / "Title2.pack", target}}, true, {}, {{src / "logs/packs.json", "bcml/0/packs.json"}});
+    CHECK(lib.conflicts(Game::Botw).empty());
+    // It changes the packages' file as well: the order in My mods decides who wins.
+    put(src / "zip/Title.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{"blyt/Title.bflyt", "zip layout"},
+                                                                                     {"timg/__Combined.bntx", "zip textures"},
+                                                                                     {"timg/Zip.bntx", "zip"}}))}}));
+    ModRecord z;
+    z.id = "zip-title";
+    z.game = Game::Botw;
+    lib.add(z, {{src / "zip/Title.pack", target}}, true);  // on top
+    CHECK(lib.conflicts(Game::Botw).empty());
+    CHECK(lib.bcmlMergedTargets().count(toLower(target)) == 1);
+    auto layout = [&] { return Sarc::parse(Sarc::parse(readFile(sd / target)).find("Layout/Title.sblarc")->data); };
+    auto top = layout();
+    CHECK(top.find("timg/Zip.bntx") && top.find("timg/Zip.bntx")->data == "zip");
+    CHECK(top.find("timg/__Combined.bntx")->data == "zip textures");  // above the packages: it wins
+    CHECK(top.find("blyt/Title.bflyt")->data == "zip layout");
+    // Between the two packages: above Linkle's textures, below the other layout.
+    lib.move("zip-title", -1);
+    auto middle = layout();
+    CHECK(middle.find("timg/__Combined.bntx")->data == "zip textures");
+    CHECK(middle.find("blyt/Title.bflyt")->data == "other layout");  // the package above it wins
+    CHECK(middle.find("timg/Zip.bntx") != nullptr);
+    // Below every package: the merge starts from it, the packages win.
+    lib.move("zip-title", -1);
+    auto bottom = layout();
+    CHECK(bottom.find("timg/__Combined.bntx")->data == "linkle textures");
+    CHECK(bottom.find("blyt/Title.bflyt")->data == "other layout");
+    CHECK(bottom.find("timg/Zip.bntx") != nullptr);
+    // Turning the zip off merges again without it.
+    lib.setEnabled("zip-title", false);
+    CHECK(!layout().find("timg/Zip.bntx"));
+    CHECK(layout().find("timg/__Combined.bntx")->data == "linkle textures");
+    lib.remove("zip-title");
+    lib.remove("other-title");
+
     lib.setEnabled("linkle-title", false);
     CHECK(!fs::exists(sd / target));
     CHECK(!fs::exists(data / "bcml-merged"));
     lib.setEnabled("linkle-title", true);
     CHECK(fs::exists(sd / target));
+
+    // State saved before other mods' copies were merged in: merged again, kept until then.
+    {
+        auto state = nlohmann::json::parse(readFile(data / "state.json"));
+        state.erase("bcmlReads");
+        writeFileAtomic(data / "state.json", state.dump());
+        Library old(sd, data);
+        old.load();
+        CHECK(old.bcmlPending());
+        old.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
+        old.setGameFileReader([&](const std::string& p) {
+            auto f = files.read(p);
+            return f ? Library::GameFile{Library::GameFile::State::Found, *f} : Library::GameFile{Library::GameFile::State::Absent, {}};
+        });
+        old.apply();
+        CHECK(!old.bcmlPending());
+        CHECK(Sarc::parse(Sarc::parse(readFile(sd / target)).find("Layout/Title.sblarc")->data).find("timg/__Combined.bntx")->data == "linkle textures");
+    }
 
     // Without the game's files the merge waits, and says what it needs.
     Library lib2(sd, data);

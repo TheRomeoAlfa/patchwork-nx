@@ -33,6 +33,13 @@ struct Variant {
     std::vector<FileMapping> files;
     std::map<std::string, uint32_t> resourceSizes;  // BCML packages: romfs path -> size (0 = remove)
     fs::path bcmlLogs;  // BCML packages that need merging: this variant's logs folder
+    // BCML packages whose info.json lists their options (otherwise left as they are):
+    std::string label;      // the option's name from info.json
+    bool preselected = false;
+    bool always = false;    // the package itself: always installed, not offered as a choice
+    int group = -1;         // options of one "pick one" group share a number
+    std::string groupName;
+    bool required = false;  // its group needs a pick
 };
 
 struct LayoutResult {

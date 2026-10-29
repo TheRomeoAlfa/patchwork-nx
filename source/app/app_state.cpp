@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <new>
 #include <regex>
 
 #include <webp/decode.h>
@@ -355,14 +356,24 @@ void AppState::saveSettings() {
     }
 }
 
+std::string AppState::outOfMemoryMessage() {
+    std::string text = "Patchwork ran out of memory. Merging BCML packages rebuilds some of the game's biggest files.";
+    if (!platform::fullMemory())
+        text += "\n\nPatchwork was opened from the Album, which leaves it only a little memory. Press + to close it, then "
+                "hold R while starting a game and open Patchwork from the Homebrew Menu that appears.";
+    return text;
+}
+
 void AppState::runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string&)> done) {
     ++fileJobs_;
     files_.post([this, job = std::move(job), done = std::move(done)] {
         std::string error;
         try {
             job(*library_);
+        } catch (const std::bad_alloc&) {
+            error = outOfMemoryMessage();
         } catch (const std::exception& e) {
-            error = e.what();
+            error = e.what() == std::string(mm::Library::kOutOfMemory) ? outOfMemoryMessage() : e.what();
         }
         try {
             publishSnapshot(*library_);
@@ -384,6 +395,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
             if (!m->sourceKey.empty()) snap->installedKeys.insert(m->sourceKey);
         }
         snap->conflicts[g.game] = lib.conflicts(g.game);
+        if (g.game == mm::Game::Botw) snap->bcmlMerged = lib.bcmlMergedTargets();
         snap->overlaps[g.game] = lib.patchOverlaps(g.game);
         auto un = lib.unmanagedFiles(g.game);
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};

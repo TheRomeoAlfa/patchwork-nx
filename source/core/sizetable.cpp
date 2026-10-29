@@ -29,7 +29,7 @@ constexpr size_t kNameLen = 128;
 
 }  // namespace
 
-bool isYaz0(const std::string& data) { return data.size() >= 16 && data.compare(0, 4, "Yaz0") == 0; }
+bool isYaz0(std::string_view data) { return data.size() >= 16 && data.compare(0, 4, "Yaz0") == 0; }
 
 std::string yaz0Decompress(const std::string& data) {
     if (!isYaz0(data)) throw std::runtime_error("not Yaz0 data");

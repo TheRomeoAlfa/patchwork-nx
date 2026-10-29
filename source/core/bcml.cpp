@@ -179,32 +179,42 @@ struct Context {
         return p.yaz ? yaz0Compress(raw) : raw;
     }
     // `progress` gets 0..1 as the archives are packed (and recompressed).
+    // The game's copies of these archives are let go first (working out sizes reads them again),
+    // so a big one like TitleBG.pack is never in memory three times over.
     void closeAll(const std::function<void(float)>& progress = {}) {
-        size_t done = 0;
+        gameChain.clear();  // points into gameCache
+        for (const auto& [path, p] : packs) gameCache.erase(path);
+        size_t done = 0, total = packs.size();
         for (auto& [path, p] : packs) {
             if (p->dirty) result.files[path] = close(*p);
-            if (progress) progress(static_cast<float>(++done) / packs.size());
+            p.reset();
+            if (progress) progress(static_cast<float>(++done) / total);
         }
         packs.clear();
     }
 
     // Parsed game archives along the path last looked up, one per depth (lookups come in
     // file order, so neighbours share their archives), with an index by name.
+    // Read in place (archives like TitleBG.pack are 150 MB): the files point into the parent's
+    // data, or into `plain` when the archive was compressed.
     struct IndexedSarc {
         std::string key;
-        Sarc sarc;
+        std::string plain;
+        std::vector<SarcView> files;
         std::unordered_map<std::string, size_t> index;
     };
     std::deque<IndexedSarc> gameChain;  // a deque: growing it keeps the parents' data in place
 
-    const IndexedSarc* gameArchive(size_t depth, const std::string& key, const std::string& data) {
+    const IndexedSarc* gameArchive(size_t depth, const std::string& key, std::string_view data) {
         if (gameChain.size() > depth && gameChain[depth].key == key) return &gameChain[depth];
         gameChain.resize(depth + 1);
         auto& slot = gameChain[depth];
         slot.key = key;
-        slot.sarc = Sarc::parse(data);
+        bool yaz = isYaz0(data);
+        slot.plain = yaz ? yaz0Decompress(std::string(data)) : std::string();
+        slot.files = sarcView(yaz ? std::string_view(slot.plain) : data);
         slot.index.clear();
-        for (size_t i = 0; i < slot.sarc.files.size(); ++i) slot.index.emplace(slot.sarc.files[i].name, i);
+        for (size_t i = 0; i < slot.files.size(); ++i) slot.index.emplace(slot.files[i].name, i);
         return &slot;
     }
 
@@ -218,8 +228,8 @@ struct Context {
         for (size_t i = 1; i < path.size(); ++i) {
             auto it = s->index.find(path[i]);
             if (it == s->index.end()) return std::nullopt;
-            const auto& data = s->sarc.files[it->second].data;
-            if (i + 1 == path.size()) return data;
+            auto data = s->files[it->second].data;
+            if (i + 1 == path.size()) return std::string(data);
             if (!isSarc(data)) return std::nullopt;
             key += "//" + path[i];
             s = gameArchive(i, key, data);
@@ -1195,16 +1205,19 @@ std::string tableNameOf(const std::string& path) {
     return sizeTableName(path);
 }
 
-void sizeNested(Context& c, std::vector<std::string>& path, const std::string& data) {
-    auto plain = unpack(data);
-    for (const auto& f : Sarc::parse(plain).files) {
+void sizeNested(Context& c, std::vector<std::string>& path, std::string_view data) {
+    // Read in place: copying a 150 MB TitleBG.pack's files out would double what's in memory.
+    std::string decompressed;
+    bool yaz = isYaz0(data);
+    if (yaz) decompressed = yaz0Decompress(std::string(data));
+    for (const auto& f : sarcView(yaz ? std::string_view(decompressed) : data)) {
         path.push_back(f.name);
         auto canon = sizeTableName(f.name);
         auto ext = extOf(canon);
         auto game = c.gameNested(path);
-        bool changed = !game || (*game != f.data && unpack(*game) != unpack(f.data));
+        bool changed = !game || (*game != f.data && unpack(*game) != unpack(std::string(f.data)));
         if (changed && !sizeExcludedExts().count(ext) && canon != "Actor/ActorInfo.product.byml") {
-            if (auto size = resourceSize(canon, f.data)) c.result.sizes[canon] = size;
+            if (auto size = resourceSize(canon, std::string(f.data))) c.result.sizes[canon] = size;
             if (sizeRecurse(ext) && isSarc(f.data)) sizeNested(c, path, f.data);
         }
         path.pop_back();

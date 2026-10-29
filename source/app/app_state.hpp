@@ -54,6 +54,7 @@ struct LibrarySnapshot {
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
     bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    std::set<std::string> bcmlMerged;  // targets (lowercase) the last BCML merge produced
     bool loaded = false;       // false until the mod list has been read at startup
 };
 
@@ -98,6 +99,8 @@ public:
 
     // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
     void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
+    // What to tell the user when a job runs out of memory (says how to get more).
+    static std::string outOfMemoryMessage();
     bool fileJobRunning() const { return fileJobs_ > 0; }
     // What a background job (not started by the user) is doing, for "waiting" messages; "" if none.
     std::string backgroundTask() const;

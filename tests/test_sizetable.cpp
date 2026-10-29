@@ -154,6 +154,45 @@ TEST("bnp: prepare a simple package with an option") {
     CHECK(u.layout.problem.find("packs.log") != std::string::npos);
 }
 
+TEST("bnp: options follow info.json") {
+    t::TempDir d;
+    // Shaped like DAR Combat System (GameBanana 432404): add-ons, a required "pick one" group,
+    // and a folder info.json doesn't list.
+    auto bnp = d.path / "dar.bnp";
+    const char* gamedata = "bool_data: {add: {}, del: []}\n";
+    makeArchive(bnp, {{"info.json", R"({"name":"DAR","options":{
+                          "multi":[{"name":"Bows Speed","folder":"bow","default":true},
+                                   {"name":"Extra Run Speed","folder":"run","default":false}],
+                          "single":[{"name":"Skill Level","required":true,"options":[
+                                    {"name":"Skill Level 1","folder":"SA1"},{"name":"Skill Level 2","folder":"SA2"}]}]}})"},
+                      {"logs/gamedata.yml", gamedata},
+                      {"options/SA1/logs/gamedata.yml", gamedata},
+                      {"options/SA2/logs/gamedata.yml", gamedata},
+                      {"options/archDAR/logs/gamedata.yml", gamedata},
+                      {"options/bow/logs/gamedata.yml", gamedata},
+                      {"options/run/logs/gamedata.yml", gamedata}});
+    auto p = prepareArchive(bnp, d.path / "work", Game::Botw, "m");
+    CHECK(p.layout.kind == PackageKind::Installable);
+    std::vector<std::string> names;
+    for (const auto& v : p.layout.variants) names.push_back(v.name);
+    CHECK(names == std::vector<std::string>({"Main", "options/bow", "options/run", "options/SA1", "options/SA2"}));
+    if (names.size() == 5) {
+        const auto& v = p.layout.variants;
+        CHECK(v[0].always);
+        CHECK_EQ(v[1].label, std::string("Bows Speed"));
+        CHECK(v[1].preselected && !v[2].preselected);
+        CHECK(v[3].group == 0 && v[4].group == 0 && v[3].required);
+        CHECK(v[3].preselected && !v[4].preselected);
+        CHECK_EQ(v[3].groupName, std::string("Skill Level"));
+    }
+    // Without a list of options, every folder stays a choice.
+    auto plain = d.path / "plain.bnp";
+    makeArchive(plain, {{"info.json", R"({"name":"X"})"}, {"logs/gamedata.yml", gamedata}, {"options/A/logs/gamedata.yml", gamedata}});
+    auto q = prepareArchive(plain, d.path / "work2", Game::Botw, "m");
+    CHECK_EQ(q.layout.variants.size(), 2u);
+    if (q.layout.variants.size() == 2) CHECK(!q.layout.variants[0].always && q.layout.variants[1].label.empty());
+}
+
 TEST("library: BOTW size table is merged from all enabled mods") {
     t::TempDir tmp;
     auto sd = tmp.path / "sd", src = tmp.path / "src";
