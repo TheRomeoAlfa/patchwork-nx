@@ -5,11 +5,13 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "gamebanana.hpp"
 #include "installer.hpp"
+#include "library.hpp"
 #include "saves.hpp"
 #include "ui.hpp"
 
@@ -46,6 +48,9 @@ public:
     void showLoading(const std::string& text);
     void showFilePicker(const mm::gb::ModDetails& d);
     void install(const mm::gb::ModDetails& d, const mm::gb::ModFile& file);
+    // Pick an installed mod's options again (from `file`, its archive) and reinstall it in
+    // place: same load order position, on or off as it was.
+    void changeOptions(const mm::ModRecord& m, const mm::gb::ModDetails& d, const mm::gb::ModFile& file);
     void showMessage(const std::string& title, const std::string& body, bool isError);
     // The one-time setup BCML packages need (reading the game's files), as steps.
     // `missing`: the game file it couldn't read (or "size table").
@@ -77,6 +82,7 @@ private:
     brls::Label* workingLabel_ = nullptr;
     ui::ProgressBar* bar_ = nullptr;
     brls::Label* hint_ = nullptr;
+    std::optional<mm::ModRecord> reinstall_;  // changing this installed mod's options
 };
 
 }  // namespace app

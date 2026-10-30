@@ -1,6 +1,7 @@
 #include "my_mods_page.hpp"
 
 #include <ctime>
+#include <optional>
 
 #include "app_state.hpp"
 #include "platform.hpp"
@@ -139,7 +140,7 @@ void MyModsPage::rebuild() {
                 if (paneFree()) showPending(p);
             });
             row->registerClickAction([this, p](brls::View*) {
-                flow_->install(p.details, p.file);
+                paneToFlow().install(p.details, p.file);
                 return true;
             });
             row->updateActionHint(brls::BUTTON_A, "Finish installing");
@@ -230,6 +231,11 @@ void MyModsPage::rebuild() {
             remove(id);
             return true;
         });
+        if (m->hasOptions)  // no room for a sixth hint in the footer: the mod's details say "Press Y"
+            row->registerAction("Change options", brls::BUTTON_Y, [this, id](brls::View*) {
+                changeOptions(id);
+                return true;
+            }, true);
         list_->addView(row);
         if (id == focusedId_ || !focusTarget) focusTarget = row;
     }
@@ -269,6 +275,11 @@ void MyModsPage::clearPane() {
     *detailsToken_ = false;  // late GameBanana details for the old pane are dropped
     ui::parkFocusIfInside(pane_, sink_);
     pane_->clearViews();
+}
+
+InstallFlow& MyModsPage::paneToFlow() {
+    *detailsToken_ = false;
+    return *flow_;
 }
 
 bool MyModsPage::paneFree() {
@@ -454,6 +465,7 @@ void MyModsPage::showDetails(const std::string& id) {
         for (const auto& v : m->variants) info += " " + v + ";";
         info.pop_back();
     }
+    if (m->hasOptions) info += "\nPress Y to change its options.";
     auto* infoL = ui::label(info, 16, ui::muted(), false);
     infoL->setMarginTop(8);
     content->addView(infoL);
@@ -608,6 +620,72 @@ void MyModsPage::toggle(const std::string& id) {
     bool enable = !m->enabled;
     runJob(enable ? "Turning on " + m->name + "…" : "Turning off " + m->name + "…",
            [id, enable](mm::Library& lib, const auto& p) { lib.setEnabled(id, enable, p); });
+}
+
+// Reopens the options of an installed mod, from the archive Patchwork kept, the inbox (mods added
+// from the SD card) or the mod's page (downloaded again).
+void MyModsPage::changeOptions(const std::string& id) {
+    if (busy_ || flow_->active()) return;
+    auto& st = AppState::get();
+    const auto* found = st.findMod(id);
+    if (!found || !found->hasOptions) return;
+    auto m = *found;
+    mm::gb::ModDetails d;
+    d.summary.id = m.gamebananaModId;
+    d.summary.sourceKey = m.sourceKey;
+    d.summary.name = m.name;
+    d.summary.author = m.author;
+    d.summary.profileUrl = m.profileUrl;
+
+    auto archive = st.keptPackage(m);
+    std::error_code ec;
+    if (archive.empty() && m.sourceKey.rfind("file:", 0) == 0 && mm::fs::is_regular_file(st.inboxDir() / m.sourceFile, ec))
+        archive = st.inboxDir() / m.sourceFile;
+    if (!archive.empty()) {
+        mm::gb::ModFile f;
+        f.filename = m.sourceFile;
+        f.downloadUrl = "file://" + archive.string();
+        f.size = static_cast<int64_t>(mm::fs::file_size(archive, ec));
+        f.id = m.gamebananaFileId ? m.gamebananaFileId : mm::stableId(archive.string() + ":" + std::to_string(f.size));
+        d.files.push_back(f);
+        paneToFlow().changeOptions(m, d, f);
+        return;
+    }
+    bool online = (m.sourceKey.rfind("gb:", 0) == 0 && m.gamebananaModId) || m.sourceKey.rfind("wk:", 0) == 0;
+    if (!online) {
+        paneToFlow().showMessage("Can't change the options",
+                           "Patchwork didn't keep " + m.sourceFile + ". Put it back in switch/patchwork/inbox on the SD card, then try again.", true);
+        return;
+    }
+    paneToFlow().showLoading("Getting " + m.name + "'s files…");
+    auto token = std::make_shared<bool>(true);  // false once the pane shows something else
+    detailsToken_ = token;
+    auto alive = alive_;
+    st.runNetwork([this, alive, token, m, summary = d.summary] {
+        std::optional<mm::gb::ModDetails> details;
+        std::string error;
+        try {
+            details = AppState::get().fetchDetails(summary);
+        } catch (const std::exception& e) {
+            error = e.what();
+        }
+        brls::sync([this, alive, token, m, details, error] {
+            if (!*alive || !*token) return;
+            if (!details) {
+                flow_->showMessage("Couldn't reach the mod's page", "Check your internet connection and try again.\n\n" + error, true);
+                return;
+            }
+            // The file it was installed from: by id on GameBanana, by name elsewhere.
+            const mm::gb::ModFile* file = nullptr;
+            for (const auto& f : details->files)
+                if ((m.gamebananaFileId && f.id == m.gamebananaFileId) || (!m.gamebananaFileId && f.filename == m.sourceFile)) file = &f;
+            if (!file) {
+                flow_->showMessage("Can't change the options", m.sourceFile + " isn't on the mod's page any more. Install the mod again from Browse to pick a newer file.", true);
+                return;
+            }
+            flow_->changeOptions(m, *details, *file);
+        });
+    });
 }
 
 void MyModsPage::move(const std::string& id, int delta) {

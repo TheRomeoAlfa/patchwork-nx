@@ -31,6 +31,9 @@ json toJson(const ModRecord& m) {
         {"gamebananaFileId", m.gamebananaFileId},
         {"installedAt", m.installedAt},
         {"variants", m.variants},
+        {"chosen", m.chosen},
+        {"package", m.package},
+        {"hasOptions", m.hasOptions},
         {"gameVersionsNamed", m.gameVersionsNamed},
         {"enabled", m.enabled},
         {"priority", m.priority},
@@ -55,6 +58,13 @@ ModRecord fromJson(const json& j) {
     if (m.sourceKey.empty() && m.gamebananaModId) m.sourceKey = "gb:" + std::to_string(m.gamebananaModId);  // older state files
     m.installedAt = j.value("installedAt", int64_t{0});
     m.variants = j.value("variants", std::vector<std::string>{});
+    m.chosen = j.value("chosen", std::vector<std::string>{});
+    m.package = j.value("package", "");
+    // Older state files: options were recorded only when there was a choice (BCML packages
+    // list just the options, without the package itself).
+    m.hasOptions = j.contains("hasOptions") ? j.value("hasOptions", false)
+                                            : m.variants.size() > 1 || (!m.bcmlLogs.empty() && !m.variants.empty() &&
+                                                                        !(m.variants.size() == 1 && m.variants[0] == "Main"));
     m.gameVersionsNamed = j.value("gameVersionsNamed", std::vector<std::string>{});
     m.enabled = j.value("enabled", false);
     m.priority = j.value("priority", 0);
@@ -178,6 +188,13 @@ void Library::save() const {
     writeFileAtomic(dataDir_ / "state.json", j.dump(1));
 }
 
+fs::path Library::keptPackage(const ModRecord& m) const {
+    if (m.package.empty() || !isSafeRelativePath(m.package)) return {};
+    std::error_code ec;
+    auto p = modDir(m) / fs::path(m.package);
+    return fs::is_regular_file(p, ec) ? p : fs::path();
+}
+
 fs::path Library::modDir(const ModRecord& m) const {
     return dataDir_ / "library" / std::string(gameInfo(m.game).key) / m.id;
 }
@@ -237,6 +254,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
     if (!removeTree(staging, &err) || !removeTree(old, &err)) throw std::runtime_error(err);
     record.files.clear();
     bool replacedWasOn = false;  // replacing an enabled copy: it's turned off during the swap
+    bool mergeDeferred = false;
     try {
         size_t done = 0;
         for (const auto& f : files) {
@@ -256,8 +274,18 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
         std::optional<int> keepPriority;
         if (auto* existing = findMut(record.id)) {
             keepPriority = existing->priority;
+            // Merges are keyed on it: a reinstall within the same second must still count as new.
+            if (!record.installedAt)
+                record.installedAt = std::max<int64_t>(static_cast<int64_t>(std::time(nullptr)), existing->installedAt + 1);
             replacedWasOn = existing->enabled;
             existing->enabled = false;
+            // A package's own files aren't on the card (its merge is): merging without it only
+            // to merge again right after would take twice as long.
+            mergeDeferred = deferMerge_ = !existing->bcmlLogs.empty();
+            struct Undefer {
+                bool& flag;
+                ~Undefer() { flag = false; }
+            } undefer{deferMerge_};
             apply(progress);
         }
         if (fs::exists(dir)) fs::rename(dir, old);
@@ -333,6 +361,8 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             throw std::runtime_error("couldn't copy the files to the SD card (" + why +
                                      "). The mod is saved but turned off; turn it on in My mods to try again.");
         }
+    } else if (mergeDeferred && replacedWasOn) {
+        apply(progress);  // the package was on and isn't now: merge without it
     }
     return *find(id);
 }
@@ -812,7 +842,7 @@ void Library::apply(const ProgressFn& progress) {
     // A merge that can't run (game files missing) doesn't stop the rest: the packages it
     // concerns just stay off the SD card for now.
     try {
-        refreshBcml();
+        if (!deferMerge_) refreshBcml();
         bcmlError_.clear();
     } catch (const std::exception& e) {
         bcmlError_ = dynamic_cast<const std::bad_alloc*>(&e) ? kOutOfMemory : e.what();

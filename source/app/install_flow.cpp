@@ -107,6 +107,7 @@ void InstallFlow::clear() {
 void InstallFlow::leave() {
     if (busy_) return;
     active_ = false;
+    reinstall_.reset();
     cancel_.reset();
     if (onExit) onExit();
 }
@@ -246,7 +247,13 @@ static std::string modIdFor(const ModDetails& d, const ModFile& file) {
     return "src-" + mm::slugify(d.summary.sourceKey, 60) + "-" + std::to_string(file.id % 1000000007);
 }
 
+void InstallFlow::changeOptions(const mm::ModRecord& m, const ModDetails& d, const ModFile& file) {
+    reinstall_ = m;
+    install(d, file);
+}
+
 void InstallFlow::showFilePicker(const ModDetails& d) {
+    reinstall_.reset();
     active_ = true;
     clear();
     auto& st = AppState::get();
@@ -470,8 +477,10 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
 
 void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, std::shared_ptr<mm::PreparedArchive> prep) {
     clear();
-    pane_->addView(ui::label("Choose options", 24, ui::text()));
-    auto* sub = ui::label("This file contains several versions or add-ons. Pick the ones you want, then press + to install.", 16, ui::muted(), false);
+    pane_->addView(ui::label(reinstall_ ? "Change options" : "Choose options", 24, ui::text()));
+    auto* sub = ui::label(reinstall_ ? "Your current choices are ticked. Change them, then press + to install the mod again with them."
+                                     : "This file contains several versions or add-ons. Pick the ones you want, then press + to install.",
+                          16, ui::muted(), false);
     sub->setMargins(6, 0, 16, 0);
     pane_->addView(sub);
 
@@ -485,6 +494,23 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     bool listed = std::any_of(variants.begin(), variants.end(), [](const mm::Variant& v) { return !v.label.empty(); });
     bool picked = listed;
     for (size_t i = 0; listed && i < variants.size(); ++i) (*selected)[i] = variants[i].always || variants[i].preselected;
+    if (reinstall_) {
+        // What's installed now. Older records only list the shown names (folder or label).
+        const auto& was = reinstall_->chosen.empty() ? reinstall_->variants : reinstall_->chosen;
+        auto had = [&](const mm::Variant& v) {
+            return std::find(was.begin(), was.end(), v.name) != was.end() ||
+                   (!v.label.empty() && std::find(was.begin(), was.end(), v.label) != was.end());
+        };
+        for (size_t i = 0; i < variants.size(); ++i) (*selected)[i] = variants[i].always || had(variants[i]);
+        // A "pick one" group none of whose options is installed (the mod changed) starts on its default.
+        for (size_t i = 0; i < variants.size(); ++i) {
+            if (variants[i].group < 0 || !variants[i].preselected) continue;
+            bool any = false;
+            for (size_t k = 0; k < variants.size(); ++k) any |= variants[k].group == variants[i].group && (*selected)[k];
+            if (!any) (*selected)[i] = true;
+        }
+        picked = true;
+    }
     for (size_t i = 0; !listed && i < variants.size(); ++i)
         if (mm::checkCompat(installed, mm::mentionedGameVersions(variants[i].name, game)) == mm::Compat::Likely) {
             (*selected)[i] = true;
@@ -688,17 +714,18 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         }
     }
     bool fromGameBanana = d.summary.sourceKey.rfind("gb:", 0) == 0;
-    auto newId = modIdFor(d, file);
+    auto reinstall = reinstall_;
+    auto newId = reinstall ? reinstall->id : modIdFor(d, file);
     // Other files of the same mod already installed (an older version, usually).
     std::vector<std::string> others;
     std::string otherNames;
     for (const auto* m : st.mods(st.game()))
-        if (!d.summary.sourceKey.empty() && m->sourceKey == d.summary.sourceKey && m->id != newId) {
+        if (!reinstall && !d.summary.sourceKey.empty() && m->sourceKey == d.summary.sourceKey && m->id != newId) {
             others.push_back(m->id);
             otherNames += (otherNames.empty() ? "" : ", ") + m->sourceFile;
         }
 
-    auto run = [this, d, file, prep, variants, newId, fromGameBanana](std::vector<std::string> replace) {
+    auto run = [this, d, file, prep, variants, newId, fromGameBanana, reinstall](std::vector<std::string> replace) {
         auto& st = AppState::get();
         mm::ModRecord r;
         r.id = newId;
@@ -717,14 +744,28 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         r.gameVersionsNamed = mm::mentionedGameVersions(file.description, r.game, false, modUsesVersionWord(d, r.game));
         if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
             r.gameVersionsNamed = mm::mentionedGameVersions(d.descriptionHtml, r.game, true);
+        if (reinstall && r.gameVersionsNamed.empty()) r.gameVersionsNamed = reinstall->gameVersionsNamed;  // from its kept copy: no page
         for (auto i : variants) {  // as the picker named them; the package itself goes without saying
             const auto& v = prep->layout.variants.at(i);
             if (!v.always) r.variants.push_back(v.label.empty() ? v.name : v.label);
+            r.chosen.push_back(v.name);
         }
+        const auto& all = prep->layout.variants;
+        r.hasOptions = all.size() > 1 && std::any_of(all.begin(), all.end(), [](const mm::Variant& v) { return !v.always; });
+        bool enable = reinstall ? reinstall->enabled : true;
         r.resourceSizes = mm::mergeVariantSizes(prep->layout, variants);
         auto files = mm::mergeVariants(prep->layout, variants);
         std::vector<mm::fs::path> logDirs;  // BCML packages that need merging
         auto logs = mm::variantLogFiles(prep->layout, variants, r.bcmlLogs);
+        // Keep the archive to change the options later without downloading it again: packages
+        // and small archives (big ones can be downloaded again, or put back in the inbox).
+        auto archive = st.archivePathFor(file);
+        std::error_code ec;
+        auto archiveSize = mm::fs::file_size(archive, ec);
+        if (r.hasOptions && !ec && (mm::endsWithI(file.filename, ".bnp") || archiveSize <= (64u << 20))) {
+            r.package = "package/" + mm::slugify(file.filename, 80);
+            logs.push_back({archive, r.package});
+        }
         for (auto i : variants)
             if (!prep->layout.variants.at(i).bcmlLogs.empty()) logDirs.push_back(prep->layout.variants.at(i).bcmlLogs);
         setBusy(true);
@@ -732,7 +773,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         setWorking("Installing… 0 / " + std::to_string(files.size()) + " files", 0);
         auto alive = flowAlive_;
         st.runFileJob(
-            [this, alive, r, files, logs, logDirs, replace, prep, fileId = file.id](mm::Library& lib) {
+            [this, alive, r, files, logs, logDirs, replace, prep, enable, fileId = file.id](mm::Library& lib) {
                 size_t lastStep = 0;
                 try {
                 if (!lib.canMergeSizes(r)) throw std::runtime_error(kSetupMarker + "size table");
@@ -756,7 +797,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     mm::Library& lib;
                     ~StopProgress() { lib.setMergeProgress({}); }
                 } stopProgress{lib};
-                lib.add(r, files, true, [&](size_t done, size_t total, const std::string&) {
+                lib.add(r, files, enable, [&](size_t done, size_t total, const std::string&) {
                     size_t step = total ? done * 50 / total : 0;  // ~2% steps
                     if (step == lastStep) return;
                     lastStep = step;
@@ -783,7 +824,7 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                 // Installed: the download and the unpacked copy aren't needed any more.
                 AppState::get().discardPending(fileId);
             },
-            [this, alive, d, file](const std::string& error) {
+            [this, alive, d, file, enable, reinstall](const std::string& error) {
                 if (!*alive) {
                     // The page was closed meanwhile; still tell the user how it went.
                     brls::Application::notify(error.empty() ? d.summary.name + " installed" : "Install of " + d.summary.name + " failed");
@@ -805,7 +846,11 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
                     showMessage("Install failed", error + (isLocalFile(file) ? std::string() : "\n\nThe download was kept. Try again from here or from My mods; it won't download again."), true);
                     return;
                 }
-                showMessage("Installed", d.summary.name + " is installed and turned on. Start the game to try it.\n\nYou can turn it off or change its load order in My mods.", false);
+                if (reinstall)
+                    showMessage("Options changed", reinstall->name + " is installed again with the options you picked" +
+                                                       (enable ? ". Start the game to try it." : ". It's still turned off."), false);
+                else
+                    showMessage("Installed", d.summary.name + " is installed and turned on. Start the game to try it.\n\nYou can turn it off or change its load order in My mods.", false);
             });
     };
 

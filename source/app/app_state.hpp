@@ -161,6 +161,8 @@ public:
     mm::fs::path downloadsDir() const { return dataDir_ / "downloads"; }
     mm::fs::path workDir() const { return dataDir_ / "work"; }
     mm::fs::path inboxDir() const { return dataDir_ / "inbox"; }  // archives copied here by the user
+    // The archive a mod was installed from, if Patchwork kept it ("" if not). Any thread.
+    mm::fs::path keptPackage(const mm::ModRecord& m) const { return library_->keptPackage(m); }
     mm::fs::path saveBackupsDir() const { return dataDir_ / "save-backups"; }
     // Each install unpacks into its own folder so two attempts can never mix files.
     mm::fs::path workDirFor(int64_t fileId) const { return workDir() / std::to_string(fileId); }

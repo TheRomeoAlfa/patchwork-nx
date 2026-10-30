@@ -324,6 +324,62 @@ TEST("bcml: the library deploys merged files instead of a package's partial pack
     CHECK_EQ(lib2.missingGameFiles({src / "logs"}).size(), 1u);
 }
 
+TEST("bcml: reinstalling a package with other options merges once, in place") {
+    t::TempDir d;
+    auto sd = d.path / "sd", data = d.path / "sd/switch/patchwork", game = d.path / "game";
+    put(game / "01007EF00011E000/romfs/Pack/Title.pack",
+        sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{"blyt/Title.bflyt", "game layout"}, {"timg/__Combined.bntx", "game textures"}}))}}));
+    SizeTable table;
+    put(data / "original/botw/ResourceSizeTable.product.srsizetable", yaz0Store(table.write()));
+    Library lib(sd, data);
+    lib.load();
+    lib.setOriginalSizeTable(data / "original/botw/ResourceSizeTable.product.srsizetable");
+    bcml::FolderGameFiles files(game);
+    lib.setGameFileReader([&](const std::string& p) {
+        auto f = files.read(p);
+        return f ? Library::GameFile{Library::GameFile::State::Found, *f} : Library::GameFile{Library::GameFile::State::Absent, {}};
+    });
+    int merges = 0;
+    lib.setMergeProgress([&](float, const std::string& what) {
+        if (what == "Reading the packages") ++merges;  // each merge starts there
+    });
+    const std::string target = "atmosphere/contents/01007EF00011E000/romfs/Pack/Title.pack";
+    auto install = [&](const std::string& file, const std::string& inner, const std::string& data, bool enable,
+                       const std::string& id = "pkg") {
+        auto src = d.path / file;
+        put(src / "Title.pack", sarcOf({{"Layout/Title.sblarc", yaz0Compress(sarcOf({{inner, data}}))}}));
+        put(src / "logs/packs.json", R"({"Pack/Title.pack": "01007EF00011E000/romfs/Pack/Title.pack"})");
+        ModRecord r;
+        r.id = id;
+        r.game = Game::Botw;
+        r.bcmlLogs = {"0"};
+        r.chosen = {"options/" + file};
+        lib.add(r, {{src / "Title.pack", target}}, enable, {}, {{src / "logs/packs.json", "bcml/0/packs.json"}});
+    };
+    auto layout = [&] { return Sarc::parse(Sarc::parse(readFile(sd / target)).find("Layout/Title.sblarc")->data); };
+    install("base", "timg/Base.bntx", "another package", true, "base");  // so a merge without "pkg" isn't empty
+    install("textures", "timg/__Combined.bntx", "option A", true);
+    put(d.path / "other/x.bfres", "x");
+    ModRecord other;
+    other.id = "other";
+    other.game = Game::Botw;
+    lib.add(other, {{d.path / "other/x.bfres", "atmosphere/contents/01007EF00011E000/romfs/Model/x.bfres"}}, true);  // above it
+    CHECK(layout().find("timg/__Combined.bntx")->data == "option A");
+    int before = merges;
+    install("layout", "blyt/Title.bflyt", "option B", true);
+    CHECK_EQ(merges - before, 1);  // not once without it, then again with it
+    auto changed = layout();
+    CHECK(changed.find("blyt/Title.bflyt")->data == "option B");
+    CHECK(changed.find("timg/__Combined.bntx")->data == "game textures");  // the old option is gone
+    CHECK(changed.find("timg/Base.bntx")->data == "another package");
+    CHECK(lib.find("pkg")->priority < lib.find("other")->priority);         // kept its place
+    CHECK(lib.find("pkg")->chosen == std::vector<std::string>({"options/layout"}));
+    // Reinstalled turned off: merged without it.
+    install("layout", "blyt/Title.bflyt", "option B", false);
+    CHECK(layout().find("blyt/Title.bflyt")->data == "game layout");
+    CHECK(layout().find("timg/Base.bntx") != nullptr);
+}
+
 namespace {
 using aamp::Parameter;
 using aamp::Type;
