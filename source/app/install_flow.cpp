@@ -39,7 +39,8 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, 
                                                      : FileNote{"BCML package · installs here", ui::ok()};
         return {"BCML package", ui::muted()};
     }
-    if (mm::endsWithI(f.filename, ".tkcl")) return {"Needs TKMM on a PC", ui::warn()};
+    if (mm::endsWithI(f.filename, ".tkcl") || (game == mm::Game::Totk && mm::saysTkmmOnly(f.description + " " + f.filename)))
+        return {"Needs TKMM on a PC", ui::warn()};
     if (mm::wk::isWiiUOnly(f)) return {"Wii U only", ui::warn()};
     if (mm::isRestoreOriginalsFile(f.filename, f.description))
         return {"Original files · not needed", ui::muted()};  // Patchwork undoes mods itself
@@ -55,15 +56,19 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, 
 }
 
 // The file we'd pick for the user: one made for their game version, else the newest
-// one that isn't a PC-only package.
+// one that isn't a PC-only package, in the console's language if files differ by language.
 size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& installed) {
     size_t best = 0;
-    int bestScore = -1;
+    int bestScore = -1000;
     bool versionWordIsMod = modUsesVersionWord(d, game);
+    auto language = mm::toLower(platform::gameTextLanguage().substr(2));  // "USen" -> "en"
     for (size_t i = 0; i < d.files.size(); ++i) {
         const auto& f = d.files[i];
         int score = 0;
-        if (!isUnsupportedPackage(f)) score += 4;
+        // Labeled for TKMM: an archive with a TKMM package inside, needing a PC too.
+        bool pcOnly = isUnsupportedPackage(f) || (game == mm::Game::Totk && mm::saysTkmmOnly(f.description + " " + f.filename));
+        if (!pcOnly) score += 4;
+        score += 2 * mm::languageMatch(f.description + " " + f.filename, language);
         if (mm::isRestoreOriginalsFile(f.filename, f.description)) score -= 20;  // only if it's all there is
         if (noteFor(f, game, installed, versionWordIsMod).matches) score += 8;
         // The author's own advice ("Standalone Version (Not Recommended)").
