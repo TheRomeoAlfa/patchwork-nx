@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <ctime>
+#include <new>
 #include <set>
 #include <stdexcept>
 
 #include "bcml.hpp"
 #include "nlohmann/json.hpp"
+#include "sarc.hpp"
 #include "sizetable.hpp"
 
 namespace mm {
@@ -149,6 +151,10 @@ bool Library::load() {
     bcmlKey_ = j.value("bcmlKey", "");
     bcmlOutputs_ = j.value("bcmlOutputs", std::vector<std::string>{});
     bcmlSizes_ = j.value("bcmlSizes", std::map<std::string, uint32_t>{});
+    bcmlReads_ = j.value("bcmlReads", std::vector<std::string>{});
+    // Merges from before other mods' copies were merged in: merge again at the next apply().
+    // Changed past the packages' part of the key, so the last merge stays usable meanwhile.
+    if (!j.contains("bcmlReads") && !bcmlKey_.empty()) bcmlKey_ += " (old)";
     auto backups = j.value("backedUp", json::object());
     for (const auto& [k, v] : backups.items()) {
         // Old format was {target: true}.
@@ -168,6 +174,7 @@ void Library::save() const {
     j["bcmlKey"] = bcmlKey_;
     j["bcmlOutputs"] = bcmlOutputs_;
     j["bcmlSizes"] = bcmlSizes_;
+    j["bcmlReads"] = bcmlReads_;
     writeFileAtomic(dataDir_ / "state.json", j.dump(1));
 }
 
@@ -564,6 +571,26 @@ private:
     const Library::GameFileReader& r_;
 };
 
+// What a merge starts from: what the packages merged before made of a file, else another
+// mod's copy below every package, else the game's. Keyed by lowercase path. Notes what was read.
+class BaseGameFiles : public bcml::GameFiles {
+public:
+    BaseGameFiles(bcml::GameFiles& game, std::map<std::string, fs::path> mods) : game_(game), mods_(std::move(mods)) {}
+    std::optional<std::string> read(const std::string& path) override {
+        reads.push_back(path);
+        auto key = toLower(path);
+        if (auto it = merged.find(key); it != merged.end()) return it->second.second;
+        if (auto it = mods_.find(key); it != mods_.end()) return readFile(it->second);
+        return game_.read(path);
+    }
+    std::vector<std::string> reads;
+    std::map<std::string, std::pair<std::string, std::string>> merged;  // -> (path, data)
+
+private:
+    bcml::GameFiles& game_;
+    std::map<std::string, fs::path> mods_;
+};
+
 }  // namespace
 
 namespace {
@@ -589,6 +616,18 @@ bool Library::bcmlStillUsable() const {
     return true;
 }
 
+std::map<std::string, std::pair<const ModRecord*, std::string>> Library::bcmlBases() const {
+    std::map<std::string, std::pair<const ModRecord*, std::string>> out;
+    for (const auto* m : mods(Game::Botw)) {  // highest priority first
+        if (!m->enabled || !m->bcmlLogs.empty()) continue;
+        for (const auto& t : m->files) {
+            auto key = targetKey(t);
+            if (key.rfind(kContentsPrefix, 0) == 0) out.emplace(key.substr(kContentsPrefix.size()), std::make_pair(m, t));
+        }
+    }
+    return out;
+}
+
 std::string Library::bcmlKey() const {
     std::vector<const ModRecord*> pkgs;
     for (const auto& m : mods_)
@@ -596,8 +635,18 @@ std::string Library::bcmlKey() const {
     std::sort(pkgs.begin(), pkgs.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
     std::string key;
     for (const auto* m : pkgs) key += m->id + "@" + std::to_string(m->installedAt) + ";";
-    if (!key.empty()) key += "lang=" + textLanguage_;
-    return key;
+    if (key.empty()) return key;
+    // Other mods' copies the last merge used, and where they sit among the packages: turning
+    // one on or off, moving it past a package, or a new one, means merging again.
+    auto bases = bcmlBases();
+    for (const auto& path : bcmlReads_) {
+        auto it = bases.find(toLower(path));
+        if (it == bases.end()) continue;
+        const auto* m = it->second.first;
+        auto below = std::count_if(pkgs.begin(), pkgs.end(), [&](auto* p) { return p->priority < m->priority; });
+        key += "base:" + toLower(path) + "=" + m->id + "@" + std::to_string(m->installedAt) + "/" + std::to_string(below) + ";";
+    }
+    return key + "lang=" + textLanguage_;
 }
 
 void Library::refreshBcml() {
@@ -608,6 +657,7 @@ void Library::refreshBcml() {
         bcmlKey_.clear();
         bcmlOutputs_.clear();
         bcmlSizes_.clear();
+        bcmlReads_.clear();
         removeTree(staging);
         removeTree(fs::path(staging) += ".new");
         removeTree(fs::path(staging) += ".old");
@@ -623,11 +673,61 @@ void Library::refreshBcml() {
         for (const auto& d : m->bcmlLogs) p.logDirs.push_back(modDir(*m) / "bcml" / d);
         pkgs.push_back(std::move(p));
     }
-    ReaderGameFiles game(gameFiles_);
     bcml::Options options;
     options.language = textLanguage_;
-    if (mergeProgress_) options.progress = [this](float f, const std::string& what) { mergeProgress_(0.9f * f, what); };
-    auto result = bcml::merge(pkgs, game, options);
+    // Other mods' copies of files the merge reads. One below every package is where the merge
+    // starts (BCML on a PC puts such mods under the packages). One higher up keeps its place:
+    // the packages below it are merged first, its changes are laid over that, and the packages
+    // above it are merged on top.
+    std::set<std::string> needed;
+    for (const auto& p : bcml::gameFilesNeeded(pkgs, options)) needed.insert(toLower(p));
+    std::map<std::string, fs::path> startFrom;
+    std::map<size_t, std::vector<std::pair<std::string, fs::path>>> layers;  // packages below -> (path, copy)
+    for (const auto& [key, owner] : bcmlBases()) {
+        auto file = modDir(*owner.first) / fs::path(owner.second);
+        auto below = size_t(std::count_if(sorted.begin(), sorted.end(), [&](auto* p) { return p->priority < owner.first->priority; }));
+        if (below == 0)
+            startFrom[key] = file;
+        else if (needed.count(key))
+            layers[below].push_back({owner.second.substr(kContentsPrefix.size()), file});
+    }
+    ReaderGameFiles reader(gameFiles_);
+    BaseGameFiles game(reader, std::move(startFrom));
+    bcml::Result result;
+    size_t runs = 1 + layers.size(), run = 0, done = 0;
+    auto mergeUpTo = [&](size_t end) {
+        if (end > done) {
+            if (mergeProgress_)
+                options.progress = [this, run, runs](float f, const std::string& what) { mergeProgress_(0.9f * (run + f) / runs, what); };
+            std::vector<bcml::Package> part(pkgs.begin() + done, pkgs.begin() + end);
+            auto r = bcml::merge(part, game, options);
+            for (auto& [path, data] : r.files) game.merged[toLower(path)] = {path, std::move(data)};
+            for (const auto& [name, size] : r.sizes) result.sizes[name] = size;
+            done = end;
+        }
+        ++run;
+    };
+    for (const auto& [below, copies] : layers) {
+        mergeUpTo(below);
+        for (const auto& [path, file] : copies) {
+            if (mergeProgress_) mergeProgress_(0.9f * run / runs, "Adding " + fs::path(path).filename().string());
+            auto top = readFile(file);
+            auto original = reader.read(path);
+            auto it = game.merged.find(toLower(path));
+            std::string current = it != game.merged.end() ? std::move(it->second.second) : original ? *original : std::string();
+            std::string layered;
+            if (original && isSarc(*original) && isSarc(current) && isSarc(top)) {
+                layered = layerSarc(*original, std::move(current), top);
+                if (isYaz0(top)) layered = yaz0Compress(layered);
+            } else {
+                layered = std::move(top);  // not an archive: the higher copy wins whole
+            }
+            game.merged[toLower(path)] = {path, std::move(layered)};
+        }
+    }
+    mergeUpTo(pkgs.size());
+    for (auto& [key, file] : game.merged) result.files[file.first] = std::move(file.second);
+    game.merged.clear();
     // Written next to the last merge's files and swapped in once all are there, so a failed
     // write leaves the last merge as it was.
     auto incoming = staging, previous = staging;
@@ -651,8 +751,11 @@ void Library::refreshBcml() {
     if (!result.files.empty()) fs::rename(incoming, staging);
     removeTree(previous);
     removeTree(incoming);
-    bcmlKey_ = key;
     bcmlOutputs_ = std::move(outputs);
+    bcmlReads_ = std::move(game.reads);
+    std::sort(bcmlReads_.begin(), bcmlReads_.end());
+    bcmlReads_.erase(std::unique(bcmlReads_.begin(), bcmlReads_.end()), bcmlReads_.end());
+    bcmlKey_ = bcmlKey();  // with the other mods' copies this merge started from
     bcmlSizes_ = std::move(result.sizes);
     save();
 }
@@ -712,7 +815,7 @@ void Library::apply(const ProgressFn& progress) {
         refreshBcml();
         bcmlError_.clear();
     } catch (const std::exception& e) {
-        bcmlError_ = e.what();
+        bcmlError_ = dynamic_cast<const std::bad_alloc*>(&e) ? kOutOfMemory : e.what();
         // The last merge stays on the card while it only lacks packages turned on since (they
         // wait). If it includes one that's now off, removed or reinstalled, it would keep that
         // package's changes in the game: take every merged file off until a merge succeeds.
@@ -924,13 +1027,23 @@ const ModRecord& Library::importUnmanaged(Game game, const std::string& name, co
     return *find(r.id);
 }
 
+std::set<std::string> Library::bcmlMergedTargets() const {
+    std::set<std::string> out;
+    if (!bcmlKey_.empty())
+        for (const auto& t : bcmlOutputs_) out.insert(targetKey(t));
+    return out;
+}
+
 std::vector<Conflict> Library::conflicts(Game game) const {
+    auto merged = game == Game::Botw ? bcmlMergedTargets() : std::set<std::string>{};
     std::map<std::string, Conflict> byKey;
     for (const auto* m : mods(game)) {  // already sorted highest priority first
         if (!m->enabled) continue;
         for (const auto& t : m->files) {
-            if (targetKey(t) == kSizeTableKey && m->game == Game::Botw) continue;  // merged, not a conflict
-            auto& c = byKey[targetKey(t)];
+            auto key = targetKey(t);
+            if (key == kSizeTableKey && m->game == Game::Botw) continue;  // merged, not a conflict
+            if (merged.count(key) && !m->bcmlLogs.empty()) continue;  // part of the merged file
+            auto& c = byKey[key];
             if (c.target.empty()) c.target = t;
             c.modIds.push_back(m->id);
         }

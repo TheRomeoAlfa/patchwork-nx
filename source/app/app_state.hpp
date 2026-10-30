@@ -54,6 +54,7 @@ struct LibrarySnapshot {
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
     bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    std::set<std::string> bcmlMerged;  // targets (lowercase) the last BCML merge produced
     bool loaded = false;       // false until the mod list has been read at startup
 };
 
@@ -98,6 +99,8 @@ public:
 
     // ---- library: mutate only inside runFileJob; read the snapshot on the UI thread
     void runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string& error)> done);
+    // What to tell the user when a job runs out of memory (says how to get more).
+    static std::string outOfMemoryMessage();
     bool fileJobRunning() const { return fileJobs_ > 0; }
     // What a background job (not started by the user) is doing, for "waiting" messages; "" if none.
     std::string backgroundTask() const;
@@ -185,7 +188,10 @@ private:
     LibrarySnapshot snapshot_;
     Settings settings_;
 
-    WorkQueue net_{3};
+    // Network threads: from the Album the console allows homebrew only two connections at a time
+    // (holding R on a game: twelve), and more requests than that wait in line until they time out.
+    WorkQueue net_{networkThreads()};
+    static int networkThreads();
     WorkQueue files_{1};
     std::atomic<int> fileJobs_{0};
     int installBusy_ = 0;

@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -114,7 +115,11 @@ public:
     // turned off and back on. Copies them into the library; the SD card is left as is.
     const ModRecord& importUnmanaged(Game game, const std::string& name, const ProgressFn& progress = {});
 
+    // Files the BCML merge combines aren't conflicts for the packages in it. Other mods' copies
+    // of them still compete as usual: the highest one is what the merge starts from.
     std::vector<Conflict> conflicts(Game game) const;
+    // Targets (lowercase) the last BCML merge produced.
+    std::set<std::string> bcmlMergedTargets() const;
     std::vector<PatchOverlap> patchOverlaps(Game game) const;
 
     // Make the SD card match the enabled set. Called by the mutators above; also usable
@@ -175,6 +180,8 @@ public:
     // Merge BCML packages again on the next apply() (the game files they read changed).
     void invalidateBcml() { bcmlKey_.clear(); }
     const std::string& bcmlError() const { return bcmlError_; }
+    // bcmlError() when the merge ran out of memory.
+    static constexpr const char* kOutOfMemory = "the merge ran out of memory";
 private:
     void writeMergedSizeTable(const fs::path& sdPath) const;
     void checkSpace(uint64_t needed, const std::string& advice) const;
@@ -190,6 +197,10 @@ private:
     std::string bcmlKey_;
     std::vector<std::string> bcmlOutputs_;
     std::map<std::string, uint32_t> bcmlSizes_;
+    std::vector<std::string> bcmlReads_;  // the files the last merge read ("01007EF00011E000/romfs/…")
+    // For each file a merge reads, the mod (not a BCML package) whose copy it starts from
+    // instead of the game's: the enabled BOTW one highest in the list. Keyed by lowercase path.
+    std::map<std::string, std::pair<const ModRecord*, std::string>> bcmlBases() const;
     std::string bcmlError_;  // why the last merge didn't happen
     bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
     // Every package in the last merge is still enabled (as installed then): its files may stay.

@@ -211,11 +211,16 @@ std::string urlDecode(std::string_view s) {
 }
 
 std::string readFile(const fs::path& p) {
-    std::ifstream in(p, std::ios::binary);
+    std::ifstream in(p, std::ios::binary | std::ios::ate);
     if (!in) throw std::runtime_error("cannot open " + p.string());
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+    // Straight into a string of the right size: a stream's buffer would grow by doubling and
+    // be copied once more, about three times the file in memory for a moment.
+    auto size = in.tellg();
+    if (size < 0) throw std::runtime_error("cannot read " + p.string());
+    std::string out(static_cast<size_t>(size), '\0');
+    in.seekg(0);
+    if (!in.read(out.data(), size)) throw std::runtime_error("cannot read " + p.string());
+    return out;
 }
 
 void writeFileAtomic(const fs::path& p, std::string_view data) {

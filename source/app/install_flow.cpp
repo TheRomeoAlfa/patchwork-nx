@@ -7,6 +7,7 @@
 #include "platform.hpp"
 #include "waikuteru.hpp"
 
+#include <algorithm>
 #include <ctime>
 #include <set>
 
@@ -454,8 +455,14 @@ void InstallFlow::install(const ModDetails& d, const ModFile& file) {
                 showMessage("Can't install this file", message, true);
                 return;
             }
+            // Nothing to choose (one version, or a BCML package without options): install it.
+            std::vector<size_t> always;
+            for (size_t i = 0; i < layout.variants.size(); ++i)
+                if (layout.variants[i].always) always.push_back(i);
             if (layout.variants.size() == 1)
                 finish(d, file, prep, {0});
+            else if (always.size() == layout.variants.size())
+                finish(d, file, prep, always);
             else
                 showVariantPicker(d, file, prep);
         });
@@ -468,14 +475,17 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     sub->setMargins(6, 0, 16, 0);
     pane_->addView(sub);
 
-    // Pre-select the option made for the user's game version if the options are per-version,
-    // otherwise the biggest one (usually the main mod rather than an add-on).
+    // BCML packages that list their options start on BCML's defaults. Otherwise pre-select the
+    // option made for the user's game version if the options are per-version, else the biggest
+    // one (usually the main mod rather than an add-on).
     const auto& variants = prep->layout.variants;
     auto selected = std::make_shared<std::vector<bool>>(variants.size(), false);
     auto game = AppState::get().game();
     const auto& installed = AppState::get().gameVersion(game);
-    bool picked = false;
-    for (size_t i = 0; i < variants.size(); ++i)
+    bool listed = std::any_of(variants.begin(), variants.end(), [](const mm::Variant& v) { return !v.label.empty(); });
+    bool picked = listed;
+    for (size_t i = 0; listed && i < variants.size(); ++i) (*selected)[i] = variants[i].always || variants[i].preselected;
+    for (size_t i = 0; !listed && i < variants.size(); ++i)
         if (mm::checkCompat(installed, mm::mentionedGameVersions(variants[i].name, game)) == mm::Compat::Likely) {
             (*selected)[i] = true;
             picked = true;
@@ -514,12 +524,22 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     pane_->addView(scroll);
 
     auto install = [this, d, file, prep, selected](brls::View*) {
+        const auto& variants = prep->layout.variants;
         std::vector<size_t> chosen;
         for (size_t i = 0; i < selected->size(); ++i)
             if ((*selected)[i]) chosen.push_back(i);
         if (chosen.empty()) {
             brls::Application::notify("Pick at least one option");
             return true;
+        }
+        for (size_t i = 0; i < variants.size(); ++i) {
+            if (!variants[i].required) continue;
+            bool any = false;
+            for (size_t k = 0; k < variants.size(); ++k) any |= variants[k].group == variants[i].group && (*selected)[k];
+            if (!any) {
+                brls::Application::notify("Pick one: " + (variants[i].groupName.empty() ? variants[i].label : variants[i].groupName));
+                return true;
+            }
         }
         finish(d, file, prep, chosen);
         return true;
@@ -535,7 +555,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
     // Option folders often share a long prefix ("BreathOfTheWild_NoFall…", "BreathOfTheWild_
     // Reduced…"): show only the part that differs.
     size_t common = 0;
-    if (variants.size() > 1) {
+    if (variants.size() > 1 && !listed) {
         common = variants[0].name.size();
         for (const auto& v : variants) {
             size_t n = 0;
@@ -558,27 +578,56 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
             text.pop_back();
         return text;
     };
+    // Options of a "pick one" group show as radio buttons; picking one clears the others.
+    auto boxes = std::make_shared<std::vector<brls::Label*>>(variants.size(), nullptr);
+    auto icon = [](const mm::Variant& v, bool on) {
+        return v.group >= 0 ? (on ? ui::icon::radioOn : ui::icon::radioOff) : (on ? ui::icon::boxOn : ui::icon::boxOff);
+    };
     brls::View* first = nullptr;
+    brls::View* top = nullptr;
+    int lastGroup = -1;
     for (size_t i = 0; i < variants.size(); ++i) {
         const auto& v = variants[i];
+        if (v.always) continue;  // the package itself goes in regardless
+        if (v.group >= 0 && v.group != lastGroup && !v.groupName.empty()) {
+            auto* heading = ui::label(v.groupName, 16, ui::muted(), false);
+            heading->setMargins(10, 0, 4, 0);
+            list->addView(heading);
+        }
+        lastGroup = v.group;
         auto* row = ui::focusRow();
         ui::tappable(row, ui::Tap::Act);
-        auto* box = ui::label((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff, 26, ui::accent());
+        auto* box = ui::label(icon(v, (*selected)[i]), 26, ui::accent());
+        (*boxes)[i] = box;
         row->addView(box);
-        auto* name = ui::label(shown(v.name), 18, ui::text());
+        auto* name = ui::label(v.label.empty() ? shown(v.name) : v.label, 18, ui::text());
         name->setMarginLeft(12);
         name->setGrow(1);
         name->setShrink(1);
         row->addView(name);
-        row->addView(ui::label(std::to_string(v.files.size()) + " files", 15, ui::muted()));
-        row->registerClickAction([selected, i, box](brls::View*) {
-            (*selected)[i] = !(*selected)[i];
-            box->setText((*selected)[i] ? ui::icon::boxOn : ui::icon::boxOff);
+        // BCML options often change the game's files rather than bringing their own.
+        if (!v.files.empty() || v.bcmlLogs.empty())
+            row->addView(ui::label(std::to_string(v.files.size()) + " files", 15, ui::muted()));
+        row->registerClickAction([prep, selected, boxes, icon, i](brls::View*) {
+            const auto& variants = prep->layout.variants;
+            const auto& v = variants[i];
+            if (v.group < 0) {
+                (*selected)[i] = !(*selected)[i];
+            } else if ((*selected)[i]) {
+                if (!v.required) (*selected)[i] = false;
+            } else {
+                for (size_t k = 0; k < variants.size(); ++k)
+                    if (variants[k].group == v.group) (*selected)[k] = false;
+                (*selected)[i] = true;
+            }
+            for (size_t k = 0; k < variants.size(); ++k)
+                if ((*boxes)[k]) (*boxes)[k]->setText(icon(variants[k], (*selected)[k]));
             return true;
         });
         row->updateActionHint(brls::BUTTON_A, "Select");
         list->addView(row);
         if ((*selected)[i] && !first) first = row;  // start on the pre-selected option
+        if (!top) top = row;
     }
     auto* button = new brls::Button();
     button->setText("Install selected");
@@ -590,12 +639,31 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         l->setMarginTop(6);
         list->addView(l);
     }
-    brls::Application::giveFocus(first);
+    brls::Application::giveFocus(first ? first : top);
 }
 
 void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_ptr<mm::PreparedArchive> prep,
                          std::vector<size_t> variants, bool sizeTablesOk) {
     auto& st = AppState::get();
+    // Merging can rebuild archives of 100 MB and more, which the Album's memory may not hold.
+    // Said once per session.
+    static bool memoryWarned = false;
+    bool merges = std::any_of(variants.begin(), variants.end(), [&](size_t i) { return !prep->layout.variants.at(i).bcmlLogs.empty(); });
+    if (merges && !memoryWarned && !platform::fullMemory()) {
+        memoryWarned = true;
+        auto* dialog = new brls::Dialog(
+            "Patchwork was opened from the Album, which leaves it only a little memory. BCML packages that change big game "
+            "files (like Link's moves or the title screen) may fail with \"out of memory\".\n\n"
+            "To be safe: press + to close Patchwork, then hold R while starting a game and open Patchwork from the Homebrew Menu.");
+        dialog->addButton("Cancel", [this, prep] {
+            mm::removeTree(prep->extractDir);  // the download stays (listed in My mods)
+            leave();
+        });
+        dialog->addButton("Install anyway", [this, d, file, prep, variants, sizeTablesOk] { finish(d, file, prep, variants, sizeTablesOk); });
+        dialog->setCancelable(false);
+        dialog->open();
+        return;
+    }
     if (!sizeTablesOk) {
         std::vector<std::string> targets;
         for (const auto& f : mm::mergeVariants(prep->layout, variants)) targets.push_back(f.target);
@@ -649,7 +717,10 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         r.gameVersionsNamed = mm::mentionedGameVersions(file.description, r.game, false, modUsesVersionWord(d, r.game));
         if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
             r.gameVersionsNamed = mm::mentionedGameVersions(d.descriptionHtml, r.game, true);
-        for (auto i : variants) r.variants.push_back(prep->layout.variants.at(i).name);
+        for (auto i : variants) {  // as the picker named them; the package itself goes without saying
+            const auto& v = prep->layout.variants.at(i);
+            if (!v.always) r.variants.push_back(v.label.empty() ? v.name : v.label);
+        }
         r.resourceSizes = mm::mergeVariantSizes(prep->layout, variants);
         auto files = mm::mergeVariants(prep->layout, variants);
         std::vector<mm::fs::path> logDirs;  // BCML packages that need merging
@@ -745,15 +816,27 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         auto& st = AppState::get();
         std::set<std::string> targets;
         for (const auto& f : mm::mergeVariants(prep->layout, variants)) targets.insert(mm::toLower(f.target));
-        std::set<std::string> owned;
+        // Files a BCML merge combines: packages' copies, and the copy of the mod highest in the
+        // list that isn't a package (the merge starts from it), all end up in one file.
+        std::vector<mm::fs::path> logDirs;
+        for (auto i : variants)
+            if (!prep->layout.variants.at(i).bcmlLogs.empty()) logDirs.push_back(prep->layout.variants.at(i).bcmlLogs);
+        std::set<std::string> merging;
+        if (!logDirs.empty())
+            for (const auto& p : mm::bcml::gameFilesNeeded({mm::bcml::Package{newId, {}, logDirs}}))
+                merging.insert(mm::toLower("atmosphere/contents/" + p));
+        const auto& merged = st.snapshot().bcmlMerged;
+        std::set<std::string> owned(merged.begin(), merged.end());
         std::vector<std::string> clashing;
         for (const auto* m : st.mods(st.game())) {
             bool replaced = std::find(replace.begin(), replace.end(), m->id) != replace.end();
+            bool bcml = !m->bcmlLogs.empty();
             for (const auto& t : m->files) {
-                owned.insert(mm::toLower(t));
-                if (m->enabled && !replaced && m->id != newId && targets.count(mm::toLower(t)) &&
-                    std::find(clashing.begin(), clashing.end(), m->name) == clashing.end())
-                    clashing.push_back(m->name);
+                auto key = mm::toLower(t);
+                owned.insert(key);
+                if (!m->enabled || replaced || m->id == newId || !targets.count(key)) continue;
+                if (merging.count(key) || (bcml && merged.count(key))) continue;  // merged together
+                if (std::find(clashing.begin(), clashing.end(), m->name) == clashing.end()) clashing.push_back(m->name);
             }
         }
         size_t onCard = 0;

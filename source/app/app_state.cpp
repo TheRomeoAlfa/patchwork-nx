@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <new>
 #include <regex>
 
 #include <webp/decode.h>
@@ -355,14 +356,26 @@ void AppState::saveSettings() {
     }
 }
 
+int AppState::networkThreads() { return platform::fullMemory() ? 3 : 2; }
+
+std::string AppState::outOfMemoryMessage() {
+    std::string text = "Patchwork ran out of memory. Merging BCML packages rebuilds some of the game's biggest files.";
+    if (!platform::fullMemory())
+        text += "\n\nPatchwork was opened from the Album, which leaves it only a little memory. Press + to close it, then "
+                "hold R while starting a game and open Patchwork from the Homebrew Menu that appears.";
+    return text;
+}
+
 void AppState::runFileJob(std::function<void(mm::Library&)> job, std::function<void(const std::string&)> done) {
     ++fileJobs_;
     files_.post([this, job = std::move(job), done = std::move(done)] {
         std::string error;
         try {
             job(*library_);
+        } catch (const std::bad_alloc&) {
+            error = outOfMemoryMessage();
         } catch (const std::exception& e) {
-            error = e.what();
+            error = e.what() == std::string(mm::Library::kOutOfMemory) ? outOfMemoryMessage() : e.what();
         }
         try {
             publishSnapshot(*library_);
@@ -384,6 +397,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
             if (!m->sourceKey.empty()) snap->installedKeys.insert(m->sourceKey);
         }
         snap->conflicts[g.game] = lib.conflicts(g.game);
+        if (g.game == mm::Game::Botw) snap->bcmlMerged = lib.bcmlMergedTargets();
         snap->overlaps[g.game] = lib.patchOverlaps(g.game);
         auto un = lib.unmanagedFiles(g.game);
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
@@ -615,8 +629,11 @@ std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& m
         }
     };
     auto started = std::chrono::steady_clock::now();
+    // Runs on a network thread already, next to the other one (or two): with the Album's two
+    // connections, no helpers.
     std::vector<std::thread> workers;
-    for (int t = 0; t < 4; ++t) workers.emplace_back(worker);
+    for (int t = 0; t < (platform::fullMemory() ? 2 : 0); ++t) workers.emplace_back(worker);
+    worker();
     for (auto& t : workers) t.join();
     brls::Logger::info("checked {} mods for PC-only packages in {} ms", todo.size(),
                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());

@@ -428,8 +428,8 @@ void MyModsPage::showDetails(const std::string& id) {
                         AppState::bcmlSetupSteps(false),
                     ui::warn(), ui::warnBg());
         else
-            addNote(std::string(ui::icon::info) + "  Merged with the game's own files. Patchwork merges again whenever a BCML package is "
-                                                  "turned on or off or moved in the list.",
+            addNote(std::string(ui::icon::info) + "  Merged with the game's own files. Patchwork merges again whenever a BCML package, "
+                                                  "or another mod that changes the same files, is turned on or off or moved in the list.",
                     ui::accent(), ui::accentDim());
     }
 
@@ -449,7 +449,7 @@ void MyModsPage::showDetails(const std::string& id) {
     std::string info = "Installed " + std::string(date);
     if (!m->sourceFile.empty()) info += "\nFile: " + m->sourceFile;
     if (!m->version.empty()) info += "\nMod version: " + m->version;
-    if (m->variants.size() > 1) {
+    if (m->variants.size() > 1 || (m->variants.size() == 1 && !m->bcmlLogs.empty())) {
         info += "\nOptions:";
         for (const auto& v : m->variants) info += " " + v + ";";
         info.pop_back();

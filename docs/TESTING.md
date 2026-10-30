@@ -143,3 +143,13 @@ Run these after any release build; they cover what the desktop build can't.
 34. **Merge progress:** installing or turning a BCML package on/off shows a bar with a
    percentage and what it's reading; "Press B to cancel" turns into "Don't close Patchwork or
    turn off the Switch" once the change can't be stopped.
+35. **BCML options from info.json:** install DAR Combat System Standalone (432404, the .bnp). The options
+   show by name with all add-ons ticked, Skill Level as round buttons (exactly one), and no "Main" or
+   "archDAR". In the game the new attacks work. My mods lists the chosen options by name.
+36. **Zip mods in a merged pack:** with DAR on, install a zip mod that replaces `Pack/TitleBG.pack` (e.g.
+   Invincible Link): no clash warning, and both work in the game. Move the zip below DAR and back: each
+   move merges again, and the game still loads.
+37. **Album memory:** open Patchwork from the Album and install a BCML package: a warning suggests holding
+   R. If a merge runs out of memory, the message says how to get more instead of "bad alloc".
+38. **Network:** browse several pages, open descriptions, switch sources with L/R: thumbnails load and no
+   "timeout was reached" errors appear.

@@ -61,6 +61,11 @@ std::string gameTextLanguage();
 // desktop: when $MM_GAME_ROMFS_BOTW / _TOTK is set.
 bool runningAsGame(mm::Game game);
 
+// Whether Patchwork has the console's full memory: opened by holding R while starting a game,
+// rather than from the Album (which leaves homebrew a few hundred MB). On desktop: unless
+// $MM_APPLET is set.
+bool fullMemory();
+
 // Calendar time in the console's time zone. Newlib's localtime() doesn't know it on the
 // Switch (it gives UTC), so this asks the system.
 std::tm localTime(int64_t unixSeconds);
