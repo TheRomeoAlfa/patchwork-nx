@@ -47,7 +47,7 @@ Read these before using Patchwork:
 - **Picks the right file** for your installed game version and warns about mismatches
 - **One-press install** from zip, 7z and rar, including archives with several options or nested archives
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
-- **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash
+- **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash (files a BCML merge combines aren't clashes)
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
 - **BCML packages (`.bnp`) for Breath of the Wild are merged on the console**, like BCML does on a PC ([below](#bcml-packages-breath-of-the-wild))
 - **Save files** from GameBanana (100% saves, unlocked shrines…): pick the save, the user profile and the slot. Patchwork backs up that profile's whole save first, and Settings → Save backups puts it back. A save's photo album is only copied if you turn that on.
@@ -92,6 +92,17 @@ Patchwork keeps copies of the files it reads in `switch/patchwork/original/botw-
 needed again after a game update, or when a package needs a file it hasn't read yet (it says which).
 Patchwork shows these steps whenever they're needed.
 
+**Options.** Packages with options (a skill level, add-ons…) show them with the names and defaults their
+author gave them, as BCML does; options that are "pick one" show as round buttons.
+
+**Mods that aren't packages.** When a zip mod and a BCML package change the same file, like
+`Pack/TitleBG.pack`, both end up in it: the zip's changes and the packages' are merged file by file, and
+where both change the same file inside it, the one higher in My mods wins. (Two zip mods that replace the
+same file still compete: only the higher one is used.)
+
+Merging big files like `TitleBG.pack` needs a lot of memory: open Patchwork by holding **R** while starting
+a game. From the Album it may fail with "out of memory" (it warns you first).
+
 This covers 376 of the 383 BCML packages on GameBanana. The rest use BCML 2's old format and, like TKMM
 packages for Tears of the Kingdom (`.tkcl`), are marked as needing those PC tools.
 
@@ -122,15 +133,58 @@ packages for Tears of the Kingdom (`.tkcl`), are marked as needing those PC tool
 | `switch/patchwork/merged/`, `bcml-merged/` | merged size tables and BCML merges, copied to the game from here |
 | `switch/patchwork/state.json` | what's installed and deployed |
 
+## Questions
+
+**Does Patchwork work alongside TKMM NX, UKMM or other mod managers?**
+They all put files in `atmosphere/contents`, so two managers can overwrite each other's files. Patchwork
+backs up files it finds there and puts them back when its mods are turned off, but the cleanest way is to
+remove the mods another manager installed and start fresh with Patchwork. Files that are already on the SD
+card show up in My mods, and you can import them as a mod there.
+
+**Should I download the BCML (`.bnp`) or the zip version of a mod?**
+The `.bnp` when there is one. BCML packages are merged with each other, so several of them can change the
+same game files and all still work. A zip is copied as it is: if two zips replace the same file, only the one
+higher in My mods counts.
+
+**Does it merge mods like BCML or UKMM?**
+BCML packages, yes: on the console, the same way BCML does on a PC, again whenever you install, turn on/off
+or reorder one. Zip mods are combined with them too ([above](#bcml-packages-breath-of-the-wild)).
+
+**Do I need both the `.bnp` and a zip from the same mod page?**
+No. They're different ways to install the same mod; pick one. Installing both can make them fight over the
+same files.
+
+**What does "It changes files that … also change" mean when installing?**
+Both mods replace the same file, and only one version of it can be used: the mod higher in My mods. Move it
+up or down to choose. Files a BCML merge combines don't trigger this.
+
+**Which options should I pick for a BCML package?**
+The ones already ticked are the author's defaults. In "pick one" groups (like a skill level), choose exactly
+one.
+
+**What if I don't like a mod?**
+Turn it off or remove it in My mods: everything goes back to how it was, including the game's own files and
+anything that was on the SD card before.
+
 ## Troubleshooting
 
-- **"Couldn't reach GameBanana" / secure connection errors**: check the Switch's date and time
-  (System Settings → System). A wrong clock makes secure connections fail.
+- **Patchwork can't connect, but other homebrew can**: check the Switch's date and time (System Settings →
+  System). Patchwork checks GameBanana's security certificate, and a wrong clock makes that fail.
+- **"Couldn't reach GameBanana" / secure connection errors**: check the date and time as above, then your
+  Wi-Fi. Requests that time out are retried once by themselves.
+- **"Out of memory" or "bad alloc" while installing a BCML package**: close Patchwork and open it by holding
+  **R** while starting a game, not from the Album.
 - **The game crashes with an Atmosphère error (Program ID 010041544D530000) when mods are on**: usually not
   the mod. Turn off background add-ons in Settings, restart, and try again.
 - **A mod doesn't show up in the game**: check it's turned on in My mods and higher in the list than mods
   that change the same files. Settings → "Re-copy enabled mods to the SD card" fixes missing files.
 - **A BCML package says it needs game files**: follow the steps on screen (hold L and R while starting BOTW).
+- **The game crashes at launch after installing a mod**: turn off the mods you added last, one at a time, to
+  find the one causing it, and check its page for your game version. Two mods that replace the same big
+  file (for example two full `TitleBG.pack` zips) don't mix.
+- **"The software was closed because an error occurred" when opening Patchwork**: please open an
+  [issue](https://github.com/TheRomeoAlfa/patchwork-nx/issues) and attach the newest file from
+  `atmosphere/crash_reports` on the SD card.
 
 ## Uninstall
 
