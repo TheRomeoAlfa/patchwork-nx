@@ -744,7 +744,10 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         r.gameVersionsNamed = mm::mentionedGameVersions(file.description, r.game, false, modUsesVersionWord(d, r.game));
         if (r.gameVersionsNamed.empty() && !mm::saysAllVersions(file.description))
             r.gameVersionsNamed = mm::mentionedGameVersions(d.descriptionHtml, r.game, true);
-        if (reinstall && r.gameVersionsNamed.empty()) r.gameVersionsNamed = reinstall->gameVersionsNamed;  // from its kept copy: no page
+        if (reinstall) {  // from its kept copy there's no mod page to read these from
+            if (r.gameVersionsNamed.empty()) r.gameVersionsNamed = reinstall->gameVersionsNamed;
+            if (r.version.empty()) r.version = reinstall->version;
+        }
         for (auto i : variants) {  // as the picker named them; the package itself goes without saying
             const auto& v = prep->layout.variants.at(i);
             if (!v.always) r.variants.push_back(v.label.empty() ? v.name : v.label);

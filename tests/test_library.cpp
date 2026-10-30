@@ -361,3 +361,60 @@ TEST("library: a reorder that doesn't fit keeps the old order") {
     CHECK_EQ(f.lib.mods(Game::Totk).front()->id, std::string("b"));
     CHECK_EQ(read(f.sd / (kRomfs + "shared")), "b:" + kRomfs + "shared");
 }
+
+TEST("library: options, kept package and reinstalling a zip mod in place") {
+    Fixture f;
+    // A zip with two versions, installed with "Fast", the archive kept.
+    write(f.src / "opt/archive.zip", "the archive");
+    write(f.src / "opt/Fast.bfres", "fast");
+    write(f.src / "opt/Slow.bfres", "slow");
+    ModRecord r;
+    r.id = "opt";
+    r.name = "Options mod";
+    r.game = Game::Totk;
+    r.variants = {"Fast"};
+    r.chosen = {"Fast"};
+    r.hasOptions = true;
+    r.package = "package/archive.zip";
+    f.lib.add(r, {{f.src / "opt/Fast.bfres", kRomfs + "Model/Fast.bfres"}}, true, {}, {{f.src / "opt/archive.zip", r.package}});
+    f.addMod("other", {kRomfs + "Model/Other.bfres"});  // above it
+    CHECK(!f.lib.keptPackage(*f.lib.find("opt")).empty());
+    CHECK_EQ(read(f.lib.keptPackage(*f.lib.find("opt"))), std::string("the archive"));
+
+    // Saved and read back.
+    Library again(f.sd, f.sd / "switch/mm");
+    again.load();
+    const auto* back = again.find("opt");
+    CHECK(back && back->hasOptions && back->package == "package/archive.zip");
+    CHECK(back && back->chosen == std::vector<std::string>({"Fast"}));
+
+    // Reinstalled with "Slow", from the kept copy, turned off: same place, old version's file gone.
+    auto kept = f.lib.keptPackage(*f.lib.find("opt"));
+    int priority = f.lib.find("opt")->priority;
+    r.variants = r.chosen = {"Slow"};
+    f.lib.add(r, {{f.src / "opt/Slow.bfres", kRomfs + "Model/Slow.bfres"}}, false, {}, {{kept, r.package}});
+    CHECK_EQ(f.lib.find("opt")->priority, priority);
+    CHECK(!f.lib.find("opt")->enabled);
+    CHECK(!fs::exists(f.sd / (kRomfs + "Model/Fast.bfres")));
+    CHECK(!fs::exists(f.sd / (kRomfs + "Model/Slow.bfres")));
+    CHECK_EQ(read(f.lib.keptPackage(*f.lib.find("opt"))), std::string("the archive"));  // copied over itself fine
+    f.lib.setEnabled("opt", true);
+    CHECK_EQ(read(f.sd / (kRomfs + "Model/Slow.bfres")), std::string("slow"));
+}
+
+TEST("library: records from before options were kept still know they have options") {
+    t::TempDir tmp;
+    auto data = tmp.path / "sd/switch/mm";
+    write(data / "state.json", R"({"version":1,"mods":[
+        {"id":"zip","game":"totk","variants":["Fast","Slow"],"enabled":true},
+        {"id":"one","game":"totk","variants":["Main"],"enabled":true},
+        {"id":"bnp","game":"botw","variants":["Main","options/SA3"],"bcmlLogs":["0","1"],"enabled":true},
+        {"id":"bnp-plain","game":"botw","variants":["Main"],"bcmlLogs":["0"],"enabled":true}]})");
+    Library lib(tmp.path / "sd", data);
+    lib.load();
+    CHECK(lib.find("zip")->hasOptions);
+    CHECK(!lib.find("one")->hasOptions);
+    CHECK(lib.find("bnp")->hasOptions);
+    CHECK(!lib.find("bnp-plain")->hasOptions);
+    CHECK(lib.keptPackage(*lib.find("zip")).empty());
+}
