@@ -241,3 +241,42 @@ TEST("compat: a bare two-part version is the mod's, not the game's") {
     CHECK_EQ(mentionedGameVersions("For game 1.6", Game::Botw).size(), 1u);
     CHECK_EQ(mentionedGameVersions("TOTK 1.2", Game::Totk).size(), 1u);
 }
+
+TEST("compat: version ranges") {
+    // Shinobi no Satori (GameBanana 641335): "Now works on Version 1.1.0 - 1.4.3".
+    // Read strictly (a whole mod page), "Version" alone is the mod's own: nothing.
+    CHECK(mentionedGameVersions("Now works on Version 1.1.0 - 1.4.3 With Tkmm", Game::Totk, true).empty());
+    auto v = mentionedGameVersions("Now works on Version 1.1.0 - 1.4.3", Game::Totk);
+    CHECK(v == std::vector<std::string>({"1.1.0-1.4.3"}));
+    CHECK(checkCompat("1.2.1", v) == Compat::Likely);
+    CHECK(checkCompat("1.1.0", v) == Compat::Likely);
+    CHECK(checkCompat("1.4.3", v) == Compat::Likely);
+    CHECK(checkCompat("1.0.0", v) == Compat::Mismatch);
+    CHECK(checkCompat("1.4.4", v) == Compat::Mismatch);
+    // Other ways of writing it; an open end ("1.4") covers its whole x.
+    CHECK(mentionedGameVersions("TotK 1.2.0 to 1.4.1", Game::Totk) == std::vector<std::string>({"1.2.0-1.4.1"}));
+    CHECK(mentionedGameVersions("game v1.1.0\xe2\x80\x93v1.2.1", Game::Totk) == std::vector<std::string>({"1.1.0-1.2.1"}));
+    auto open = mentionedGameVersions("TotK 1.2 - 1.4", Game::Totk);
+    CHECK(open == std::vector<std::string>({"1.2-1.4"}));
+    CHECK(checkCompat("1.4.2", open) == Compat::Likely);
+    // Not ranges: a list, a backwards pair, a changelog line after a version.
+    CHECK(mentionedGameVersions("TotK 1.2.1, 1.4.1", Game::Totk, true).size() == 1u);
+    CHECK(mentionedGameVersions("TotK 1.4.1 - 1.2.0", Game::Totk) == std::vector<std::string>({"1.4.1"}));
+    CHECK(mentionedGameVersions("TotK 1.2.1 - v3.0 adds swords", Game::Totk) == std::vector<std::string>({"1.2.1"}));
+    // The closest per-version option counts a range up to the installed version.
+    CHECK_EQ(closestVersionOption({"Game Version 1.0.0", "Game Version 1.1.0 - 1.4.3"}, Game::Totk, "1.2.1"), size_t(1));
+}
+
+TEST("compat: files labeled for TKMM, and file languages") {
+    CHECK(saysTkmmOnly("TKMM Only"));
+    CHECK(saysTkmmOnly("For TKMM (merge on PC)"));
+    CHECK(!saysTkmmOnly("Without TKMM English"));
+    CHECK(!saysTkmmOnly("No TKMM version"));
+    CHECK(!saysTkmmOnly("non-tkmm romfs"));
+    CHECK(!saysTkmmOnly("Atmosphere romfs"));
+    CHECK_EQ(languageMatch("Without TKMM English", "en"), 1);
+    CHECK_EQ(languageMatch("Without TKMM German", "en"), -1);
+    CHECK_EQ(languageMatch("Deutsch", "de"), 1);
+    CHECK_EQ(languageMatch("Atmosphere romfs", "en"), 0);
+    CHECK_EQ(languageMatch("Englishman's armor", "en"), 0);  // a whole word only
+}

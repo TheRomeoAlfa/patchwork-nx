@@ -32,11 +32,15 @@ private:
     void toggle(const std::string& id);
     void move(const std::string& id, int delta);
     void remove(const std::string& id);
+    void changeOptions(const std::string& id);
     void showUnmanaged(size_t files, uint64_t bytes);
     void importUnmanaged(size_t files, uint64_t bytes);
     void showPending(const PendingInstall& p);
     void discardPending(const PendingInstall& p);
     void clearPane();
+    // The install flow is about to draw in the pane (it clears it itself): drop late loads for
+    // what was there, like the mod's picture.
+    InstallFlow& paneToFlow();
     void rebuildWhenSafe();
     // Called when a row gains focus; false if the pane belongs to an install in progress.
     bool paneFree();

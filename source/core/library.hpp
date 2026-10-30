@@ -26,7 +26,10 @@ struct ModRecord {
     int64_t gamebananaModId = 0;
     int64_t gamebananaFileId = 0;
     int64_t installedAt = 0;  // unix seconds
-    std::vector<std::string> variants;          // which variants of the archive were installed
+    std::vector<std::string> variants;          // which variants of the archive were installed, as shown
+    std::vector<std::string> chosen;            // the same, as the archive names them ("options/SA3")
+    std::string package;  // the archive itself, kept to change its options later (in the mod's folder); "" if not
+    bool hasOptions = false;  // the archive offered a choice of options (they can be changed later)
     std::vector<std::string> gameVersionsNamed;  // game versions the mod page mentions
     bool enabled = false;
     int priority = 0;  // higher wins on conflicts
@@ -156,6 +159,9 @@ public:
     using FreeSpaceFn = std::function<uint64_t()>;
     void setFreeSpace(FreeSpaceFn fn) { freeSpace_ = std::move(fn); }
 
+    // The archive a mod was installed from, if it was kept (see ModRecord::package); else "".
+    fs::path keptPackage(const ModRecord& m) const;
+
     const fs::path& sdRoot() const { return sdRoot_; }
     const fs::path& dataDir() const { return dataDir_; }
 
@@ -202,6 +208,7 @@ private:
     // instead of the game's: the enabled BOTW one highest in the list. Keyed by lowercase path.
     std::map<std::string, std::pair<const ModRecord*, std::string>> bcmlBases() const;
     std::string bcmlError_;  // why the last merge didn't happen
+    bool deferMerge_ = false;  // apply() leaves the last merge as it is (a reinstall merges once, at the end)
     bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
     // Every package in the last merge is still enabled (as installed then): its files may stay.
     bool bcmlStillUsable() const;

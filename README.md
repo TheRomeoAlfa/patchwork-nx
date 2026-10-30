@@ -47,6 +47,7 @@ Read these before using Patchwork:
 - **Picks the right file** for your installed game version and warns about mismatches
 - **One-press install** from zip, 7z and rar, including archives with several options or nested archives
 - **On/off without deleting**: a clean copy of every mod is kept, so turning one off restores the files underneath
+- **Change a mod's options later**: for mods that come with options (a BCML package's add-ons, versions in a zip), press **Y** in My mods to pick them again; the mod is installed again in its place
 - **Load order**: when two mods change the same file, the one higher in the list wins, and Patchwork tells you which files clash (files a BCML merge combines aren't clashes)
 - **Keeps your own files safe**: anything already in `atmosphere/contents` is backed up before a mod overwrites it and restored afterwards
 - **BCML packages (`.bnp`) for Breath of the Wild are merged on the console**, like BCML does on a PC ([below](#bcml-packages-breath-of-the-wild))
@@ -113,7 +114,7 @@ packages for Tears of the Kingdom (`.tkcl`), are marked as needing those PC tool
 | A | Install | Turn on / off |
 | B | Back | Back |
 | X | Search | Remove |
-| Y | Change sort | |
+| Y | Change sort | Change options (mods that have them) |
 | L / R | GameBanana / Waikuteru | Move up / down in load order |
 | → | Read the full description | Read the mod's page |
 | ZL / ZR | Switch game | Switch game |
@@ -161,6 +162,12 @@ up or down to choose. Files a BCML merge combines don't trigger this.
 **Which options should I pick for a BCML package?**
 The ones already ticked are the author's defaults. In "pick one" groups (like a skill level), choose exactly
 one.
+
+**Can I change a mod's options after installing it?**
+Yes: select it in My mods and press **Y**. Your current choices are ticked; change them and press **+**. The
+mod is installed again with them, in the same place in the list, and BCML packages are merged again.
+Patchwork keeps packages and small archives for this; bigger ones are downloaded again from the mod's page
+(mods added from the inbox: put the file back in `switch/patchwork/inbox`).
 
 **What if I don't like a mod?**
 Turn it off or remove it in My mods: everything goes back to how it was, including the game's own files and

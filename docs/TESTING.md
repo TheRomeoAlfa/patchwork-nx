@@ -153,3 +153,7 @@ Run these after any release build; they cover what the desktop build can't.
    R. If a merge runs out of memory, the message says how to get more instead of "bad alloc".
 38. **Network:** browse several pages, open descriptions, switch sources with L/R: thumbnails load and no
    "timeout was reached" errors appear.
+39. **Change options:** in My mods, select DAR and press Y: the options screen shows the current choices.
+   Pick another skill level and untick an add-on, press +: "Options changed", DAR keeps its place and on/off
+   state, it merges once, and the game has the new moves. Press Y again: the new choices are ticked (from
+   the kept package, no download). B on the options screen changes nothing.
