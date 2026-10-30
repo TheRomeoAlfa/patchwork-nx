@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <vector>
 
 #include "http.hpp"
 
@@ -56,22 +57,56 @@ CURLSH* sharedState() {
     return share;
 }
 
-using CurlPtr = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
+// Handles are kept from request to request: each keeps its connections open, so the next
+// request to the same host (most go to GameBanana) skips the TCP and TLS handshakes. On the
+// Switch every new TLS connection goes through the system's SSL service and loads the
+// certificate list; a page of thumbnails used to start dozens of them at once. A request
+// borrows an idle handle (or makes one) and gives it back when done, so there are as many as
+// requests ever ran at once.
+class Lease {
+public:
+    Lease() = default;
+    Lease(const Lease&) = delete;
+    Lease& operator=(const Lease&) = delete;
+    ~Lease() {
+        if (!h_) return;
+        std::lock_guard lock(mutex());
+        idle().push_back(h_);
+    }
+    // The handle with its options cleared (open connections and caches stay).
+    CURL* fresh() {
+        if (!h_) {
+            std::lock_guard lock(mutex());
+            if (!idle().empty()) {
+                h_ = idle().back();
+                idle().pop_back();
+            }
+        }
+        if (h_)
+            curl_easy_reset(h_);
+        else
+            h_ = curl_easy_init();
+        if (!h_) throw std::runtime_error("curl_easy_init failed");
+        return h_;
+    }
 
-// One handle per thread, kept from request to request: it keeps its connections open, so the
-// next request to the same host (most go to GameBanana) skips the TCP and TLS handshakes. On
-// the Switch every new TLS connection goes through the system's SSL service and loads the
-// certificate list; a page of thumbnails used to start dozens of them at once.
+private:
+    // Never destroyed: requests may still be finishing while the app exits.
+    static std::mutex& mutex() {
+        static auto* m = new std::mutex;
+        return *m;
+    }
+    static std::vector<CURL*>& idle() {
+        static auto* v = new std::vector<CURL*>;
+        return *v;
+    }
+    CURL* h_ = nullptr;
+};
+
 // `progress` must outlive the request.
-CURL* makeHandle(const std::string& url, const std::string& userAgent, const std::string& caBundle, const Progress& progress) {
+CURL* makeHandle(Lease& lease, const std::string& url, const std::string& userAgent, const std::string& caBundle, const Progress& progress) {
     if (*progress.cancelled) throw std::runtime_error("cancelled");
-    thread_local CurlPtr handle(nullptr, curl_easy_cleanup);
-    if (handle)
-        curl_easy_reset(handle.get());  // options only: open connections and caches stay
-    else
-        handle.reset(curl_easy_init());
-    CURL* h = handle.get();
-    if (!h) throw std::runtime_error("curl_easy_init failed");
+    CURL* h = lease.fresh();
     curl_easy_setopt(h, CURLOPT_URL, url.c_str());
     curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);  // required with threads (DNS timeouts use signals otherwise)
     curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
@@ -156,9 +191,10 @@ CurlHttpClient::~CurlHttpClient() = default;
 std::string CurlHttpClient::get(const std::string& url) {
     Progress prog{&cancelled_};
     std::string body;
+    Lease lease;
     CURL* h = nullptr;
     auto rc = withRetry(cancelled_, [&](int) {
-        h = makeHandle(url, userAgent_, caBundle_, prog);
+        h = makeHandle(lease, url, userAgent_, caBundle_, prog);
         body.clear();
         curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, appendToString);
         curl_easy_setopt(h, CURLOPT_WRITEDATA, &body);
@@ -181,6 +217,7 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
         std::error_code ec;
         fs::remove(part, ec);
     };
+    Lease lease;
     CURL* h = nullptr;
     CURLcode rc;
     try {
@@ -191,7 +228,7 @@ void CurlHttpClient::download(const std::string& url, const fs::path& dest, cons
             f = std::fopen(part.string().c_str(), "wb");
             if (!f) throw std::runtime_error("cannot write " + part.string());
             std::setvbuf(f, nullptr, _IOFBF, 1 << 18);  // big buffer: SD card writes are slow in small chunks
-            h = makeHandle(url, userAgent_, caBundle_, prog);
+            h = makeHandle(lease, url, userAgent_, caBundle_, prog);
             curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, writeToFile);
             curl_easy_setopt(h, CURLOPT_WRITEDATA, f);
             auto r = curl_easy_perform(h);
@@ -224,9 +261,10 @@ std::string CurlHttpClient::getRange(const std::string& url, uint64_t from, uint
     } st{{}, static_cast<size_t>(to - from + 1)};
     Progress prog{&cancelled_};
     auto range = std::to_string(from) + "-" + std::to_string(to);
+    Lease lease;
     CURL* h = nullptr;
     auto rc = withRetry(cancelled_, [&](int) {
-        h = makeHandle(url, userAgent_, caBundle_, prog);
+        h = makeHandle(lease, url, userAgent_, caBundle_, prog);
         st.body.clear();
         curl_easy_setopt(h, CURLOPT_RANGE, range.c_str());
         curl_easy_setopt(h, CURLOPT_TIMEOUT, 30L);
@@ -261,9 +299,10 @@ int64_t CurlHttpClient::contentLength(const std::string& url) {
         size_t received = 0;
     } st;
     Progress prog{&cancelled_};
+    Lease lease;
     withRetry(cancelled_, [&](int) {
         st = State{};
-        CURL* h = makeHandle(url, userAgent_, caBundle_, prog);
+        CURL* h = makeHandle(lease, url, userAgent_, caBundle_, prog);
         curl_easy_setopt(h, CURLOPT_RANGE, "0-0");
         curl_easy_setopt(h, CURLOPT_TIMEOUT, 20L);
         curl_easy_setopt(h, CURLOPT_HEADERDATA, &st);
