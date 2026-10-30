@@ -188,7 +188,10 @@ private:
     LibrarySnapshot snapshot_;
     Settings settings_;
 
-    WorkQueue net_{3};
+    // Network threads: from the Album the console allows homebrew only two connections at a time
+    // (holding R on a game: twelve), and more requests than that wait in line until they time out.
+    WorkQueue net_{networkThreads()};
+    static int networkThreads();
     WorkQueue files_{1};
     std::atomic<int> fileJobs_{0};
     int installBusy_ = 0;

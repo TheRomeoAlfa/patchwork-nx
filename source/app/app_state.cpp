@@ -356,6 +356,8 @@ void AppState::saveSettings() {
     }
 }
 
+int AppState::networkThreads() { return platform::fullMemory() ? 3 : 2; }
+
 std::string AppState::outOfMemoryMessage() {
     std::string text = "Patchwork ran out of memory. Merging BCML packages rebuilds some of the game's biggest files.";
     if (!platform::fullMemory())
@@ -627,8 +629,11 @@ std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& m
         }
     };
     auto started = std::chrono::steady_clock::now();
+    // Runs on a network thread already, next to the other one (or two): with the Album's two
+    // connections, no helpers.
     std::vector<std::thread> workers;
-    for (int t = 0; t < 4; ++t) workers.emplace_back(worker);
+    for (int t = 0; t < (platform::fullMemory() ? 2 : 0); ++t) workers.emplace_back(worker);
+    worker();
     for (auto& t : workers) t.join();
     brls::Logger::info("checked {} mods for PC-only packages in {} ms", todo.size(),
                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
