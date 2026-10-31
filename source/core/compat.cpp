@@ -193,9 +193,17 @@ bool isRestoreOriginalsFile(const std::string& filename, const std::string& desc
 
 bool saysTkmmOnly(const std::string& raw) {
     auto text = plainText(raw);
-    if (text.find("tkmm") == std::string::npos) return false;
-    static const std::regex without(R"((without|w/o|no|non|not|sans)[\s\-_]*(a\s+|the\s+)?tkmm)");
-    return !std::regex_search(text, without);
+    // TKMM, or its package format (.tkcl): "TKCL file", "emotewheelv1tkcl.zip".
+    if (text.find("tkmm") == std::string::npos && text.find("tkcl") == std::string::npos) return false;
+    static const std::regex without(R"(\b(without|w/o|no|non|not|sans)[\s\-_]*(a\s+|the\s+)?(tkmm|tkcl))");
+    // One archive with both: "(TKMM file included)", "Includes TKCL file. RomFS built for 1.2.0".
+    static const std::regex included(R"((tkmm|tkcl)\s+(file\s+)?included|\bincludes?\s+(a\s+|the\s+)?(tkmm|tkcl))");
+    // Plain files that only advise TKMM for merging: "romfs version, install still with tkmm",
+    // but not "TKCL file (will upload romfs version later)".
+    static const std::regex files(R"(\b(romfs|exefs)\b)");
+    static const std::regex noFiles(R"(\b(without|w/o|no|non|not|upload)[\s\-_]*(a\s+|the\s+)?(romfs|exefs)\b)");
+    if (std::regex_search(text, without) || std::regex_search(text, included)) return false;
+    return !(std::regex_search(text, files) && !std::regex_search(text, noFiles));
 }
 
 int languageMatch(const std::string& raw, const std::string& language) {

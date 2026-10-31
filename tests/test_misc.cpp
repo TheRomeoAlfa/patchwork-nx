@@ -274,6 +274,23 @@ TEST("compat: files labeled for TKMM, and file languages") {
     CHECK(!saysTkmmOnly("No TKMM version"));
     CHECK(!saysTkmmOnly("non-tkmm romfs"));
     CHECK(!saysTkmmOnly("Atmosphere romfs"));
+    // Labels from GameBanana's TOTK mods.
+    CHECK(saysTkmmOnly("[TKMM Only] TKCL for Game Versions 1.4.0-1.4.3 (Includes Mod Options)"));
+    CHECK(saysTkmmOnly("Main File (TKCL)"));
+    CHECK(saysTkmmOnly("weapons_of_legend_redux.zip Main File (TKCL)"));
+    CHECK(saysTkmmOnly("emotewheelv1tkcl.zip"));
+    CHECK(saysTkmmOnly("Compressed TKCL for use with TKMM"));
+    CHECK(saysTkmmOnly("TKCL with No Host Included"));
+    CHECK(saysTkmmOnly("Use this for TKMM - includes both versions of the mod"));
+    CHECK(saysTkmmOnly("TKCL file (will upload romfs version if internet get's better)"));
+    CHECK(saysTkmmOnly("TKCL FILE - TKMM ONLY"));
+    CHECK(!saysTkmmOnly("Made with game version 1.2.1. (TKMM file included)"));
+    CHECK(!saysTkmmOnly("Initial release, TKMM file included"));
+    CHECK(!saysTkmmOnly("Includes TKCL file. RomFS built for game version v1.2.0"));
+    CHECK(!saysTkmmOnly("This is the raw file download for 1.1.2, this is the most flexible version without a tkcl"));
+    CHECK(!saysTkmmOnly("romfs version, 1.2.1 only, install still with tkmm to merge with other mods"));
+    CHECK(!saysTkmmOnly("ROMFS 1.2.1 only - USE TKMM"));
+    CHECK(!saysTkmmOnly("Piano Mod, no romfs edits"));  // no TKMM mention at all
     CHECK_EQ(languageMatch("Without TKMM English", "en"), 1);
     CHECK_EQ(languageMatch("Without TKMM German", "en"), -1);
     CHECK_EQ(languageMatch("Deutsch", "de"), 1);

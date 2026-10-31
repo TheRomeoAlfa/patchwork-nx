@@ -56,8 +56,9 @@ bool isAddOnFileOf(const std::string& own, const std::string& other);
 // "vanilla_files.zip"), meant for undoing a hand-copied install. Patchwork undoes mods itself.
 bool isRestoreOriginalsFile(const std::string& filename, const std::string& description = "");
 
-// True for a download labeled as made for TKMM, the PC mod merger ("TKMM Only", "for TKMM"),
-// but not "Without TKMM" / "No TKMM". Such archives hold a TKMM package inside.
+// True for a download labeled as made for TKMM, the PC mod merger ("TKMM Only", "for TKMM",
+// "TKCL file"), but not "Without TKMM", "TKMM file included" or a romfs version that only
+// advises TKMM for merging. Such archives hold a TKMM package inside.
 bool saysTkmmOnly(const std::string& text);
 
 // How well a file's label suits the console's language (its two-letter code, "en", "de"…):
