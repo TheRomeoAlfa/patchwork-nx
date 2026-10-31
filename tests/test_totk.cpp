@@ -133,10 +133,18 @@ TEST("tkcl: ULIDs as text") {
 #include "sarc.hpp"
 #include "zstd.hpp"
 
-TEST("zstd: the game's dictionaries, chosen by each file") {
-    // A dictionary like the game's (magic, then its id), trained from similar files.
+namespace {
+
+std::vector<std::string> dictionarySamples() {
     std::vector<std::string> samples;
     for (int i = 0; i < 400; ++i) samples.push_back("Actor/Weapon_Sword_" + std::to_string(i) + ".engine__actor__ActorParam.bgyml Components ModelInfo");
+    return samples;
+}
+
+// A Pack/ZsDic.pack.zs like the game's: dictionaries 1 and 3 (magic, then their id), trained
+// from similar files, and a file that isn't one.
+std::string fakeZsDic() {
+    auto samples = dictionarySamples();
     std::string all;
     std::vector<size_t> sizes;
     for (auto& s : samples) { all += s; sizes.push_back(s.size()); }
@@ -157,7 +165,15 @@ TEST("zstd: the game's dictionaries, chosen by each file") {
     pack.files.push_back({"pack.zsdic", makeDict(3)});
     pack.files.push_back({"readme.txt", "not a dictionary"});
     zs::Dictionaries none;
-    auto zsDic = none.compress(pack.write(), 0);
+    return none.compress(pack.write(), 0);
+}
+
+}  // namespace
+
+TEST("zstd: the game's dictionaries, chosen by each file") {
+    auto samples = dictionarySamples();
+    zs::Dictionaries none;
+    auto zsDic = fakeZsDic();
 
     auto dicts = zs::Dictionaries::load(zsDic);
     CHECK_EQ(dicts.size(), size_t(2));
@@ -233,4 +249,128 @@ TEST("byml v7: hash maps, aligned binary, 64-bit values and TKMM changelogs") {
     auto at = bytes.find(std::string("\x01\x02\x03", 3));
     CHECK(at != std::string::npos && at % 0x80 == 0);
     CHECK(byml::write(back) == bytes);
+}
+
+#include <fstream>
+
+#include "totk.hpp"
+#include "util.hpp"
+
+namespace {
+
+// TKMM's pack index format: "PKCH", entry count, string table offset, string count, then
+// entries (first/last letter, hash of the UTF-16 name, pack index) and "name\0<attributes>".
+std::string fakePackIndex(const std::vector<std::pair<std::string, uint16_t>>& files,
+                          const std::vector<std::pair<std::string, uint8_t>>& packs) {
+    std::string d;
+    auto put = [&](auto v) { d.append(reinterpret_cast<const char*>(&v), sizeof v); };
+    put(uint32_t(0x48434B50));
+    put(uint32_t(files.size()));
+    put(uint32_t(0x10 + 8 * files.size()));
+    put(uint32_t(packs.size()));
+    for (const auto& [name, pack] : files) {
+        put(uint16_t((uint8_t(name.front()) << 8) | uint8_t(name.back())));
+        put(totk::xxHash32(totk::utf16le(name)));
+        put(pack);
+    }
+    for (const auto& [name, attributes] : packs) {
+        d += name;
+        d += '\0';
+        d += char(attributes);
+    }
+    zs::Dictionaries none;
+    return none.compress(d, 0);
+}
+
+}  // namespace
+
+TEST("totk: hashes as TKMM makes them") {
+    CHECK_EQ(totk::xxHash32(""), 0x02CC5D05u);
+    CHECK_EQ(totk::xxHash32("abc"), 0x32D153FFu);
+    CHECK_EQ(totk::xxHash32("Nobody inspects the spammish repetition"), 0xE2293B2Fu);
+    CHECK(totk::utf16le("A\xc3\xa9") == std::string("A\0\xe9\0", 4));
+    CHECK(totk::utf16le("\xf0\x9f\x98\x80") == std::string("\x3d\xd8\x00\xde", 4));  // a surrogate pair
+    std::string nso;
+    CHECK_EQ(totk::parseVersion("ja\r\n100-121\r\n082CE09B06E33A12", &nso), 121);
+    CHECK_EQ(nso, std::string("082CE09B06E33A12"));
+}
+
+TEST("totk: the game's files by their TKMM names, and files inside packs") {
+    using byml::Node;
+    t::TempDir dir;
+    auto root = dir.path / "romfs";
+    auto zsDic = fakeZsDic();
+    auto dicts = zs::Dictionaries::load(zsDic);
+    auto put = [&](const std::string& path, const std::string& data) {
+        auto p = root / path;
+        fs::create_directories(p.parent_path());
+        std::ofstream(p, std::ios::binary) << data;
+    };
+    auto table = [&](Node n) {
+        byml::Document doc;
+        doc.version = 7;
+        doc.root = std::move(n);
+        return dicts.compress(byml::write(doc), 1);
+    };
+    put("System/RegionLangMask.txt", "ja\r\n100-121\r\n082CE09B06E33A12");
+    put("Pack/ZsDic.pack.zs", zsDic);
+    auto addresses = Node::makeDict();
+    for (std::string name : {"Event/EventFlow/EventFlowFileEntry.Product.byml", "AI/FileEntry/FileEntry.Product.byml",
+                             "Logic/FileEntry/FileEntry.Product.byml", "Sequence/FileEntry/FileEntry.Product.byml",
+                             "GameData/GameDataList.Product.byml"}) {
+        auto real = name.substr(0, name.size() - 5) + ".121.byml";
+        addresses.dict[name] = Node::str(real);
+    }
+    addresses.dict["Effect/EffectFileInfo.Product.Nin_NX_NVN.byml"] = Node::str("Effect/EffectFileInfo.Product.121.Nin_NX_NVN.byml");
+    put("System/AddressTable/Product.121.Nin_NX_NVN.atbl.byml.zs", table(addresses));
+    auto flows = Node::makeDict();
+    flows.dict["Versions"] = Node::makeDict();
+    flows.dict["Versions"].dict["Demo001"] = Node::str("110");
+    put("Event/EventFlow/EventFlowFileEntry.Product.121.byml.zs", table(flows));
+    auto effects = Node::makeDict();
+    effects.dict["BinaryDict"] = Node::makeDict();
+    effects.dict["BinaryDict"].dict["Fire"] = Node::str("Fire.Product.120");
+    effects.dict["StaticEsetb"] = Node::makeArray();
+    effects.dict["StaticEsetb"].array.push_back(Node::str("Static.Product.100"));
+    put("Effect/EffectFileInfo.Product.121.Nin_NX_NVN.byml.zs", table(effects));
+    auto ai = Node::makeDict();
+    ai.dict["AI/Horse.ainb"] = Node::str("AI/Horse.120.ainb");
+    put("AI/FileEntry/FileEntry.Product.121.byml.zs", table(ai));
+    put("Logic/FileEntry/FileEntry.Product.121.byml.zs", table(Node::makeDict()));
+    put("Sequence/FileEntry/FileEntry.Product.121.byml.zs", table(Node::makeDict()));
+    put("GameData/GameDataList.Product.121.byml.zs", dicts.compress("game data", 1));
+    Sarc actor;
+    actor.files.push_back({"Component/Horse.bgyml", "neigh"});
+    actor.files.push_back({"Actor/Horse.engine__actor__ActorParam.bgyml", "horse"});
+    put("Pack/Actor/Horse.pack.zs", dicts.compress(actor.write(), 3));
+
+    auto index = totk::PackIndex::load(fakePackIndex(
+        {{"Component/Horse.bgyml", 0}, {"Actor/Horse.engine__actor__ActorParam.bgyml", 0}, {"Component/Lost.bgyml", 1}},
+        {{"Pack/Actor/Horse.pack", uint8_t(tkcl::HasZsExtension)}, {"Pack/Actor/Gone.pack", uint8_t(tkcl::HasZsExtension)}}));
+    CHECK_EQ(index.size(), size_t(3));
+    CHECK(index.packFor("Component/Horse.bgyml")->first == "Pack/Actor/Horse.pack");
+    CHECK(!index.packFor("Component/Nothing.bgyml"));
+
+    totk::FolderGameFiles files(root.string());
+    totk::Rom rom(files, index, 1);  // a tiny cache: one pack at a time
+    CHECK_EQ(rom.version(), 121);
+    CHECK_EQ(rom.nsoBinaryId(), std::string("082CE09B06E33A12"));
+    const uint32_t zs = tkcl::HasZsExtension, product = tkcl::IsProductFile;
+    CHECK_EQ(rom.relativePath("GameData/GameDataList.Product.byml", zs | product), std::string("GameData/GameDataList.Product.121.byml.zs"));
+    CHECK_EQ(rom.relativePath("AI/Horse.ainb", zs), std::string("AI/Horse.120.ainb.zs"));
+    CHECK_EQ(rom.relativePath("Event/EventFlow/Demo001.bfevfl", zs), std::string("Event/EventFlow/Demo001.110.bfevfl.zs"));
+    CHECK_EQ(rom.relativePath("Effect/Fire.Product.Nin_NX_NVN.esetb.byml", zs | product),
+             std::string("Effect/Fire.Product.120.Product.Nin_NX_NVN.esetb.byml.zs"));
+    CHECK_EQ(rom.relativePath("Model/Horse.bfres", tkcl::HasMcExtension), std::string("Model/Horse.bfres.mc"));
+    CHECK(*rom.vanilla("GameData/GameDataList.Product.byml", zs | product) == "game data");
+    CHECK(*rom.vanilla("Component/Horse.bgyml", 0) == "neigh");
+    CHECK(*rom.vanilla("Actor/Horse.engine__actor__ActorParam.bgyml", 0) == "horse");
+    CHECK(!rom.vanilla("Component/Lost.bgyml", 0));  // its pack isn't there
+    CHECK(!rom.vanilla("Component/Nothing.bgyml", 0));
+
+    // Without the tables: a clear error.
+    fs::remove(root / "AI/FileEntry/FileEntry.Product.121.byml.zs");
+    bool threw = false;
+    try { totk::Rom again(files, index); } catch (const std::runtime_error& e) { threw = std::string(e.what()).find("FileEntry") != std::string::npos; }
+    CHECK(threw);
 }
