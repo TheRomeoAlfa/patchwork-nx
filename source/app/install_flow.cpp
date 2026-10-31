@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <regex>
 #include <set>
 
 namespace app {
@@ -74,6 +75,9 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
         // The author's own advice ("Standalone Version (Not Recommended)").
         auto desc = mm::toLower(f.description + " " + f.filename);
         if (desc.find("not recommend") != std::string::npos || desc.find("not-recommend") != std::string::npos) score -= 2;
+        // "Main File (Manual Install)" over its "Unbreakable Options File" add-ons.
+        static const std::regex mainFile(R"(\bmain\s+(file|download|mod)\b)");
+        if (std::regex_search(desc, mainFile)) score += 1;
         // "dark_title_screen_base_defogger" is a variant of "base_defogger": prefer the base.
         bool isVariantOfAnother = false;
         for (size_t j = 0; j < d.files.size(); ++j)
