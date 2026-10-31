@@ -24,10 +24,11 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
 
 1. **Done**: `.tkcl` reader (`source/core/tkcl.*`; 32 of 38 real packages read, the rest are
    TKMM 2.0 beta packages TKMM also refuses), zstd with the game's dictionaries (`zstd.*`).
-2. **Game access**: game version, real file names, pack index, reading files inside packs
-   (with a small cache), BYML v7 (hash maps, aligned binary, 64-bit values, TKMM's
-   changelog nodes 0xFD/0xFE). A hidden option to copy the files below to the SD card, so
-   tests can use the user's own game files.
+2. **Done**: game version, real file names, pack index (`totk.*`), reading files inside
+   packs (with a small cache), BYML v7 (hash maps, aligned binary, TKMM's changelog nodes
+   0xFD/0xFE; all 4,779 BYMLs in the real packages round-trip). Settings > "Copy game files
+   for testing" (TOTK, opened from the game) copies the files below to
+   `switch/patchwork/totk-game-files`. Not yet checked against a real game copy.
 3. **First installs**: `.tkcl` into My mods with its options (as BCML packages' groups);
    merge whole files, placeholders, packs, exefs patches, cheats, the size table. Many
    armor and model packages work from here. First test on the Switch.
@@ -40,10 +41,9 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
 
 ## Game files for tests
 
-From the user's own game (phase 2's copy option): `System/RegionLangMask.txt`,
-`Pack/ZsDic.pack.zs`, `System/AddressTable/*`, the FileEntry tables,
-`System/Resource/ResourceSizeTable.Product.*`, `GameData/GameDataList.Product.*`,
-`RSDB/*`, `Mals/USen.Product.*`, `System/HeapDef/*`, and a few packs from `Pack/Actor/`.
+From the user's own game (the copy option, `totk::testFilePatterns()`): `System/`, the zstd
+dictionaries, `Pack/Bootup*`, `Pack/AI.Global*`, `Pack/Actor/`, the FileEntry tables,
+the effect and event flow tables, `RSDB/`, `GameData/` and `Mals/USen*`.
 
 ## Memory
 
