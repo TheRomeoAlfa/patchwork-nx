@@ -53,6 +53,14 @@ mm::fs::path resourcePath(const std::string& name);
 bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out, std::string& why,
                   const std::function<void(uint64_t done, uint64_t total)>& progress = {}, bool* notInGame = nullptr);
 
+// Copy some of the game's files to `dest` on the SD card (same paths), for testing on a
+// computer. Each pattern is a file ("System/RegionLangMask.txt"), a folder ending in "/"
+// (all of it), or "folder/prefix*" (the files directly in it starting with prefix). Same
+// conditions as readGameFile. `progress` gets each file as it's copied; returns how many.
+// Throws std::runtime_error with a reason.
+size_t copyGameFiles(mm::Game game, const std::vector<std::string>& patterns, const mm::fs::path& dest,
+                     const std::function<void(const std::string& file, uint64_t bytesSoFar)>& progress);
+
 // The language BOTW shows its text in, as its message packs name it ("USen", "EUfr"…), from
 // the console's language. On desktop: $MM_GAME_LANG, default "USen".
 std::string gameTextLanguage();

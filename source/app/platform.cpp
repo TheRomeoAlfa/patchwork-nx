@@ -75,6 +75,47 @@ std::string caBundle() {
 }
 
 namespace {
+// Copy the game files matching `patterns` from `root` (the game's romfs) to `dest`.
+size_t copyMatching(const mm::fs::path& root, const std::vector<std::string>& patterns, const mm::fs::path& dest,
+                    const std::function<void(const std::string&, uint64_t)>& progress) {
+    size_t count = 0;
+    uint64_t bytes = 0;
+    std::vector<char> buf(1 << 20);
+    auto copy = [&](const mm::fs::path& from) {
+        // As text: "gamefs:/" isn't a root std::filesystem knows.
+        auto full = from.generic_string(), base = root.generic_string();
+        if (!base.empty() && base.back() != '/') base += '/';
+        mm::fs::path rel = full.rfind(base, 0) == 0 ? full.substr(base.size()) : from.filename().string();
+        auto to = dest / rel;
+        std::error_code ec;
+        mm::fs::create_directories(to.parent_path(), ec);
+        std::unique_ptr<FILE, int (*)(FILE*)> in(std::fopen(from.c_str(), "rb"), &std::fclose);
+        std::unique_ptr<FILE, int (*)(FILE*)> out(std::fopen(to.c_str(), "wb"), &std::fclose);
+        if (!in || !out) throw std::runtime_error("couldn't copy " + rel.generic_string());
+        for (size_t n; (n = std::fread(buf.data(), 1, buf.size(), in.get())) > 0;) {
+            if (std::fwrite(buf.data(), 1, n, out.get()) != n) throw std::runtime_error("couldn't write " + rel.generic_string() + " (SD card full?)");
+            bytes += n;
+        }
+        ++count;
+        if (progress) progress(rel.generic_string(), bytes);
+    };
+    for (const auto& pattern : patterns) {
+        std::error_code ec;
+        if (!pattern.empty() && pattern.back() == '/') {
+            for (mm::fs::recursive_directory_iterator it(root / pattern, ec), end; !ec && it != end; it.increment(ec))
+                if (it->is_regular_file(ec)) copy(it->path());
+        } else if (!pattern.empty() && pattern.back() == '*') {
+            auto folder = mm::fs::path(pattern).parent_path();
+            auto prefix = mm::fs::path(pattern.substr(0, pattern.size() - 1)).filename().string();
+            for (mm::fs::directory_iterator it(root / folder, ec), end; !ec && it != end; it.increment(ec))
+                if (it->is_regular_file(ec) && it->path().filename().string().rfind(prefix, 0) == 0) copy(it->path());
+        } else if (mm::fs::is_regular_file(root / pattern, ec)) {
+            copy(root / pattern);
+        }
+    }
+    return count;
+}
+
 // Read a whole file in pieces, reporting progress.
 std::string readWithProgress(const mm::fs::path& p, const std::function<void(uint64_t, uint64_t)>& progress) {
     std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(p.c_str(), "rb"), &std::fclose);
@@ -144,6 +185,32 @@ bool readGameFile(mm::Game game, const std::string& romfsPath, std::string& out,
         why = e.what();
         return false;
     }
+#endif
+}
+
+size_t copyGameFiles(mm::Game game, const std::vector<std::string>& patterns, const mm::fs::path& dest,
+                     const std::function<void(const std::string&, uint64_t)>& progress) {
+#ifdef __SWITCH__
+    u64 current = 0;
+    u64 wanted = std::stoull(std::string(mm::gameInfo(game).titleId), nullptr, 16);
+    if (R_FAILED(svcGetInfo(&current, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) || current != wanted)
+        throw std::runtime_error("Patchwork wasn't opened from " + std::string(mm::gameInfo(game).displayName) + ".");
+    Result rc = romfsMountFromCurrentProcess("gamefs");
+    if (R_FAILED(rc))
+        throw std::runtime_error("Couldn't open the game's files (error " + std::to_string(R_MODULE(rc)) + "-" +
+                                 std::to_string(R_DESCRIPTION(rc)) + ").");
+    try {
+        auto n = copyMatching("gamefs:/", patterns, dest, progress);
+        romfsUnmount("gamefs");
+        return n;
+    } catch (...) {
+        romfsUnmount("gamefs");
+        throw;
+    }
+#else
+    const char* env = std::getenv(game == mm::Game::Botw ? "MM_GAME_ROMFS_BOTW" : "MM_GAME_ROMFS_TOTK");
+    if (!env) throw std::runtime_error("Patchwork wasn't opened from the game.");
+    return copyMatching(env, patterns, dest, progress);
 #endif
 }
 

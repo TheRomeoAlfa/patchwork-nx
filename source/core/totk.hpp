@@ -59,6 +59,10 @@ private:
     std::string root_;
 };
 
+// The game files the merge tests need, as copyGameFiles patterns: the name tables, system
+// files, data tables, US English text and the actor packs.
+const std::vector<std::string>& testFilePatterns();
+
 class Rom {
 public:
     // Reads the version, the dictionaries and the name tables. Throws std::runtime_error.

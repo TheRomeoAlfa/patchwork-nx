@@ -160,6 +160,15 @@ bool FolderGameFiles::read(const std::string& romfsPath, std::string& out) {
     return true;
 }
 
+const std::vector<std::string>& testFilePatterns() {
+    static const std::vector<std::string> patterns = {
+        "System/",       "Pack/ZsDic.pack.zs", "Pack/Bootup*",    "Pack/AI.Global*", "Pack/Actor/",
+        "AI/FileEntry/", "Logic/FileEntry/",   "Sequence/FileEntry/", "Event/EventFlow/EventFlowFileEntry*",
+        "Effect/EffectFileInfo*", "RSDB/",     "GameData/",       "Mals/USen*",
+    };
+    return patterns;
+}
+
 Rom::Rom(GameFiles& files, const PackIndex& packs, size_t packCacheBytes)
     : files_(files), packs_(packs), packCacheBytes_(packCacheBytes) {
     std::string raw;
