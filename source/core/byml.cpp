@@ -84,9 +84,21 @@ struct Reader {
                 n.s = d.substr(raw + 4, size);
                 break;
             }
+            case T::BinaryAligned: {
+                uint32_t size = u32(raw);
+                n.u = u32(raw + 4);
+                need(raw + 8, size);
+                charge(0, size);
+                n.s = d.substr(raw + 8, size);
+                break;
+            }
             case T::Array:
-            case T::Dict: return container(raw, depth + 1);
+            case T::Dict:
+            case T::HashMap32:
+            case T::HashMap64:
+            case T::ArrayChangelog: return container(raw, depth + 1);
             case T::Bool: n.b = raw != 0; break;
+            case T::Changelog: n.i = int32_t(raw); break;
             case T::Int: n.i = int32_t(raw); break;
             case T::Float: std::memcpy(&n.f, &raw, 4); break;
             case T::UInt: n.u = raw; break;
@@ -121,6 +133,33 @@ struct Reader {
                 if (keyIndex >= keys.size()) throw std::runtime_error("BYML: bad key index");
                 n.dict.emplace(keys[keyIndex], value(uint8_t(u8(e + 3)), e + 4, depth));
             }
+        } else if (type == 0x20 || type == 0x21) {
+            // Entries (hash, value), then each value's type.
+            n.type = T(type);
+            size_t entry = type == 0x20 ? 8 : 12, types = at + 4 + entry * count;
+            need(at + 4, (entry + 1) * size_t(count));
+            for (uint32_t k = 0; k < count; ++k) {
+                size_t e = at + 4 + entry * k;
+                uint64_t hash = type == 0x20 ? u32(e) : u64(e);
+                n.hashes.emplace(hash, value(uint8_t(u8(types + k)), e + entry - 4, depth));
+            }
+        } else if (type == 0xFD) {
+            // TKMM: entries (index, change, node, key, second key), then their types (4 bytes each).
+            n.type = T::ArrayChangelog;
+            size_t types = at + 4 + 20 * size_t(count);
+            need(at + 4, 24 * size_t(count));
+            n.changes.resize(count);
+            for (uint32_t k = 0; k < count; ++k) {
+                size_t e = at + 4 + 20 * k, t = types + 4 * k;
+                auto& c = n.changes[k];
+                c.index = int32_t(u32(e));
+                c.change = Node::Change(int32_t(u32(e + 4)));
+                c.node = value(uint8_t(u8(t)), e + 8, depth);
+                if (u8(t + 1)) c.key = value(uint8_t(u8(t + 1)), e + 12, depth);
+                else c.key.type = T::None;
+                if (u8(t + 2)) c.key2 = value(uint8_t(u8(t + 2)), e + 16, depth);
+                else c.key2.type = T::None;
+            }
         } else {
             throw std::runtime_error("BYML: expected a container");
         }
@@ -128,7 +167,10 @@ struct Reader {
     }
 };
 
-bool inlineType(T t) { return t == T::String || t == T::Bool || t == T::Int || t == T::Float || t == T::UInt || t == T::Null; }
+bool inlineType(T t) {
+    return t == T::String || t == T::Bool || t == T::Int || t == T::Float || t == T::UInt || t == T::Null ||
+           t == T::Changelog || t == T::None;
+}
 
 struct Writer {
     std::string out;
@@ -160,6 +202,12 @@ struct Writer {
             keys.insert(k);
             collect(v, keys, strings);
         }
+        for (const auto& [h, v] : n.hashes) collect(v, keys, strings);
+        for (const auto& c : n.changes) {
+            collect(c.node, keys, strings);
+            collect(c.key, keys, strings);
+            collect(c.key2, keys, strings);
+        }
     }
 
     void writeTable(const std::set<std::string>& set, std::map<std::string, uint32_t>& index) {
@@ -187,6 +235,30 @@ struct Writer {
             case T::Binary:
                 c += std::to_string(n.s.size()) + ":" + n.s;
                 break;
+            case T::BinaryAligned:
+                c += std::to_string(n.u) + "/" + std::to_string(n.s.size()) + ":" + n.s;
+                break;
+            case T::HashMap32:
+            case T::HashMap64:
+                c += std::to_string(n.hashes.size()) + "{";
+                for (const auto& [h, v] : n.hashes) {
+                    c += std::to_string(h) + ":";
+                    canonical(v, c);
+                }
+                c += "}";
+                break;
+            case T::ArrayChangelog:
+                c += std::to_string(n.changes.size()) + "<";
+                for (const auto& e : n.changes) {
+                    c += std::to_string(e.index) + "," + std::to_string(int(e.change)) + ",";
+                    canonical(e.node, c);
+                    canonical(e.key, c);
+                    canonical(e.key2, c);
+                }
+                c += ">";
+                break;
+            case T::Changelog: c += std::to_string(n.i); break;
+            case T::None: break;
             case T::Array:
                 c += std::to_string(n.array.size()) + "[";
                 for (const auto& e : n.array) canonical(e, c);
@@ -233,6 +305,7 @@ struct Writer {
                 return bits;
             }
             case T::UInt: return uint32_t(n.u);
+            case T::Changelog: return uint32_t(int32_t(n.i));
             default: return 0;
         }
     }
@@ -243,13 +316,24 @@ struct Writer {
         canonical(n, c);
         if (auto it = written.find(c); it != written.end()) return it->second;
         align4();
+        // Aligned binary: its data (after size and alignment) starts on the alignment.
+        if (n.type == T::BinaryAligned && n.u > 1)
+            while ((out.size() + 8) % n.u) out += '\0';
         uint32_t at = uint32_t(out.size());
         written.emplace(std::move(c), at);
         switch (n.type) {
             case T::Array:
-            case T::Dict: container(n); break;
+            case T::Dict:
+            case T::HashMap32:
+            case T::HashMap64:
+            case T::ArrayChangelog: container(n); break;
             case T::Binary:
                 put32(uint32_t(n.s.size()));
+                out += n.s;
+                break;
+            case T::BinaryAligned:
+                put32(uint32_t(n.s.size()));
+                put32(uint32_t(n.u));
                 out += n.s;
                 break;
             case T::Int64: put64(uint64_t(n.i)); break;
@@ -275,6 +359,35 @@ struct Writer {
             for (const auto& e : n.array) {
                 if (!inlineType(e.type)) later.emplace_back(out.size(), &e);
                 put32(inlineValue(e));
+            }
+        } else if (n.type == T::HashMap32 || n.type == T::HashMap64) {
+            bool wide = n.type == T::HashMap64;
+            put8(uint8_t(n.type));
+            put24(uint32_t(n.hashes.size()));
+            for (const auto& [h, v] : n.hashes) {
+                if (wide) put64(h);
+                else put32(uint32_t(h));
+                if (!inlineType(v.type)) later.emplace_back(out.size(), &v);
+                put32(inlineValue(v));
+            }
+            for (const auto& [h, v] : n.hashes) put8(uint8_t(v.type));
+            align4();
+        } else if (n.type == T::ArrayChangelog) {
+            put8(0xFD);
+            put24(uint32_t(n.changes.size()));
+            for (const auto& e : n.changes) {
+                put32(uint32_t(e.index));
+                put32(uint32_t(e.change));
+                for (const Node* v : {&e.node, &e.key, &e.key2}) {
+                    if (!inlineType(v->type)) later.emplace_back(out.size(), v);
+                    put32(inlineValue(*v));
+                }
+            }
+            for (const auto& e : n.changes) {
+                put8(uint8_t(e.node.type));
+                put8(uint8_t(e.key.type));
+                put8(uint8_t(e.key2.type));
+                put8(0);
             }
         } else {
             put8(0xC1);
@@ -302,6 +415,12 @@ bool Node::operator==(const Node& o) const {
     switch (type) {
         case T::String:
         case T::Binary: return s == o.s;
+        case T::BinaryAligned: return s == o.s && u == o.u;
+        case T::HashMap32:
+        case T::HashMap64: return hashes == o.hashes;
+        case T::ArrayChangelog: return changes == o.changes;
+        case T::Changelog: return i == o.i;
+        case T::None: return true;
         case T::Array: return array == o.array;
         case T::Dict: return dict == o.dict;
         case T::Bool: return b == o.b;

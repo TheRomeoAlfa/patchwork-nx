@@ -178,3 +178,59 @@ TEST("zstd: the game's dictionaries, chosen by each file") {
     try { dicts.decompress(std::string("\x28\xb5\x2f\xfd garbage", 12)); } catch (const std::runtime_error&) { threw = true; }
     CHECK(threw);
 }
+
+#include "byml.hpp"
+
+TEST("byml v7: hash maps, aligned binary, 64-bit values and TKMM changelogs") {
+    using byml::Node;
+    byml::Document doc;
+    doc.version = 7;
+    doc.root = Node::makeDict();
+    Node h32;
+    h32.type = Node::Type::HashMap32;
+    h32.hashes[0xDEADBEEF] = Node::integer(-5);
+    h32.hashes[7] = Node::str("seven");
+    Node h64;
+    h64.type = Node::Type::HashMap64;
+    Node big;
+    big.type = Node::Type::UInt64;
+    big.u = 0x1122334455667788ull;
+    h64.hashes[0xFFFFFFFF00000001ull] = big;
+    h64.hashes[2] = h32;
+    doc.root.dict["H32"] = h32;
+    doc.root.dict["H64"] = h64;
+    Node aligned;
+    aligned.type = Node::Type::BinaryAligned;
+    aligned.u = 0x80;
+    aligned.s = std::string("\x01\x02\x03", 3);
+    doc.root.dict["Aligned"] = aligned;
+    Node changes;
+    changes.type = Node::Type::ArrayChangelog;
+    byml::ArrayChange add;
+    add.index = 3;
+    add.change = Node::Change::Add;
+    add.node = Node::makeDict();
+    add.node.dict["Name"] = Node::str("Sword");
+    add.key = Node::str("Sword");
+    add.key2.type = Node::Type::None;
+    byml::ArrayChange edit;
+    edit.index = 0;
+    edit.change = Node::Change::Edit;
+    edit.node = Node::real(1.5f);
+    edit.key.type = edit.key2.type = Node::Type::None;
+    changes.changes = {add, edit};
+    doc.root.dict["List"] = changes;
+    doc.root.dict["Gone"] = Node::removed();
+
+    auto bytes = byml::write(doc);
+    auto back = byml::parse(bytes);
+    CHECK_EQ(back.version, uint16_t(7));
+    CHECK(back.root == doc.root);
+    CHECK_EQ(back.root.find("H64")->hashes.at(2).hashes.at(0xDEADBEEF).i, int64_t(-5));
+    CHECK(back.root.find("List")->changes.at(0).key2.type == Node::Type::None);
+    CHECK(back.root.find("Gone")->type == Node::Type::Changelog);
+    // The aligned data starts on its alignment in the file.
+    auto at = bytes.find(std::string("\x01\x02\x03", 3));
+    CHECK(at != std::string::npos && at % 0x80 == 0);
+    CHECK(byml::write(back) == bytes);
+}
