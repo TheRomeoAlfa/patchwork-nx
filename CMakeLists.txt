@@ -24,7 +24,7 @@ if(PLATFORM_DESKTOP OR PLATFORM_SWITCH)
     include(${BOREALIS_LIBRARY}/cmake/toolchain.cmake)
 endif()
 
-project(patchwork VERSION 0.3.0 LANGUAGES C CXX)
+project(patchwork VERSION 0.3.1 LANGUAGES C CXX)
 set(APP_TITLE "Patchwork")
 set(APP_AUTHOR "TheRomeoAlfa")
 
