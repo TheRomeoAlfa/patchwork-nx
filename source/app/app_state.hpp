@@ -54,6 +54,9 @@ struct LibrarySnapshot {
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
     bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    bool tkmmWaiting = false;                // TKMM packages turned on that couldn't be merged yet
+    std::string tkmmError;                   // why
+    std::vector<std::string> tkmmWarnings;   // changes the last TKMM merge left out
     std::set<std::string> bcmlMerged;  // targets (lowercase) the last BCML merge produced
     bool loaded = false;       // false until the mod list has been read at startup
 };

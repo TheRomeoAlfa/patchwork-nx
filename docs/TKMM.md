@@ -32,11 +32,20 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
    files decompress, all 28,525 files in 957 actor packs are in the index (the ones indexed
    to their own pack read back identically), all 170 BYML tables round-trip. GameDataList is
    big-endian; BYML keeps each file's byte order.
-3. **First installs**: `.tkcl` into My mods with its options (as BCML packages' groups);
-   merge whole files, placeholders, packs, exefs patches, cheats, the size table. Many
-   armor and model packages work from here. First test on the Switch.
-4. **Data merges**: BYML (with TKMM's array key tables), RSDB tags and rows, game data
-   (with save data sizes), AI heap.
+3. **Done** (BYML moved here from phase 4, since nearly every package has BYML changes):
+   - BYML merging and changelogs (`byml_merge.*`). Random edits on the game's own files,
+     made into changelogs and merged back, match 99%; the rest are lists TKMM itself can't
+     tell apart.
+   - The size table (`restbl.*`; the game's table writes back byte for byte).
+   - The merge engine (`tkmm.*`): whole files, SARC and pack merging (TOTK's 959 packs
+     rewrite byte for byte), code patches with TKMM's shop default, cheats, the AI heap.
+   - Library integration: enabled packages merge into `tkmm-merged`, deployed like BCML's.
+   - Installer and picker: a `.tkcl`, or an archive with one inside, with its options.
+   - Packages needing phase 4 or 5 are refused with the reason.
+   - Desktop QA: Frostbite Set Linkle Edition installs, merges, turns off cleanly.
+   - Not yet tried on a Switch.
+4. **Data merges**: RSDB tags and rows, game data (with save data sizes). RSDB alone blocks
+   12 of the 38 surveyed packages.
 5. **Text and textures**: Mals/MSBT, combined BNTX.
 6. **Plain romfs mods**: build changelogs on the console by comparing with the game, so
    ordinary TOTK mods that change the same files merge (Linkle 3.0 + a standalone armor).

@@ -386,9 +386,10 @@ void MyModsPage::showDetails(const std::string& id) {
     });
 
     content->addView(ui::label(m->name, 26, ui::text()));
-    bool bcml = !m->bcmlLogs.empty();
+    bool bcml = !m->bcmlLogs.empty(), tkmm = !m->tkmm.empty();
     std::string meta = (m->author.empty() ? "" : "by " + m->author + " · ") +
-                       (bcml ? std::string("BCML package") : std::to_string(m->files.size()) + " files") + " · " + (m->enabled ? "on" : "off");
+                       (bcml ? std::string("BCML package") : tkmm ? std::string("TKMM package") : std::to_string(m->files.size()) + " files") +
+                       " · " + (m->enabled ? "on" : "off");
     auto* metaL = ui::label(meta, 16, ui::muted());
     metaL->setMargins(4, 0, 16, 0);
     content->addView(metaL);
@@ -444,6 +445,24 @@ void MyModsPage::showDetails(const std::string& id) {
                     ui::accent(), ui::accentDim());
     }
 
+    if (tkmm) {
+        const auto& snap = st.snapshot();
+        if (m->enabled && snap.tkmmWaiting) {
+            addNote(std::string(ui::icon::warning) + "  Not merged yet: " + (snap.tkmmError.empty() ? "waiting for the merge." : snap.tkmmError),
+                    ui::warn(), ui::warnBg());
+        } else {
+            addNote(std::string(ui::icon::info) + "  Merged with the game's own files, as TKMM does. Patchwork merges again whenever a TKMM "
+                                                  "package is turned on or off or moved in the list.",
+                    ui::accent(), ui::accentDim());
+            if (m->enabled && !snap.tkmmWarnings.empty()) {
+                std::string text = std::string(ui::icon::warning) + "  The merge left out " + std::to_string(snap.tkmmWarnings.size()) +
+                                   (snap.tkmmWarnings.size() == 1 ? " change" : " changes") + " (of all TKMM packages):";
+                for (size_t i = 0; i < snap.tkmmWarnings.size() && i < 3; ++i) text += "\n• " + snap.tkmmWarnings[i];
+                addNote(text, ui::warn(), ui::warnBg());
+            }
+        }
+    }
+
     const auto& installed = st.gameVersion(m->game);
     if (mm::checkCompat(installed, m->gameVersionsNamed) == mm::Compat::Mismatch) {
         std::string named;
@@ -460,7 +479,7 @@ void MyModsPage::showDetails(const std::string& id) {
     std::string info = "Installed " + std::string(date);
     if (!m->sourceFile.empty()) info += "\nFile: " + m->sourceFile;
     if (!m->version.empty()) info += "\nMod version: " + m->version;
-    if (m->variants.size() > 1 || (m->variants.size() == 1 && !m->bcmlLogs.empty())) {
+    if (m->variants.size() > 1 || (m->variants.size() == 1 && (!m->bcmlLogs.empty() || !m->tkmm.empty()))) {
         info += "\nOptions:";
         for (const auto& v : m->variants) info += " " + v + ";";
         info.pop_back();

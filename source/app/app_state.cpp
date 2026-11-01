@@ -409,6 +409,9 @@ void AppState::publishSnapshot(mm::Library& lib) {
         snap->unmanaged[g.game] = {un.targets.size(), un.bytes};
     }
     snap->bcmlWaiting = lib.bcmlPending();
+    snap->tkmmWaiting = lib.tkmmPending();
+    snap->tkmmError = lib.tkmmError();
+    snap->tkmmWarnings = lib.tkmmWarnings();
     snap->loaded = true;
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);
