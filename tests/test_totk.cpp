@@ -398,3 +398,41 @@ TEST("byml: big-endian files stay big-endian (GameDataList)") {
     CHECK(back.root == doc.root);
     CHECK(byml::write(back) == bytes);
 }
+
+#include "restbl.hpp"
+
+TEST("restbl: the size table round-trips, and changed files get TKMM's sizes") {
+    restbl::Table t;
+    t.hashes[restbl::crc32("Pack/Actor/Armor_001_Head.pack")] = 110592;
+    t.hashes[5] = 100;
+    t.names["Some/Collision.bgyml"] = 64;
+    auto bytes = t.write();
+    CHECK(bytes.compare(0, 6, "RESTBL") == 0);
+    CHECK_EQ(bytes.size(), size_t(22 + 2 * 8 + 1 * (0xA0 + 4)));
+    auto back = restbl::Table::parse(bytes);
+    CHECK(back.hashes == t.hashes && back.names == t.names);
+    CHECK(back.write() == bytes);
+
+    CHECK_EQ(restbl::crc32("abc"), 0x352441C2u);
+    CHECK_EQ(restbl::resourceName("Pack/Actor/X.pack.zs"), std::string("Pack/Actor/X.pack"));
+    CHECK_EQ(restbl::resourceName("Model/X.bfres.mc"), std::string("Model/X.bfres"));
+    CHECK_EQ(restbl::resourceSize("Pack/Actor/X.pack.zs", 1000, ""), (1024u + 0x180));
+    CHECK_EQ(restbl::resourceSize("Component/X.bgyml", 100, ""), (128u + 2000) * 8);
+    CHECK_EQ(restbl::resourceSize("Some/X.unknown", 32, ""), (32u + 1500) * 4);
+    std::string ainb(0x48, '\0');
+    CHECK_EQ(restbl::resourceSize("AI/X.ainb", 0x48, ainb), 0x60u + 392 + 16);
+    CHECK_EQ(restbl::resourceSize("AI/X.ainb", 0x48, "short"), 0x60u + 392 + 16);  // damaged: no crash
+
+    restbl::Collector c(t);
+    c.setVanillaCheck([](const std::string& path, std::string_view) { return path == "Same.txt"; });
+    c.collect("Pack/Actor/Armor_001_Head.pack.zs", 200000, "data");  // the game's entry is replaced
+    c.collect("New/File.txtg.zs", 10, "");                           // added
+    c.collect("Same.txt", 10, "x");                                  // same as the game's: left alone
+    c.collect("Pack/ZsDic.pack.zs", 10, "");                         // never listed
+    c.collect("Some/Collision.bgyml", 10, "", 999);                  // spelled out: stays spelled out
+    const auto& r = c.result();
+    CHECK_EQ(r.hashes.at(restbl::crc32("Pack/Actor/Armor_001_Head.pack")), (200000u + 0x180));
+    CHECK_EQ(r.hashes.at(restbl::crc32("New/File.txtg")), (32u + 0x100));
+    CHECK(!r.hashes.count(restbl::crc32("Same.txt")) && !r.hashes.count(restbl::crc32("Pack/ZsDic.pack")));
+    CHECK_EQ(r.names.at("Some/Collision.bgyml"), 999u);
+}
