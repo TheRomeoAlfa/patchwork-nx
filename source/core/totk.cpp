@@ -252,19 +252,22 @@ std::shared_ptr<const std::string> Rom::pack(const std::string& relativePath) {
 }
 
 std::optional<std::string> Rom::vanillaAt(const std::string& relativePath) {
+    // Files TKMM's index lists are read from their pack first: asking for them loose would
+    // only find out (once per file) that they aren't.
+    auto fromPack = [&]() -> std::optional<std::string> {
+        auto where = packs_.packFor(relativePath);
+        if (!where) return std::nullopt;
+        auto data = pack(this->relativePath(where->first, where->second));
+        if (!data) return std::nullopt;
+        for (const auto& f : sarcView(*data))
+            if (f.name == relativePath) return std::string(f.data);
+        return std::nullopt;
+    };
+    if (auto nested = fromPack()) return nested;
     std::string raw;
-    if (files_.read(relativePath, raw)) {
-        if (zs::isZstd(raw)) return dicts_.decompress(raw);
-        return raw;
-    }
-    // Only inside a pack: there its name is the canonical one.
-    auto where = packs_.packFor(relativePath);
-    if (!where) return std::nullopt;
-    auto data = pack(this->relativePath(where->first, where->second));
-    if (!data) return std::nullopt;
-    for (const auto& f : sarcView(*data))
-        if (f.name == relativePath) return std::string(f.data);
-    return std::nullopt;
+    if (!files_.read(relativePath, raw)) return std::nullopt;
+    if (zs::isZstd(raw)) return dicts_.decompress(raw);
+    return raw;
 }
 
 }  // namespace mm::totk

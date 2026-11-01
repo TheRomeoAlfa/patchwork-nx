@@ -147,6 +147,7 @@ void AppState::init() {
     }
     library_->setFreeSpace(platform::freeSpaceBytes);
     library_->setTextLanguage(platform::gameTextLanguage());
+    library_->setTotkPackIndex(platform::resourcePath("totk/PackFileLookup.pkcache.zs"));
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
         if (!mm::isSafeRelativePath(path)) return GF{};  // names come from downloaded packages
@@ -156,12 +157,16 @@ void AppState::init() {
         auto absent = cached;
         absent += ".absent";
         if (mm::fs::exists(absent, ec)) return GF{GF::State::Absent, {}};
-        bool dlc = path.rfind(mm::bcml::kDlc, 0) == 0;
-        if (!dlc && path.rfind(mm::bcml::kContent, 0) != 0) return GF{};
-        auto rel = path.substr(std::string(dlc ? mm::bcml::kDlc : mm::bcml::kContent).size());
+        // BOTW and its DLC (BCML packages), or TOTK (TKMM packages).
+        static const std::string totkPrefix = std::string(mm::gameInfo(mm::Game::Totk).titleId) + "/romfs/";
+        bool dlc = path.rfind(mm::bcml::kDlc, 0) == 0, totk = path.rfind(totkPrefix, 0) == 0;
+        if (!dlc && !totk && path.rfind(mm::bcml::kContent, 0) != 0) return GF{};
+        auto rel = path.substr(dlc ? std::string(mm::bcml::kDlc).size() : totk ? totkPrefix.size() : std::string(mm::bcml::kContent).size());
         std::string data, why;
         bool notInGame = false;
-        bool ok = dlc ? platform::readDlcFile(rel, data, why, &notInGame) : platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame);
+        bool ok = dlc    ? platform::readDlcFile(rel, data, why, &notInGame)
+                  : totk ? platform::readGameFile(mm::Game::Totk, rel, data, why, {}, &notInGame)
+                         : platform::readGameFile(mm::Game::Botw, rel, data, why, {}, &notInGame);
         if (!ok) {
             if (notInGame) {
                 try {
@@ -173,7 +178,8 @@ void AppState::init() {
             return GF{};
         }
         // Opened without L, Atmosphère hands over the SD card's (modded) copy: not the game's.
-        auto onCard = platform::sdRoot() / "atmosphere/contents" / mm::fs::path(dlc ? "01007EF00011F001/romfs" : "01007EF00011E000/romfs") / mm::fs::path(rel);
+        auto onCard = platform::sdRoot() / "atmosphere/contents" / mm::fs::path(path.substr(0, path.size() - rel.size()));
+        onCard /= mm::fs::path(rel);
         if (mm::fs::exists(onCard, ec) && mm::fs::file_size(onCard, ec) == data.size() && mm::readFile(onCard) == data) return GF{};
         try {
             mm::writeFileAtomic(cached, data);
@@ -208,9 +214,9 @@ void AppState::init() {
             finish.status = "Couldn't check";
         }
         lib.setOriginalSizeTable(originalTable);
-        // BCML packages waiting for game files: merge them now if the files can be read.
+        // BCML and TKMM packages waiting for game files: merge them now if the files can be read.
         if (dlcFound) lib.invalidateBcml();
-        if (dlcFound || lib.bcmlPending()) {
+        if (dlcFound || lib.bcmlPending() || lib.tkmmPending()) {
             try {
                 lib.apply();
             } catch (const std::exception& e) {
@@ -530,8 +536,10 @@ void AppState::loadPcCacheLocked() {
     // Packages are remembered by the kinds of merging they need, so what's installable
     // follows what this version of Patchwork can merge. A mod remembered as "needs a PC"
     // under older rules is checked again.
-    auto read = [this](const json& j) {
-        bool sameRules = j.value("rules", std::string()) == mm::bcml::mergeSupportKey();
+    // TKMM packages install since Patchwork merges them ("tkmm": 1): mods remembered as "needs
+    // a PC" before that are checked again.
+    auto read = [this](const json& j, bool learned) {
+        bool sameRules = j.value("rules", std::string()) == mm::bcml::mergeSupportKey() && (!learned || j.value("tkmm", 0) == 1);
         for (const auto& [id, v] : j["mods"].items()) {
             bool pcOnly = v.at(1).get<bool>();
             if (pcOnly && !sameRules) continue;
@@ -541,12 +549,12 @@ void AppState::loadPcCacheLocked() {
             for (const auto& [id, v] : j["bnpLogs"].items()) bnpLogs_[std::stoll(id)] = v.get<std::vector<std::string>>();
     };
     try {
-        read(json::parse(mm::readFile(platform::resourcePath("bnp-cache.json"))));
+        read(json::parse(mm::readFile(platform::resourcePath("bnp-cache.json"))), false);
     } catch (...) {
     }
     try {
         auto cached = json::parse(mm::readFile(dataDir_ / "pc-only-cache.json"));  // keep alive while iterating
-        if (cached.contains("mods")) read(cached);
+        if (cached.contains("mods")) read(cached, true);
     } catch (...) {
         // none yet, or unreadable: start over
     }
@@ -554,7 +562,7 @@ void AppState::loadPcCacheLocked() {
 
 void AppState::savePcCacheLocked() {
     try {
-        json j = {{"rules", mm::bcml::mergeSupportKey()}, {"mods", json::object()}, {"bnpLogs", json::object()}};
+        json j = {{"rules", mm::bcml::mergeSupportKey()}, {"tkmm", 1}, {"mods", json::object()}, {"bnpLogs", json::object()}};
         for (const auto& [id, v] : pcOnly_) j["mods"][std::to_string(id)] = {v.first, v.second};
         for (const auto& [id, logs] : bnpLogs_) j["bnpLogs"][std::to_string(id)] = logs;
         mm::writeFileAtomic(dataDir_ / "pc-only-cache.json", j.dump());
@@ -612,9 +620,10 @@ std::vector<bool> AppState::needsPcTool(const std::vector<mm::gb::ModSummary>& m
         for (size_t k; (k = next++) < todo.size();) {
             try {
                 auto files = gb_->files(mods[todo[k]].id);
-                // Only packages need a closer look; anything else installs.
+                // Only BCML packages need a closer look; anything else installs (TKMM packages
+                // too: what they need is only known once downloaded).
                 bool allPackages = !files.empty() && std::all_of(files.begin(), files.end(), [](const mm::gb::ModFile& f) {
-                    return mm::endsWithI(f.filename, ".bnp") || mm::endsWithI(f.filename, ".tkcl");
+                    return mm::endsWithI(f.filename, ".bnp");
                 });
                 bool pcOnly = allPackages;
                 // One installable package is enough to show the mod; stop there.

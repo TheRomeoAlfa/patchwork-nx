@@ -40,6 +40,7 @@ struct Variant {
     int group = -1;         // options of one "pick one" group share a number
     std::string groupName;
     bool required = false;  // its group needs a pick
+    int priority = 0;       // TKMM packages: options apply lowest priority first
 };
 
 struct LayoutResult {
@@ -47,6 +48,8 @@ struct LayoutResult {
     std::vector<Variant> variants;
     std::vector<std::string> warnings;
     std::string problem;  // why it can't be installed, when more specific than the kind's message
+    bool tkmm = false;    // a TKMM package: merged, its files kept with the mod (`internal`)
+    std::vector<FileMapping> internal;  // targets relative to the mod's library folder
 };
 
 // Inspect an extracted archive and decide where each file belongs on the SD card.

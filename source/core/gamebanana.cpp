@@ -140,7 +140,7 @@ std::vector<ModFile> parseFiles(const std::string& body) { return parseFileArray
 bool needsPcTool(const std::vector<std::string>& names) {
     if (names.empty()) return false;
     for (const auto& n : names)
-        if (!endsWithI(n, ".bnp") && !endsWithI(n, ".tkcl")) return false;
+        if (!endsWithI(n, ".bnp")) return false;  // TKMM packages install here
     return true;
 }
 

@@ -10,6 +10,9 @@
 #include "nlohmann/json.hpp"
 #include "sarc.hpp"
 #include "sizetable.hpp"
+#include "tkcl.hpp"
+#include "tkmm.hpp"
+#include "totk.hpp"
 
 namespace mm {
 
@@ -40,6 +43,7 @@ json toJson(const ModRecord& m) {
         {"files", m.files},
         {"resourceSizes", m.resourceSizes},
         {"bcmlLogs", m.bcmlLogs},
+        {"tkmm", m.tkmm},
     };
 }
 
@@ -71,6 +75,7 @@ ModRecord fromJson(const json& j) {
     m.files = j.value("files", std::vector<std::string>{});
     m.resourceSizes = j.value("resourceSizes", std::map<std::string, uint32_t>{});
     m.bcmlLogs = j.value("bcmlLogs", std::vector<std::string>{});
+    m.tkmm = j.value("tkmm", std::vector<std::string>{});
     return m;
 }
 
@@ -91,6 +96,7 @@ void replaceFile(const fs::path& from, const fs::path& to);  // below
 const std::string kSizeTableKey = toLower(kBotwSizeTable);
 constexpr const char* kMergedPrefix = "*merged:";
 constexpr const char* kBcmlPrefix = "*bcml:";
+constexpr const char* kTkmmPrefix = "*tkmm:";
 const std::string kContentsPrefix = "atmosphere/contents/";
 // Owner of a target recorded before its file is written (see apply()).
 constexpr const char* kWriting = "*writing";
@@ -162,6 +168,8 @@ bool Library::load() {
     bcmlOutputs_ = j.value("bcmlOutputs", std::vector<std::string>{});
     bcmlSizes_ = j.value("bcmlSizes", std::map<std::string, uint32_t>{});
     bcmlReads_ = j.value("bcmlReads", std::vector<std::string>{});
+    tkmmKey_ = j.value("tkmmKey", "");
+    tkmmOutputs_ = j.value("tkmmOutputs", std::vector<std::string>{});
     // Merges from before other mods' copies were merged in: merge again at the next apply().
     // Changed past the packages' part of the key, so the last merge stays usable meanwhile.
     if (!j.contains("bcmlReads") && !bcmlKey_.empty()) bcmlKey_ += " (old)";
@@ -185,6 +193,8 @@ void Library::save() const {
     j["bcmlOutputs"] = bcmlOutputs_;
     j["bcmlSizes"] = bcmlSizes_;
     j["bcmlReads"] = bcmlReads_;
+    j["tkmmKey"] = tkmmKey_;
+    j["tkmmOutputs"] = tkmmOutputs_;
     writeFileAtomic(dataDir_ / "state.json", j.dump(1));
 }
 
@@ -281,7 +291,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             existing->enabled = false;
             // A package's own files aren't on the card (its merge is): merging without it only
             // to merge again right after would take twice as long.
-            mergeDeferred = deferMerge_ = !existing->bcmlLogs.empty();
+            mergeDeferred = deferMerge_ = !existing->bcmlLogs.empty() || !existing->tkmm.empty();
             struct Undefer {
                 bool& flag;
                 ~Undefer() { flag = false; }
@@ -336,6 +346,7 @@ const ModRecord& Library::add(ModRecord record, const std::vector<FileMapping>& 
             apply(progress);
             const auto* added = find(id);
             if (added && !added->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
+            if (added && !added->tkmm.empty() && tkmmPending()) throw BcmlMergeError(tkmmError_);
         } catch (const BcmlMergeError& e) {
             findMut(id)->enabled = false;
             try {
@@ -372,7 +383,7 @@ void Library::setEnabled(const std::string& id, bool enabled, const ProgressFn& 
     if (!m) throw std::invalid_argument("unknown mod " + id);
     if (m->enabled == enabled) return;
     m->enabled = enabled;
-    bool bcml = !m->bcmlLogs.empty();
+    bool bcml = !m->bcmlLogs.empty(), tkmm = !m->tkmm.empty();
     save();
     try {
         apply(progress);
@@ -382,6 +393,7 @@ void Library::setEnabled(const std::string& id, bool enabled, const ProgressFn& 
         throw;
     }
     if (bcml && bcmlPending()) throw BcmlMergeError(bcmlError_);
+    if (tkmm && tkmmPending()) throw BcmlMergeError(tkmmError_);
 }
 
 void Library::remove(const std::string& id, const ProgressFn& progress) {
@@ -465,6 +477,7 @@ void Library::move(const std::string& id, int delta, const ProgressFn& progress)
         throw;
     }
     if (!target->bcmlLogs.empty() && bcmlPending()) throw BcmlMergeError(bcmlError_);
+    if (!target->tkmm.empty() && tkmmPending()) throw BcmlMergeError(tkmmError_);
 }
 
 std::map<std::string, std::string> Library::desiredDeployment() const {
@@ -489,6 +502,18 @@ std::map<std::string, std::string> Library::desiredDeployment() const {
     if (!bcmlKey_.empty()) {
         auto owner = kBcmlPrefix + std::to_string(stableId(bcmlKey_));
         for (const auto& t : bcmlOutputs_) {
+            for (auto it = out.begin(); it != out.end(); ++it)
+                if (targetKey(it->first) == targetKey(t)) {
+                    out.erase(it);
+                    break;
+                }
+            out[t] = owner;
+        }
+    }
+    // Likewise the TKMM merge's.
+    if (!tkmmKey_.empty()) {
+        auto owner = kTkmmPrefix + std::to_string(stableId(tkmmKey_));
+        for (const auto& t : tkmmOutputs_) {
             for (auto it = out.begin(); it != out.end(); ++it)
                 if (targetKey(it->first) == targetKey(t)) {
                     out.erase(it);
@@ -855,6 +880,16 @@ void Library::apply(const ProgressFn& progress) {
             bcmlSizes_.clear();
         }
     }
+    try {
+        if (!deferMerge_) refreshTkmm();
+        tkmmError_.clear();
+    } catch (const std::exception& e) {
+        tkmmError_ = dynamic_cast<const std::bad_alloc*>(&e) ? kOutOfMemory : e.what();
+        if (!tkmmStillUsable()) {
+            tkmmKey_.clear();
+            tkmmOutputs_.clear();
+        }
+    }
     auto desired = desiredDeployment();
 
     std::map<std::string, std::string> desiredByKey, deployedByKey;  // key -> actual target
@@ -874,6 +909,7 @@ void Library::apply(const ProgressFn& progress) {
     auto sourceOf = [&](const std::string& t, const std::string& id) -> fs::path {
         if (id.rfind(kMergedPrefix, 0) == 0) return {};
         if (id.rfind(kBcmlPrefix, 0) == 0) return dataDir_ / "bcml-merged" / fs::path(t.substr(kContentsPrefix.size()));
+        if (id.rfind(kTkmmPrefix, 0) == 0) return dataDir_ / "tkmm-merged" / fs::path(t);
         return modDir(*find(id)) / fs::path(t);
     };
 
@@ -1062,6 +1098,135 @@ std::set<std::string> Library::bcmlMergedTargets() const {
     if (!bcmlKey_.empty())
         for (const auto& t : bcmlOutputs_) out.insert(targetKey(t));
     return out;
+}
+
+std::set<std::string> Library::tkmmMergedTargets() const {
+    std::set<std::string> out;
+    if (!tkmmKey_.empty())
+        for (const auto& t : tkmmOutputs_) out.insert(targetKey(t));
+    return out;
+}
+
+namespace {
+
+// The game's files through the library's reader ("0100F2C0115B6000/romfs/…"). One it can't
+// read now (Patchwork wasn't opened from the game, and there's no copy kept) stops the merge.
+class TotkReader : public totk::GameFiles {
+public:
+    explicit TotkReader(const Library::GameFileReader& reader) : reader_(reader) {}
+    bool read(const std::string& romfsPath, std::string& out) override {
+        auto f = reader_ ? reader_(std::string(gameInfo(Game::Totk).titleId) + "/romfs/" + romfsPath) : Library::GameFile{};
+        if (f.state == Library::GameFile::State::Found) {
+            out = std::move(f.data);
+            return true;
+        }
+        if (f.state == Library::GameFile::State::Absent) return false;
+        throw std::runtime_error("Tears of the Kingdom's " + romfsPath +
+                                 " couldn't be read. Hold L and R while starting the game to open Patchwork, then try again.");
+    }
+
+private:
+    const Library::GameFileReader& reader_;
+};
+
+// Where a merged file goes on the SD card.
+std::string tkmmTarget(const std::string& merged) {
+    std::string contents = kContentsPrefix + std::string(gameInfo(Game::Totk).titleId) + "/";
+    if (merged.rfind("exefs_patches/", 0) == 0) return "atmosphere/exefs_patches/patchwork-tkmm/" + merged.substr(14);
+    return contents + merged;  // romfs/…, exefs/…, cheats/…
+}
+
+}  // namespace
+
+std::string Library::tkmmKey() const {
+    std::vector<const ModRecord*> on;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Totk && !m.tkmm.empty()) on.push_back(&m);
+    if (on.empty()) return {};
+    std::sort(on.begin(), on.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    std::string key;
+    for (const auto* m : on) {
+        key += m->id + "@" + std::to_string(m->installedAt) + ":";
+        for (const auto& c : m->tkmm) key += c + ",";
+        key += ";";
+    }
+    return key;
+}
+
+bool Library::tkmmStillUsable() const {
+    // Every package in the last merge is still on, as it was installed then, with the same options.
+    auto wanted = keyPackages(tkmmKey());
+    for (const auto& p : keyPackages(tkmmKey_))
+        if (!wanted.count(p)) return false;
+    return true;
+}
+
+void Library::refreshTkmm() {
+    auto key = tkmmKey();
+    if (key == tkmmKey_) return;
+    auto staging = dataDir_ / "tkmm-merged", incoming = staging, previous = staging;
+    incoming += ".new";
+    previous += ".old";
+    if (key.empty()) {
+        tkmmKey_.clear();
+        tkmmOutputs_.clear();
+        tkmmWarnings_.clear();
+        removeTree(staging);
+        removeTree(incoming);
+        removeTree(previous);
+        return;
+    }
+    std::vector<const ModRecord*> sorted;
+    for (const auto& m : mods_)
+        if (m.enabled && m.game == Game::Totk && !m.tkmm.empty()) sorted.push_back(&m);
+    std::sort(sorted.begin(), sorted.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    std::vector<tkcl::Package> packages;
+    packages.reserve(sorted.size());
+    std::vector<tkmm::Input> inputs;
+    for (const auto* m : sorted) {
+        packages.push_back(tkcl::read(readFile(modDir(*m) / "tkmm" / "package.tkcl")));
+        const auto& pkg = packages.back();
+        auto root = modDir(*m) / "tkmm" / "files";
+        for (const auto& c : m->tkmm) {
+            if (c == "main") {
+                inputs.push_back({m->id, root, &pkg.changelog});
+                continue;
+            }
+            for (const auto& g : pkg.groups)
+                for (const auto& o : g.options)
+                    if (o.id == c) inputs.push_back({m->id, root / o.id, &o.changelog});
+        }
+    }
+    if (totkPackIndex_.empty()) throw std::runtime_error("TKMM's pack index is missing");
+    auto index = totk::PackIndex::load(readFile(totkPackIndex_));
+    TotkReader files(gameFiles_);
+    totk::Rom rom(files, index);
+    std::string err;
+    if (!removeTree(incoming, &err) || !removeTree(previous, &err)) throw std::runtime_error(err);
+    auto raw = incoming / ".raw";
+    tkmm::Progress progress;
+    if (mergeProgress_) progress = [this](float f, const std::string& what) { mergeProgress_(f, what); };
+    auto result = tkmm::merge(inputs, rom, raw, progress);
+    std::vector<std::string> outputs;
+    for (const auto& f : result.files) {
+        auto target = tkmmTarget(f);
+        auto to = incoming / fs::path(target);
+        fs::create_directories(to.parent_path());
+        fs::rename(raw / fs::path(f), to);
+        outputs.push_back(target);
+    }
+    removeTree(raw);
+    // As refreshBcml: forget the last merge before its files go.
+    tkmmKey_.clear();
+    save();
+    if (fs::exists(staging)) fs::rename(staging, previous);
+    if (!outputs.empty()) fs::rename(incoming, staging);
+    removeTree(previous);
+    removeTree(incoming);
+    tkmmOutputs_ = std::move(outputs);
+    tkmmWarnings_ = std::move(result.warnings);
+    tkmmKey_ = key;
+    save();
 }
 
 std::vector<Conflict> Library::conflicts(Game game) const {

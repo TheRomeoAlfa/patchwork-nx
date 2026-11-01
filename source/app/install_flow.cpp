@@ -17,10 +17,8 @@ namespace app {
 using mm::gb::ModDetails;
 using mm::gb::ModFile;
 
-// A package that has to be merged on a PC (TKMM, or a BCML package that needs merging).
-bool needsPcTool(const ModFile& f) {
-    return mm::endsWithI(f.filename, ".tkcl") || (mm::endsWithI(f.filename, ".bnp") && f.bcml == ModFile::Bcml::NeedsPc);
-}
+// A BCML package that has to be merged on a PC.
+bool needsPcTool(const ModFile& f) { return mm::endsWithI(f.filename, ".bnp") && f.bcml == ModFile::Bcml::NeedsPc; }
 
 bool isUnsupportedPackage(const ModFile& f) { return needsPcTool(f) || mm::wk::isWiiUOnly(f); }
 
@@ -41,7 +39,7 @@ FileNote noteFor(const ModFile& f, mm::Game game, const std::string& installed, 
         return {"BCML package", ui::muted()};
     }
     if (mm::endsWithI(f.filename, ".tkcl") || (game == mm::Game::Totk && mm::saysTkmmOnly(f.description + " " + f.filename)))
-        return {"Needs TKMM on a PC", ui::warn()};
+        return {"TKMM package · merges here", ui::accent()};
     if (mm::wk::isWiiUOnly(f)) return {"Wii U only", ui::warn()};
     if (mm::isRestoreOriginalsFile(f.filename, f.description))
         return {"Original files · not needed", ui::muted()};  // Patchwork undoes mods itself
@@ -66,8 +64,10 @@ size_t recommendedFile(const ModDetails& d, mm::Game game, const std::string& in
     for (size_t i = 0; i < d.files.size(); ++i) {
         const auto& f = d.files[i];
         int score = 0;
-        // Labeled for TKMM: an archive with a TKMM package inside, needing a PC too.
-        bool pcOnly = isUnsupportedPackage(f) || (game == mm::Game::Totk && mm::saysTkmmOnly(f.description + " " + f.filename));
+        // TKMM packages merge here, but not everything in them yet: a mod's standalone files
+        // stay the safer pick when it has them.
+        bool pcOnly = isUnsupportedPackage(f) || (game == mm::Game::Totk && (mm::endsWithI(f.filename, ".tkcl") ||
+                                                                             mm::saysTkmmOnly(f.description + " " + f.filename)));
         if (!pcOnly) score += 4;
         score += 2 * mm::languageMatch(f.description + " " + f.filename, language);
         if (mm::isRestoreOriginalsFile(f.filename, f.description)) score -= 20;  // only if it's all there is
@@ -341,11 +341,9 @@ void InstallFlow::showFilePicker(const ModDetails& d) {
 void InstallFlow::install(const ModDetails& d, const ModFile& file) {
     active_ = true;
     if (needsPcTool(file)) {
-        bool bnp = mm::endsWithI(file.filename, ".bnp");
-        showMessage(bnp ? "Needs BCML" : "Needs TKMM",
-                    std::string("This file is a ") + (bnp ? "BCML" : "TKMM") +
-                        " package. It has to be merged on a PC with that tool, then copied to the SD card. "
-                        "Pick a different file if the mod offers a standalone version.",
+        showMessage("Needs BCML",
+                    "This file is a BCML package. It has to be merged on a PC with BCML, then copied to the SD card. "
+                    "Pick a different file if the mod offers a standalone version.",
                     true);
         return;
     }
@@ -641,7 +639,7 @@ void InstallFlow::showVariantPicker(const ModDetails& d, const ModFile& file, st
         name->setShrink(1);
         row->addView(name);
         // BCML options often change the game's files rather than bringing their own.
-        if (!v.files.empty() || v.bcmlLogs.empty())
+        if (!prep->layout.tkmm && (!v.files.empty() || v.bcmlLogs.empty()))  // (TKMM options merge instead)
             row->addView(ui::label(std::to_string(v.files.size()) + " files", 15, ui::muted()));
         row->registerClickAction([prep, selected, boxes, icon, i](brls::View*) {
             const auto& variants = prep->layout.variants;
@@ -683,11 +681,12 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
     // Merging can rebuild archives of 100 MB and more, which the Album's memory may not hold.
     // Said once per session.
     static bool memoryWarned = false;
-    bool merges = std::any_of(variants.begin(), variants.end(), [&](size_t i) { return !prep->layout.variants.at(i).bcmlLogs.empty(); });
+    bool merges = prep->layout.tkmm ||
+                  std::any_of(variants.begin(), variants.end(), [&](size_t i) { return !prep->layout.variants.at(i).bcmlLogs.empty(); });
     if (merges && !memoryWarned && !platform::fullMemory()) {
         memoryWarned = true;
         auto* dialog = new brls::Dialog(
-            "Patchwork was opened from the Album, which leaves it only a little memory. BCML packages that change big game "
+            "Patchwork was opened from the Album, which leaves it only a little memory. Packages that change big game "
             "files (like Link's moves or the title screen) may fail with \"out of memory\".\n\n"
             "To be safe: press + to close Patchwork, then hold R while starting a game and open Patchwork from the Homebrew Menu.");
         dialog->addButton("Cancel", [this, prep] {
@@ -769,6 +768,16 @@ void InstallFlow::finish(const ModDetails& d, const ModFile& file, std::shared_p
         auto files = mm::mergeVariants(prep->layout, variants);
         std::vector<mm::fs::path> logDirs;  // BCML packages that need merging
         auto logs = mm::variantLogFiles(prep->layout, variants, r.bcmlLogs);
+        if (prep->layout.tkmm) {
+            // Merged in TKMM's order: the package's own files, then its options, lowest priority first.
+            std::vector<const mm::Variant*> options;
+            for (auto i : variants)
+                if (!prep->layout.variants.at(i).always) options.push_back(&prep->layout.variants.at(i));
+            std::stable_sort(options.begin(), options.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+            r.tkmm = {"main"};
+            for (const auto* v : options) r.tkmm.push_back(v->name);
+            logs.insert(logs.end(), prep->layout.internal.begin(), prep->layout.internal.end());
+        }
         // Keep the archive to change the options later without downloading it again: packages
         // and small archives (big ones can be downloaded again, or put back in the inbox).
         auto archive = st.archivePathFor(file);

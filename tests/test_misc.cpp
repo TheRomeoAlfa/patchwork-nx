@@ -220,7 +220,7 @@ TEST("gamebanana: mods that only come as PC packages") {
     CHECK(gb::needsPcTool(names));
     CHECK(gb::pcToolMessage(names).find("BCML") != std::string::npos);
     CHECK(!gb::needsPcTool({"mod.bnp", "mod-switch.zip"}));  // has something installable
-    CHECK(gb::needsPcTool({"a.TKCL"}));
+    CHECK(!gb::needsPcTool({"a.TKCL"}));  // TKMM packages install
     CHECK(!gb::needsPcTool({}));  // no files listed: don't hide
 }
 

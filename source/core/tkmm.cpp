@@ -121,7 +121,8 @@ struct Engine {
             collect(e, archives, zs::isZstd(raw) ? rom.dictionaries().decompress(raw) : raw, override);
             return;
         }
-        auto ext = extensionOf(relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".zs") == 0 ? relative.substr(0, relative.size() - 3) : relative);
+        std::string stem = relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".zs") == 0 ? relative.substr(0, relative.size() - 3) : relative;
+        auto ext = extensionOf(stem);
         bool needsData = ext == ".ainb" || ext == ".asb" || ext == ".bstar" || ext == ".mc";
         if (zs::isZstd(raw)) {
             auto data = rom.dictionaries().decompress(raw);
