@@ -161,10 +161,12 @@ bool FolderGameFiles::read(const std::string& romfsPath, std::string& out) {
 }
 
 const std::vector<std::string>& testFilePatterns() {
+    // Actor packs only for armor, weapons, horses and Lynels: all of them take several GB.
     static const std::vector<std::string> patterns = {
-        "System/",       "Pack/ZsDic.pack.zs", "Pack/Bootup*",    "Pack/AI.Global*", "Pack/Actor/",
-        "AI/FileEntry/", "Logic/FileEntry/",   "Sequence/FileEntry/", "Event/EventFlow/EventFlowFileEntry*",
-        "Effect/EffectFileInfo*", "RSDB/",     "GameData/",       "Mals/USen*",
+        "System/",           "Pack/ZsDic.pack.zs",        "Pack/Bootup*",           "Pack/AI.Global*",
+        "Pack/Actor/Armor_*", "Pack/Actor/Weapon_*",      "Pack/Actor/GameRomHorse*", "Pack/Actor/Enemy_Lynel*",
+        "AI/FileEntry/",     "Logic/FileEntry/",          "Sequence/FileEntry/",    "Event/EventFlow/EventFlowFileEntry*",
+        "Effect/EffectFileInfo*", "RSDB/",                "GameData/",              "Mals/USen*",
     };
     return patterns;
 }

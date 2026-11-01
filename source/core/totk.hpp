@@ -60,7 +60,7 @@ private:
 };
 
 // The game files the merge tests need, as copyGameFiles patterns: the name tables, system
-// files, data tables, US English text and the actor packs.
+// files, data tables, US English text and some actor packs.
 const std::vector<std::string>& testFilePatterns();
 
 class Rom {

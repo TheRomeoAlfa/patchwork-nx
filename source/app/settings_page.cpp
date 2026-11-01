@@ -131,8 +131,8 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
                 brls::Application::notify("Wait for the current install to finish");
                 return true;
             }
-            if (platform::freeSpaceBytes() < (4ull << 30)) {
-                brls::Application::notify("Needs about 4 GB free on the SD card");
+            if (platform::freeSpaceBytes() < (1ull << 30)) {
+                brls::Application::notify("Needs about 1 GB free on the SD card");
                 return true;
             }
             copy->setDetailText("Starting…");
@@ -159,7 +159,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         });
         content->addView(copy);
         auto* how = ui::label("For testing TKMM merging on a computer: hold L and R while starting Tears of the Kingdom (L keeps "
-                              "mods out of the copy), open Patchwork, then select this. It copies a few GB of the game's own "
+                              "mods out of the copy), open Patchwork, then select this. It copies a few hundred MB of the game's own "
                               "files to switch/patchwork/totk-game-files.",
                               14, ui::muted(), false);
         how->setMargins(10, 4, 4, 4);
