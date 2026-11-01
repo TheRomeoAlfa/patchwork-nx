@@ -79,6 +79,13 @@ public:
     std::optional<std::string> vanilla(const std::string& canonical, uint32_t attributes);
     // By real path ("…​.byml.zs"), decompressed.
     std::optional<std::string> vanillaAt(const std::string& relativePath);
+    // TKMM's pack index lists this file (so if it can't be read, it's missing from the game).
+    bool listedInPack(const std::string& name) const { return packs_.packFor(name).has_value(); }
+    // The version of an event flow the game uses ("Demo001" -> "110"), if listed.
+    const std::string* eventFlowVersion(const std::string& name) const {
+        auto it = eventFlows_.find(name);
+        return it == eventFlows_.end() ? nullptr : &it->second;
+    }
 
 private:
     std::shared_ptr<const std::string> pack(const std::string& relativePath);
