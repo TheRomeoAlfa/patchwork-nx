@@ -45,7 +45,8 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
 ## Game files for tests
 
 From the user's own game (the copy option, `totk::testFilePatterns()`): `System/`, the zstd
-dictionaries, `Pack/Bootup*`, `Pack/AI.Global*`, `Pack/Actor/`, the FileEntry tables,
+dictionaries, `Pack/Bootup*`, `Pack/AI.Global*`, the armor, weapon, horse and Lynel actor
+packs, the FileEntry tables,
 the effect and event flow tables, `RSDB/`, `GameData/` and `Mals/USen*`.
 
 ## Memory
