@@ -174,22 +174,23 @@ bool inlineType(T t) {
 
 struct Writer {
     std::string out;
+    bool be = false;
     std::map<std::string, uint32_t> keyIndex, stringIndex;
     std::unordered_map<std::string, uint32_t> written;  // canonical form -> offset (dedupe)
 
     void put8(uint8_t v) { out += char(v); }
     void put24(uint32_t v) {
-        for (int k = 0; k < 3; ++k) out += char((v >> (8 * k)) & 0xff);
+        for (int k = 0; k < 3; ++k) out += char((v >> (8 * (be ? 2 - k : k))) & 0xff);
     }
     void put32(uint32_t v) {
-        for (int k = 0; k < 4; ++k) out += char((v >> (8 * k)) & 0xff);
+        for (int k = 0; k < 4; ++k) out += char((v >> (8 * (be ? 3 - k : k))) & 0xff);
     }
     void put64(uint64_t v) {
-        put32(uint32_t(v));
-        put32(uint32_t(v >> 32));
+        put32(uint32_t(be ? v >> 32 : v));
+        put32(uint32_t(be ? v : v >> 32));
     }
     void set32(size_t at, uint32_t v) {
-        for (int k = 0; k < 4; ++k) out[at + k] = char((v >> (8 * k)) & 0xff);
+        for (int k = 0; k < 4; ++k) out[at + k] = char((v >> (8 * (be ? 3 - k : k))) & 0xff);
     }
     void align4() {
         while (out.size() % 4) out += '\0';
@@ -446,6 +447,7 @@ Document parse(const std::string& raw) {
     else
         throw std::runtime_error("not a BYML file");
     Document doc;
+    doc.bigEndian = !r.le;
     doc.version = uint16_t(r.le ? (uint8_t(data[2]) | (uint8_t(data[3]) << 8)) : ((uint8_t(data[2]) << 8) | uint8_t(data[3])));
     r.keys = r.table(r.u32(4));
     r.strings = r.table(r.u32(8));
@@ -456,9 +458,10 @@ Document parse(const std::string& raw) {
 
 std::string write(const Document& doc) {
     Writer w;
-    w.out = "YB";
-    w.out += char(doc.version & 0xff);
-    w.out += char(doc.version >> 8);
+    w.be = doc.bigEndian;
+    w.out = w.be ? "BY" : "YB";
+    w.out += char(w.be ? doc.version >> 8 : doc.version & 0xff);
+    w.out += char(w.be ? doc.version & 0xff : doc.version >> 8);
     w.out.append(12, '\0');
     if (!doc.root.isContainer()) return w.out;
     std::set<std::string> keys, strings;

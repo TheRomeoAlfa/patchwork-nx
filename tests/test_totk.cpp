@@ -374,3 +374,27 @@ TEST("totk: the game's files by their TKMM names, and files inside packs") {
     try { totk::Rom again(files, index); } catch (const std::runtime_error& e) { threw = std::string(e.what()).find("FileEntry") != std::string::npos; }
     CHECK(threw);
 }
+
+TEST("byml: big-endian files stay big-endian (GameDataList)") {
+    using byml::Node;
+    byml::Document doc;
+    doc.version = 7;
+    doc.bigEndian = true;
+    doc.root = Node::makeDict();
+    Node h64;
+    h64.type = Node::Type::HashMap64;
+    Node big;
+    big.type = Node::Type::Int64;
+    big.i = -0x123456789ll;
+    h64.hashes[0x0102030405060708ull] = big;
+    h64.hashes[9] = Node::uinteger(0xAABBCCDD);
+    doc.root.dict["Bool"] = h64;
+    doc.root.dict["Name"] = Node::str("Hello");
+    auto bytes = byml::write(doc);
+    CHECK(bytes.compare(0, 4, std::string("BY\0\x07", 4)) == 0);
+    CHECK(bytes.find(std::string("\x01\x02\x03\x04\x05\x06\x07\x08", 8)) != std::string::npos);  // the hash, big-endian
+    auto back = byml::parse(bytes);
+    CHECK(back.bigEndian);
+    CHECK(back.root == doc.root);
+    CHECK(byml::write(back) == bytes);
+}

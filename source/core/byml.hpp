@@ -77,10 +77,11 @@ inline Node Node::removed() { Node n; n.type = Type::Changelog; n.i = int64_t(Ch
 
 struct Document {
     uint16_t version = 2;
+    bool bigEndian = false;  // a few of Tears of the Kingdom's files (GameDataList)
     Node root;
 };
 
 Document parse(const std::string& data);  // Yaz0 or plain; throws on bad data
-std::string write(const Document& doc);   // plain (little endian)
+std::string write(const Document& doc);   // plain, in the document's byte order
 
 }  // namespace mm::byml

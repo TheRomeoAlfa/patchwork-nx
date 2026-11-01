@@ -116,7 +116,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
     }
 
     // TKMM merging is being built: a way to copy the game files its tests need.
-    if (AppState::get().game() == mm::Game::Totk) {
+    if (AppState::get().game() == mm::Game::Totk || platform::runningAsGame(mm::Game::Totk)) {
         section("TKMM merging · in development");
         auto* copy = new brls::DetailCell();
         copy->setText("Copy game files for testing");
