@@ -158,8 +158,10 @@ bool logPlainArray(Info& info, Node& root, const Node& vanilla) {
     std::vector<size_t> additions;  // a queue
     size_t additionsHead = 0;
     std::vector<bool> vanillaFound(vanilla.array.size()), srcIsVanilla(src.size());
+    size_t firstFree = 0;  // every element before it is matched already
     for (size_t i = 0; i < src.size(); ++i) {
-        size_t j = 0;
+        while (firstFree < vanilla.array.size() && vanillaFound[firstFree]) ++firstFree;
+        size_t j = firstFree;
         for (; j < vanilla.array.size(); ++j)
             if (!vanillaFound[j] && vanilla.array[j] == src[i]) break;
         if (j == vanilla.array.size()) {

@@ -54,8 +54,16 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
    (`*__Combined.bntx`, BNTX rebuilt with changed textures): none of the 13 packages tried
    needs it (their `.bntx` files are whole icons, copied), and there's no game file to check a
    BNTX writer against; packages that need it are still refused with the reason.
-6. **Plain romfs mods**: build changelogs on the console by comparing with the game, so
-   ordinary TOTK mods that change the same files merge (Linkle 3.0 + a standalone armor).
+6. **Done (plain romfs mods)**: ordinary TOTK mods merge too (Linkle 3.0 + a standalone
+   armor), in `tkmm_build.*` (TKMM's names for files, and changelogs made by comparing a mod's
+   files with the game's: BYML, RSDB tables, game data, text, SARCs, the files in packs).
+   - Only files two or more enabled mods change are merged (a size table counts, and so do
+     files TKMM packages change); the rest go on the SD card as they are, with their sizes
+     (and those of the files in their packs) put in the merged size table.
+   - When the game's files can't be read, the higher mod wins as before, and My mods says why.
+   - Checked on the user's game: two mods changing an armor pack, two RSDB tables, game data
+     and text in different places merge to both changes and nothing else; the app's merge on
+     the card is identical. Comparing long lists was quadratic: 7.7 s to 0.4 s per mod.
 7. **Maybe**: BFRES `.mc` material cleanup (TKMM's BfresMc), memory permitting.
 
 ## Game files for tests

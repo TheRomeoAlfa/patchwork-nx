@@ -412,6 +412,7 @@ void AppState::publishSnapshot(mm::Library& lib) {
     snap->tkmmWaiting = lib.tkmmPending();
     snap->tkmmError = lib.tkmmError();
     snap->tkmmWarnings = lib.tkmmWarnings();
+    snap->tkmmMerged = lib.tkmmMergedTargets();
     snap->loaded = true;
     brls::sync([this, snap] {
         snapshot_ = std::move(*snap);

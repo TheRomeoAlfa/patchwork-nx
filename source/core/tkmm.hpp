@@ -33,9 +33,11 @@ struct Result {
 using Progress = std::function<void(float done, const std::string& what)>;
 
 // `language`: the game's text language, as its text archives name it ("USen", "EUfr"…).
+// `asIs`: plain mods' files that go on the SD card unmerged, (romfs path, file): only their
+// sizes go into the size table (a pack's with the files in it).
 // Throws std::runtime_error (naming the file) when a changelog can't be applied.
 Result merge(const std::vector<Input>& lowestFirst, totk::Rom& rom, const fs::path& outDir, const Progress& progress = {},
-             const std::string& language = "USen");
+             const std::string& language = "USen", const std::vector<std::pair<std::string, fs::path>>& asIs = {});
 
 // The files of a changelog Patchwork can't merge yet (combined textures): a package with any
 // isn't installed.

@@ -463,6 +463,19 @@ void MyModsPage::showDetails(const std::string& id) {
         }
     }
 
+    if (!tkmm && !bcml && m->game == mm::Game::Totk && m->enabled) {
+        // A plain mod: files it shares with other mods merge, as TKMM merges them.
+        const auto& snap = st.snapshot();
+        int merged = 0;
+        for (const auto& t : m->files) merged += int(snap.tkmmMerged.count(mm::toLower(t)));
+        if (snap.tkmmWaiting && !snap.tkmmError.empty() && (!overriddenBy.empty() || !overrides.empty()))
+            addNote(std::string(ui::icon::warning) + "  Not merged with the other mods that change the same files: " + snap.tkmmError, ui::warn(), ui::warnBg());
+        else if (merged > 0)
+            addNote(std::string(ui::icon::info) + "  " + files(merged) + " merged with other mods' changes to the same files, as TKMM "
+                                                  "does. Patchwork merges again whenever one of them is turned on or off or moved in the list.",
+                    ui::accent(), ui::accentDim());
+    }
+
     const auto& installed = st.gameVersion(m->game);
     if (mm::checkCompat(installed, m->gameVersionsNamed) == mm::Compat::Mismatch) {
         std::string named;

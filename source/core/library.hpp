@@ -227,6 +227,7 @@ private:
     // Every package in the last merge is still enabled (as installed then): its files may stay.
     bool bcmlStillUsable() const;
     // TKMM packages: merged into <dataDir>/tkmm-merged (files at their SD card paths).
+    std::vector<const ModRecord*> tkmmMods() const;  // in the merge, lowest priority first
     std::string tkmmKey() const;
     void refreshTkmm();
     bool tkmmStillUsable() const;

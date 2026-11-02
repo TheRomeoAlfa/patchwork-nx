@@ -50,6 +50,11 @@ bool isZstd(std::string_view data) { return data.size() >= 4 && le32(data, 0) ==
 
 uint32_t frameDictionary(std::string_view data) { return unsigned(ZSTD_getDictID_fromFrame(data.data(), data.size())); }
 
+int64_t frameContentSize(std::string_view data) {
+    auto size = ZSTD_getFrameContentSize(data.data(), data.size());
+    return size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN ? -1 : int64_t(size);
+}
+
 Dictionaries Dictionaries::load(std::string_view zsDicPack) {
     Dictionaries out;
     auto pack = out.decompress(zsDicPack);

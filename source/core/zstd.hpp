@@ -35,5 +35,7 @@ private:
 bool isZstd(std::string_view data);
 // The dictionary a compressed file needs (0 = none).
 uint32_t frameDictionary(std::string_view data);
+// The decompressed size a frame's header gives (from its first 18 bytes), or -1 if it has none.
+int64_t frameContentSize(std::string_view data);
 
 }  // namespace mm::zs

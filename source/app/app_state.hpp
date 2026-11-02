@@ -58,6 +58,7 @@ struct LibrarySnapshot {
     std::string tkmmError;                   // why
     std::vector<std::string> tkmmWarnings;   // changes the last TKMM merge left out
     std::set<std::string> bcmlMerged;  // targets (lowercase) the last BCML merge produced
+    std::set<std::string> tkmmMerged;  // likewise, the last TKMM merge
     bool loaded = false;       // false until the mod list has been read at startup
 };
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <set>
@@ -12,6 +13,7 @@
 #include "msbt.hpp"
 #include "restbl.hpp"
 #include "sarc.hpp"
+#include "tkmm_build.hpp"
 #include "tkmm_data.hpp"
 #include "zstd.hpp"
 
@@ -170,6 +172,32 @@ struct Engine {
             sizes.collect(relative, uint32_t(raw.size()), needsData ? std::string_view(raw) : std::string_view(), override);
         }
         writeOut("romfs/" + relative, raw);
+    }
+
+    // A plain mod's file that goes on the SD card as it is: only its size (and, for a pack,
+    // the sizes of the files in it) goes into the table. Most files need only the size their
+    // zstd header gives.
+    void sizeOnly(const std::string& romfsPath, const fs::path& file) {
+        uint32_t attributes = 0;
+        auto canonical = canonicalName(romfsPath, nullptr, &attributes);
+        auto relative = rom.relativePath(canonical, attributes);
+        std::string stem = relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".zs") == 0 ? relative.substr(0, relative.size() - 3) : relative;
+        auto ext = extensionOf(stem);
+        if (ext == ".pack" || ext == ".ainb" || ext == ".asb" || ext == ".bstar" || ext == ".mc") {
+            auto raw = readFile(file);
+            auto data = zs::isZstd(raw) ? rom.dictionaries().decompress(raw) : std::move(raw);
+            sizes.collect(relative, uint32_t(data.size()), data);
+            if (ext == ".pack")
+                for (const auto& f : sarcView(data)) sizes.collect(std::string(f.name), uint32_t(f.data.size()), f.data);
+            return;
+        }
+        std::string head(32, '\0');
+        std::ifstream in(file, std::ios::binary);
+        in.read(head.data(), std::streamsize(head.size()));
+        head.resize(size_t(in.gcount()));
+        int64_t size = zs::isZstd(head) ? zs::frameContentSize(head) : int64_t(fs::file_size(file));
+        if (size < 0) size = int64_t(rom.dictionaries().decompress(readFile(file)).size());
+        sizes.collect(relative, uint32_t(size), {});
     }
 
     void mergedToOutput(const std::string& data, const std::string& relative, const tkcl::Entry& e, const std::vector<std::string>& archives) {
@@ -367,7 +395,7 @@ std::vector<std::string> unsupportedFiles(const tkcl::Changelog& c) {
 }
 
 Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& outDir, const Progress& progress,
-             const std::string& language) {
+             const std::string& language, const std::vector<std::pair<std::string, fs::path>>& asIs) {
     removeTree(outDir);
     auto sizePath = rom.version() >= 140 ? "System/Resource/ResourceSizeTable.Product." + std::to_string(rom.version()) + ".Nin_NX_NVN.rsizetable.zs"
                                          : "System/Resource/ResourceSizeTable.Product." + std::to_string(rom.version()) + ".rsizetable.zs";
@@ -375,6 +403,7 @@ Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& o
     if (!vanillaSizes) throw std::runtime_error("the game's size table is missing");
     Engine eng(rom, outDir, restbl::Table::parse(*vanillaSizes));
     if (progress) progress(0, "Reading the mods");
+    for (const auto& [path, file] : asIs) eng.sizeOnly(path, file);  // first: merged files' sizes replace these
 
     std::vector<std::map<std::string, uint32_t>> overrides;
     for (const auto& in : inputs) overrides.push_back(readOverrides(in));

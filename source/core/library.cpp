@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <ctime>
+#include <list>
+#include <map>
 #include <new>
 #include <set>
 #include <stdexcept>
@@ -12,6 +14,7 @@
 #include "sizetable.hpp"
 #include "tkcl.hpp"
 #include "tkmm.hpp"
+#include "tkmm_build.hpp"
 #include "totk.hpp"
 
 namespace mm {
@@ -1138,14 +1141,48 @@ std::string tkmmTarget(const std::string& merged) {
 
 }  // namespace
 
-std::string Library::tkmmKey() const {
+namespace {
+
+const std::string kTotkRomfs = kContentsPrefix + std::string(gameInfo(Game::Totk).titleId) + "/romfs/";
+const std::string kTotkSizeTable = "System/Resource/ResourceSizeTable.Product.rsizetable";
+
+// A plain TOTK mod's romfs files: (path in the romfs, target).
+std::vector<std::pair<std::string, std::string>> romfsFiles(const ModRecord& m) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& t : m.files)
+        if (t.size() > kTotkRomfs.size() && toLower(t.substr(0, kTotkRomfs.size())) == toLower(kTotkRomfs)) out.push_back({t.substr(kTotkRomfs.size()), t});
+    return out;
+}
+
+}  // namespace
+
+std::vector<const ModRecord*> Library::tkmmMods() const {
+    // TKMM packages, and plain TOTK mods (they merge too: the files they share with another
+    // mod, and their sizes in the size table).
     std::vector<const ModRecord*> on;
-    for (const auto& m : mods_)
-        if (m.enabled && m.game == Game::Totk && !m.tkmm.empty()) on.push_back(&m);
-    if (on.empty()) return {};
+    bool packages = false;
+    std::map<std::string, int> touched;  // plain mods' files: canonical -> mods
+    for (const auto& m : mods_) {
+        if (!m.enabled || m.game != Game::Totk) continue;
+        on.push_back(&m);
+        if (!m.tkmm.empty()) {
+            packages = true;
+            continue;
+        }
+        std::set<std::string> mine;
+        for (const auto& [path, target] : romfsFiles(m)) mine.insert(tkmm::canonicalName(path));
+        for (const auto& c : mine) ++touched[c];
+    }
+    // Plain mods alone merge only when two change the same file (a size table counts).
+    bool shared = std::any_of(touched.begin(), touched.end(), [](const auto& t) { return t.second > 1; });
+    if (!packages && !shared) return {};
     std::sort(on.begin(), on.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    return on;
+}
+
+std::string Library::tkmmKey() const {
     std::string key;
-    for (const auto* m : on) {
+    for (const auto* m : tkmmMods()) {
         key += m->id + "@" + std::to_string(m->installedAt) + ":";
         for (const auto& c : m->tkmm) key += c + ",";
         key += ";";
@@ -1176,26 +1213,41 @@ void Library::refreshTkmm() {
         removeTree(previous);
         return;
     }
-    std::vector<const ModRecord*> sorted;
-    for (const auto& m : mods_)
-        if (m.enabled && m.game == Game::Totk && !m.tkmm.empty()) sorted.push_back(&m);
-    std::sort(sorted.begin(), sorted.end(), [](auto* a, auto* b) { return a->priority < b->priority; });
+    auto sorted = tkmmMods();
+    // Packages' changelogs, and which files each mod changes: a plain mod's files that another
+    // mod changes too get a changelog made by comparing them with the game's.
     std::vector<tkcl::Package> packages;
     packages.reserve(sorted.size());
-    std::vector<tkmm::Input> inputs;
-    for (const auto* m : sorted) {
-        packages.push_back(tkcl::read(readFile(modDir(*m) / "tkmm" / "package.tkcl")));
-        const auto& pkg = packages.back();
-        auto root = modDir(*m) / "tkmm" / "files";
-        for (const auto& c : m->tkmm) {
-            if (c == "main") {
-                inputs.push_back({m->id, root, &pkg.changelog});
-                continue;
+    std::vector<std::vector<tkmm::Input>> perMod(sorted.size());
+    std::map<std::string, int> touched;  // canonical -> mods
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto* m = sorted[i];
+        std::set<std::string> mine;
+        if (m->tkmm.empty()) {
+            for (const auto& [path, target] : romfsFiles(*m)) mine.insert(tkmm::canonicalName(path));
+        } else {
+            packages.push_back(tkcl::read(readFile(modDir(*m) / "tkmm" / "package.tkcl")));
+            const auto& pkg = packages.back();
+            auto root = modDir(*m) / "tkmm" / "files";
+            auto use = [&](const tkcl::Changelog& c, const fs::path& dir) {
+                perMod[i].push_back({m->id, dir, &c});
+                for (const auto& e : c.files) {
+                    mine.insert(e.canonical);
+                    mine.insert(e.archiveCanonicals.begin(), e.archiveCanonicals.end());
+                }
+                mine.insert(c.malsFiles.begin(), c.malsFiles.end());
+            };
+            for (const auto& c : m->tkmm) {
+                if (c == "main") {
+                    use(pkg.changelog, root);
+                    continue;
+                }
+                for (const auto& g : pkg.groups)
+                    for (const auto& o : g.options)
+                        if (o.id == c) use(o.changelog, root / o.id);
             }
-            for (const auto& g : pkg.groups)
-                for (const auto& o : g.options)
-                    if (o.id == c) inputs.push_back({m->id, root / o.id, &o.changelog});
         }
+        for (const auto& c : mine) ++touched[c];
     }
     if (totkPackIndex_.empty()) throw std::runtime_error("TKMM's pack index is missing");
     auto index = totk::PackIndex::load(readFile(totkPackIndex_));
@@ -1203,10 +1255,30 @@ void Library::refreshTkmm() {
     totk::Rom rom(files, index);
     std::string err;
     if (!removeTree(incoming, &err) || !removeTree(previous, &err)) throw std::runtime_error(err);
-    auto raw = incoming / ".raw";
+    auto raw = incoming / ".raw", plain = incoming / ".plain";
+    std::vector<std::pair<std::string, fs::path>> asIs;
+    std::list<tkcl::Changelog> built;  // (stable addresses)
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto* m = sorted[i];
+        if (!m->tkmm.empty()) continue;
+        std::vector<std::pair<std::string, fs::path>> shared;
+        for (const auto& [path, target] : romfsFiles(*m)) {
+            auto canonical = tkmm::canonicalName(path);
+            if (canonical == kTotkSizeTable) continue;  // sizes are worked out again
+            (touched[canonical] > 1 ? shared : asIs).push_back({path, modDir(*m) / fs::path(target)});
+        }
+        if (shared.empty()) continue;
+        if (mergeProgress_) mergeProgress_(0, "Comparing " + m->name + " with the game");
+        auto dir = plain / m->id;
+        built.push_back(tkmm::buildChangelog(shared, rom, dir));
+        perMod[i].push_back({m->id, dir, &built.back()});
+    }
+    std::vector<tkmm::Input> inputs;
+    for (auto& v : perMod) inputs.insert(inputs.end(), v.begin(), v.end());
     tkmm::Progress progress;
     if (mergeProgress_) progress = [this](float f, const std::string& what) { mergeProgress_(f, what); };
-    auto result = tkmm::merge(inputs, rom, raw, progress, textLanguage_);
+    auto result = tkmm::merge(inputs, rom, raw, progress, textLanguage_, asIs);
+    removeTree(plain);
     std::vector<std::string> outputs;
     for (const auto& f : result.files) {
         auto target = tkmmTarget(f);
@@ -1230,14 +1302,14 @@ void Library::refreshTkmm() {
 }
 
 std::vector<Conflict> Library::conflicts(Game game) const {
-    auto merged = game == Game::Botw ? bcmlMergedTargets() : std::set<std::string>{};
+    auto merged = game == Game::Botw ? bcmlMergedTargets() : tkmmMergedTargets();
     std::map<std::string, Conflict> byKey;
     for (const auto* m : mods(game)) {  // already sorted highest priority first
         if (!m->enabled) continue;
         for (const auto& t : m->files) {
             auto key = targetKey(t);
             if (key == kSizeTableKey && m->game == Game::Botw) continue;  // merged, not a conflict
-            if (merged.count(key) && !m->bcmlLogs.empty()) continue;  // part of the merged file
+            if (merged.count(key) && (game == Game::Totk || !m->bcmlLogs.empty())) continue;  // part of the merged file
             auto& c = byKey[key];
             if (c.target.empty()) c.target = t;
             c.modIds.push_back(m->id);
