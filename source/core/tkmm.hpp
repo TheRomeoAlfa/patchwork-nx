@@ -32,11 +32,13 @@ struct Result {
 
 using Progress = std::function<void(float done, const std::string& what)>;
 
+// `language`: the game's text language, as its text archives name it ("USen", "EUfr"…).
 // Throws std::runtime_error (naming the file) when a changelog can't be applied.
-Result merge(const std::vector<Input>& lowestFirst, totk::Rom& rom, const fs::path& outDir, const Progress& progress = {});
+Result merge(const std::vector<Input>& lowestFirst, totk::Rom& rom, const fs::path& outDir, const Progress& progress = {},
+             const std::string& language = "USen");
 
-// The files of a changelog Patchwork can't merge yet (game data, RSDB tables, text,
-// combined textures): a package with any isn't installed.
+// The files of a changelog Patchwork can't merge yet (combined textures): a package with any
+// isn't installed.
 std::vector<std::string> unsupportedFiles(const tkcl::Changelog& changelog);
 
 // Where an entry's file is in its folder: "romfs/<name>", or for files with a copy per game

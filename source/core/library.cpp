@@ -1206,7 +1206,7 @@ void Library::refreshTkmm() {
     auto raw = incoming / ".raw";
     tkmm::Progress progress;
     if (mergeProgress_) progress = [this](float f, const std::string& what) { mergeProgress_(f, what); };
-    auto result = tkmm::merge(inputs, rom, raw, progress);
+    auto result = tkmm::merge(inputs, rom, raw, progress, textLanguage_);
     std::vector<std::string> outputs;
     for (const auto& f : result.files) {
         auto target = tkmmTarget(f);

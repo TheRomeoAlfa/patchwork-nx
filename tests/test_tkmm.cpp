@@ -253,3 +253,58 @@ TEST("tkmm: packages merge into the game's files on the SD card, and the merge f
     CHECK(!fs::exists(contents / "romfs/Pack/Actor/Horse.pack.zs"));
     CHECK(!fs::exists(sd / "atmosphere/exefs_patches/patchwork-tkmm" / (toUpper(kNso) + ".ips")));
 }
+
+#include "msbt.hpp"
+#include "tkmm.hpp"
+
+TEST("tkmm: a package's text, in the game's language, merges into the game's") {
+    using fixtures::fakePackIndex;
+    using fixtures::fakeZsDic;
+    t::TempDir dir;
+    auto game = dir.path / "game", pkg = dir.path / "pkg";
+    auto zsDic = fakeZsDic();
+    auto dicts = zs::Dictionaries::load(zsDic);
+    put(game / "System/RegionLangMask.txt", "ja\r\n100-121\r\n" + kNso);
+    put(game / "Pack/ZsDic.pack.zs", zsDic);
+    auto addresses = Node::makeDict();
+    for (std::string name : {"Event/EventFlow/EventFlowFileEntry.Product.byml", "AI/FileEntry/FileEntry.Product.byml",
+                             "Logic/FileEntry/FileEntry.Product.byml", "Sequence/FileEntry/FileEntry.Product.byml",
+                             "Effect/EffectFileInfo.Product.Nin_NX_NVN.byml"}) {
+        addresses.dict[name] = Node::str(name + ".121");
+        put(game / (name + ".121.zs"), dicts.compress(bymlFile(Node::makeDict()), 1));
+    }
+    addresses.dict["Mals/EUfr.Product.sarc"] = Node::str("Mals/EUfr.Product.121.sarc");
+    put(game / "System/AddressTable/Product.121.Nin_NX_NVN.atbl.byml.zs", dicts.compress(bymlFile(addresses), 1));
+    put(game / "System/Resource/ResourceSizeTable.Product.121.rsizetable.zs", dicts.compress(restbl::Table().write(), 0));
+    auto messages = [](std::vector<std::pair<std::string, std::string>> items) {
+        msbt::File f;
+        for (auto& [label, text] : items) f.set(label, {msbt::toUtf16(text), "", 0});
+        return msbt::write(f);
+    };
+    Sarc gameText;
+    gameText.files.push_back({"ActorMsg/PouchContent.msbt", messages({{"Armor_001_Head_Name", "Capuche"}})});
+    gameText.files.push_back({"ActorMsg/Other.msbt", messages({{"A", "a"}})});
+    put(game / "Mals/EUfr.Product.121.sarc.zs", dicts.compress(gameText.write(), 1));
+
+    // The package has English and French text: the French is picked.
+    Sarc fr, en;
+    fr.files.push_back({"ActorMsg/PouchContent.msbt", messages({{"Armor_900_Head_Name", "Masque"}})});
+    en.files.push_back({"ActorMsg/PouchContent.msbt", messages({{"Armor_900_Head_Name", "Mask"}})});
+    put(pkg / "romfs/Mals/EUfr.Product.sarc", fr.write());
+    put(pkg / "romfs/Mals/USen.Product.sarc", en.write());
+    tkcl::Changelog c;
+    c.malsFiles = {"Mals/USen.Product.sarc", "Mals/EUfr.Product.sarc"};
+    CHECK(tkmm::unsupportedFiles(c).empty());
+
+    put(dir.path / "index.pkcache.zs", fakePackIndex({}, {}));
+    auto index = totk::PackIndex::load(readFile(dir.path / "index.pkcache.zs"));
+    totk::FolderGameFiles files(game.string());
+    totk::Rom rom(files, index);
+    auto r = tkmm::merge({{"pkg", pkg, &c}}, rom, dir.path / "out", {}, "EUfr");
+    CHECK(r.warnings.empty());
+    auto merged = Sarc::parse(dicts.decompress(readFile(dir.path / "out/romfs/Mals/EUfr.Product.121.sarc.zs")));
+    auto pouch = msbt::parse(merged.find("ActorMsg/PouchContent.msbt")->data);
+    CHECK(pouch.find("Armor_001_Head_Name") && msbt::toUtf8(pouch.find("Armor_001_Head_Name")->text) == "Capuche");
+    CHECK(pouch.find("Armor_900_Head_Name") && msbt::toUtf8(pouch.find("Armor_900_Head_Name")->text) == "Masque");
+    CHECK(merged.find("ActorMsg/Other.msbt") != nullptr);
+}

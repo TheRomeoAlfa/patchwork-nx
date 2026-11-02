@@ -48,7 +48,12 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
    (rows by hash, with the save data layout worked out again) in `tkmm_data.*`. Merging the
    game's own files with no changes gives them back exactly. Unlike TKMM, tables the game
    keeps in its own order (TagDef, GameSafetySetting) aren't re-sorted.
-5. **Text and textures**: Mals/MSBT, combined BNTX.
+5. **Done (text)**: Mals text archives, in the console's language (TKMM's pick: same
+   language and region, else same language, else English); messages replaced whole. TOTK's
+   1,510 US English message files round-trip exactly. **Not done: combined textures**
+   (`*__Combined.bntx`, BNTX rebuilt with changed textures): none of the 13 packages tried
+   needs it (their `.bntx` files are whole icons, copied), and there's no game file to check a
+   BNTX writer against; packages that need it are still refused with the reason.
 6. **Plain romfs mods**: build changelogs on the console by comparing with the game, so
    ordinary TOTK mods that change the same files merge (Linkle 3.0 + a standalone armor).
 7. **Maybe**: BFRES `.mc` material cleanup (TKMM's BfresMc), memory permitting.

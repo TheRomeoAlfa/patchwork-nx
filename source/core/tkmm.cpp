@@ -9,6 +9,7 @@
 
 #include "byml.hpp"
 #include "byml_merge.hpp"
+#include "msbt.hpp"
 #include "restbl.hpp"
 #include "sarc.hpp"
 #include "tkmm_data.hpp"
@@ -25,7 +26,7 @@ const std::string kAiGlobalPack = "Pack/AI.Global.Product.pack";
 
 bool isRemoved(std::string_view data) { return data == kRemoved; }
 
-enum class Kind { Copy, Byml, Sarc, Pack, RsdbRows, RsdbTags, GameData, Unsupported };
+enum class Kind { Copy, Byml, Sarc, Pack, RsdbRows, RsdbTags, GameData, Msbt, Unsupported };
 
 std::string_view extensionOf(std::string_view name) {
     auto slash = name.rfind('/');
@@ -43,8 +44,43 @@ Kind kindOf(std::string_view canonical) {
     if (ext == ".bfarc" || ext == ".bkres" || ext == ".blarc" || ext == ".genvb" || ext == ".sarc" || ext == ".ta") return Kind::Sarc;
     if (ext == ".bntx") return canonical.size() >= 15 && canonical.substr(canonical.size() - 15) == "__Combined.bntx" ? Kind::Unsupported : Kind::Copy;
     if (ext == ".byml" || ext == ".bgyml") return Kind::Byml;
-    if (ext == ".msbt") return Kind::Unsupported;
+    if (ext == ".msbt") return Kind::Msbt;
     return Kind::Copy;  // (TKMM's .bfres.mc material cleanup isn't done: the last copy wins)
+}
+
+// TKMM's MsbtMerger: each changed message replaces the game's whole (its attribute kept when
+// the changelog has none).
+std::string mergeMsbt(const std::string& vanilla, const std::vector<std::string_view>& changelogs) {
+    auto base = msbt::parse(vanilla);
+    for (auto c : changelogs) {
+        auto changes = msbt::parse(std::string(c));
+        for (auto& [label, message] : changes.messages) {
+            if (!changes.hasAttributes)
+                if (const auto* old = base.find(label)) message.attribute = old->attribute;
+            base.set(label, std::move(message));
+        }
+    }
+    return msbt::write(base);
+}
+
+// TKMM's choice of a mod's text archive for the game's language ("Mals/USen.Product.sarc"):
+// the same language and region, else the same language, else English, else the first.
+std::string bestMals(const std::vector<std::string>& files, const std::string& locale) {
+    if (files.size() == 1 || locale.size() != 4) return files.front();
+    const std::string* best = nullptr;
+    int level = 1;
+    for (const auto& f : files) {
+        if (f.size() < 9) continue;
+        auto region = f.substr(5, 2), lang = f.substr(7, 2);
+        if (lang == locale.substr(2) && region == locale.substr(0, 2)) return f;
+        if (lang == locale.substr(2)) {
+            best = &f;
+            level = 2;
+            continue;
+        }
+        if (level < 2 && lang == "en") best = &f;
+    }
+    return best ? *best : files.front();
 }
 
 int bestVersion(int target, const std::vector<int32_t>& provided) {
@@ -173,6 +209,7 @@ struct Engine {
             }
             if (kind == Kind::Byml) it->data = byml::mergeFiles(parent + "/" + name, it->data, effective);
             else if (kind == Kind::Sarc) it->data = mergeSarc(parent + "/" + name, effective, it->data);
+            else if (kind == Kind::Msbt) it->data = mergeMsbt(it->data, effective);
             else it->data = std::string(effective.back());
         }
         return merged.write();
@@ -326,11 +363,11 @@ std::vector<std::string> unsupportedFiles(const tkcl::Changelog& c) {
     for (const auto& e : c.files)
         if (e.type == tkcl::EntryType::Changelog && kindOf(e.canonical) == Kind::Unsupported && e.canonical != kSizeOverrides)
             out.push_back(e.canonical);
-    for (const auto& m : c.malsFiles) out.push_back("Mals/" + m);
     return out;
 }
 
-Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& outDir, const Progress& progress) {
+Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& outDir, const Progress& progress,
+             const std::string& language) {
     removeTree(outDir);
     auto sizePath = rom.version() >= 140 ? "System/Resource/ResourceSizeTable.Product." + std::to_string(rom.version()) + ".Nin_NX_NVN.rsizetable.zs"
                                          : "System/Resource/ResourceSizeTable.Product." + std::to_string(rom.version()) + ".rsizetable.zs";
@@ -343,6 +380,30 @@ Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& o
     for (const auto& in : inputs) overrides.push_back(readOverrides(in));
     writeIps(eng, inputs);
     writeExefs(eng, inputs);
+
+    // Text: each mod's archive for the game's language merged into the game's.
+    std::vector<std::string> mals;
+    for (const auto& in : inputs)
+        if (!in.changelog->malsFiles.empty()) mals.push_back(readFile(in.root / "romfs" / bestMals(in.changelog->malsFiles, language)));
+    if (!mals.empty()) {
+        if (progress) progress(0, "Merging text");
+        const std::string canonical = "Mals/" + language + ".Product.sarc";
+        const uint32_t attributes = tkcl::HasZsExtension | tkcl::IsProductFile;
+        auto relative = rom.relativePath(canonical, attributes);
+        auto game = rom.vanillaAt(relative);
+        if (!game) {
+            eng.result.warnings.push_back("The game's text for " + language + " couldn't be found, so the mods' text was left out.");
+        } else {
+            for (auto& m : mals)
+                if (zs::isZstd(m)) m = rom.dictionaries().decompress(m);
+            std::vector<std::string_view> views(mals.begin(), mals.end());
+            try {
+                eng.simpleOutput(eng.mergeSarc(canonical, views, *game), relative, attributes, 1);
+            } catch (const std::exception& e) {
+                throw std::runtime_error("couldn't merge the text (" + language + "): " + e.what());
+            }
+        }
+    }
 
     // Every mod's entries for each file, in order.
     struct Use {
@@ -453,6 +514,7 @@ Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& o
                 case Kind::RsdbRows: merged = mergeRsdbRows(canonical, rsdbRowKey(canonical), *game, views); break;
                 case Kind::RsdbTags: merged = mergeRsdbTags(*game, views); break;
                 case Kind::GameData: merged = mergeGameData(canonical, *game, views); break;
+                case Kind::Msbt: merged = mergeMsbt(*game, views); break;
                 default: merged = eng.mergeSarc(canonical, views, *game); break;
             }
             eng.mergedToOutput(merged, relative, key, archives);
