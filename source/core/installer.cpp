@@ -113,9 +113,7 @@ void prepareTkcl(const fs::path& tkclPath, const fs::path& outDir, LayoutResult&
     if (!unsupported.empty()) {
         std::set<std::string> kinds;
         for (const auto& f : unsupported) {
-            if (f.rfind("RSDB/", 0) == 0) kinds.insert("actor data tables");
-            else if (f.rfind("GameData/", 0) == 0) kinds.insert("save data");
-            else if (f.rfind("Mals/", 0) == 0) kinds.insert("text");
+            if (f.rfind("Mals/", 0) == 0 || endsWithI(f, ".msbt")) kinds.insert("text");
             else kinds.insert("combined textures");
         }
         std::string list;

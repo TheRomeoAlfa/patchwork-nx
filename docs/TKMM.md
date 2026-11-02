@@ -44,8 +44,10 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
    - Packages needing phase 4 or 5 are refused with the reason.
    - Desktop QA: Frostbite Set Linkle Edition installs, merges, turns off cleanly.
    - Not yet tried on a Switch.
-4. **Data merges**: RSDB tags and rows, game data (with save data sizes). RSDB alone blocks
-   12 of the 38 surveyed packages.
+4. **Done**: RSDB row tables (by key), the RSDB tag table (bit table rebuilt), game data
+   (rows by hash, with the save data layout worked out again) in `tkmm_data.*`. Merging the
+   game's own files with no changes gives them back exactly. Unlike TKMM, tables the game
+   keeps in its own order (TagDef, GameSafetySetting) aren't re-sorted.
 5. **Text and textures**: Mals/MSBT, combined BNTX.
 6. **Plain romfs mods**: build changelogs on the console by comparing with the game, so
    ordinary TOTK mods that change the same files merge (Linkle 3.0 + a standalone armor).
