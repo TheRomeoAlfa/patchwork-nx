@@ -351,6 +351,7 @@ struct MapTracking {
 
 struct Tracking {
     std::string canonical, type;
+    std::string typeOverride;  // TKMM's BymlMergeTracking.Type (null there = empty here)
     Node* root = nullptr;
     int depth = 0;
     std::unordered_map<Node*, MapTracking> maps;
@@ -364,8 +365,9 @@ void mergeNode(Node& base, const Node& changelog, Tracking& t);
 
 void mergeArray(Node& base, const Node& changelog, const std::string* name, Tracking& t) {
     std::vector<std::pair<int, Node>>* additions = nullptr;
-    // As TkSharp: lookups by key only for rules that don't depend on the file's type.
-    KeyName keyName = name ? mergerKeyName(*name, "", t.depth) : KeyName{};
+    // As TkSharp: lookups by key only for rules that don't depend on the file's type (unless
+    // the merge names one, as game data's Struct table).
+    KeyName keyName = name ? mergerKeyName(*name, t.typeOverride, t.depth) : KeyName{};
     std::optional<std::unordered_map<std::string, int>> lookup;
     for (const auto& c : changelog.changes) {
         switch (c.change) {
@@ -481,7 +483,7 @@ int mergeKeyed(const std::string& canonical, const Info& info, Node merged, std:
 }
 
 void applyArray(Tracking& t, Node& base, ArrayTracking& a) {
-    Info info{t.type, a.depth};
+    Info info{t.typeOverride.empty() ? t.type : t.typeOverride, a.depth};
     int offset = 0;
     for (int i : a.removals)
         if (i >= 0 && size_t(i) < base.array.size()) base.array[size_t(i)] = Node::removed();
@@ -555,6 +557,22 @@ void Tracking::apply() {
 }
 
 }  // namespace
+
+struct MergeSession::Impl {
+    Tracking t;
+};
+
+MergeSession::MergeSession(std::string_view canonical, Node* root, std::string type) : impl_(new Impl{Tracking(canonical, root)}) {
+    impl_->t.typeOverride = std::move(type);
+}
+MergeSession::~MergeSession() = default;
+
+void MergeSession::mergeMap(Node& base, const Node& changes) {
+    if (base.type == T::Dict && changes.type == T::Dict) ::mm::byml::mergeMap(base, base.dict, changes.dict, impl_->t);
+    else mergeNode(base, changes, impl_->t);
+}
+void MergeSession::merge(Node& base, const Node& changelog) { mergeNode(base, changelog, impl_->t); }
+void MergeSession::apply() { impl_->t.apply(); }
 
 std::string fileType(std::string_view canonical) {
     auto slash = canonical.rfind('/');

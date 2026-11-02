@@ -11,6 +11,7 @@
 #include "byml_merge.hpp"
 #include "restbl.hpp"
 #include "sarc.hpp"
+#include "tkmm_data.hpp"
 #include "zstd.hpp"
 
 namespace mm::tkmm {
@@ -24,7 +25,7 @@ const std::string kAiGlobalPack = "Pack/AI.Global.Product.pack";
 
 bool isRemoved(std::string_view data) { return data == kRemoved; }
 
-enum class Kind { Copy, Byml, Sarc, Pack, Unsupported };
+enum class Kind { Copy, Byml, Sarc, Pack, RsdbRows, RsdbTags, GameData, Unsupported };
 
 std::string_view extensionOf(std::string_view name) {
     auto slash = name.rfind('/');
@@ -34,7 +35,9 @@ std::string_view extensionOf(std::string_view name) {
 }
 
 Kind kindOf(std::string_view canonical) {
-    if (canonical == "GameData/GameDataList.Product.byml" || canonical.substr(0, 5) == "RSDB/") return Kind::Unsupported;
+    if (canonical == "GameData/GameDataList.Product.byml") return Kind::GameData;
+    if (canonical == "RSDB/Tag.Product.rstbl.byml") return Kind::RsdbTags;
+    if (canonical.substr(0, 5) == "RSDB/") return rsdbRowKey(canonical).empty() ? Kind::Copy : Kind::RsdbRows;
     auto ext = extensionOf(canonical);
     if (ext == ".pack") return Kind::Pack;
     if (ext == ".bfarc" || ext == ".bkres" || ext == ".blarc" || ext == ".genvb" || ext == ".sarc" || ext == ".ta") return Kind::Sarc;
@@ -444,7 +447,14 @@ Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& o
                 target.tracked = eng.spill(sarc.write());
                 continue;
             }
-            auto merged = kind == Kind::Byml ? byml::mergeFiles(canonical, *game, views) : eng.mergeSarc(canonical, views, *game);
+            std::string merged;
+            switch (kind) {
+                case Kind::Byml: merged = byml::mergeFiles(canonical, *game, views); break;
+                case Kind::RsdbRows: merged = mergeRsdbRows(canonical, rsdbRowKey(canonical), *game, views); break;
+                case Kind::RsdbTags: merged = mergeRsdbTags(*game, views); break;
+                case Kind::GameData: merged = mergeGameData(canonical, *game, views); break;
+                default: merged = eng.mergeSarc(canonical, views, *game); break;
+            }
             eng.mergedToOutput(merged, relative, key, archives);
         } catch (const std::exception& e) {
             throw std::runtime_error("couldn't merge " + canonical + " (" + inputs[real.empty() ? uses.front().input : real.back()->input].modId +

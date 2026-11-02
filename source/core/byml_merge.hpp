@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,6 +35,23 @@ void merge(std::string_view canonical, Node& base, const std::vector<const Node*
 // The same on files: `vanilla` and the changelogs are BYML files; the result keeps the game
 // file's byte order and version. Throws std::runtime_error when a changelog doesn't fit.
 std::string mergeFiles(std::string_view canonical, const std::string& vanilla, const std::vector<std::string_view>& changelogs);
+
+// For the mergers built on this one (RSDB tables, game data): changes to parts of one tree,
+// with removals and additions applied together at the end, as TKMM's BymlMergeTracking.
+class MergeSession {
+public:
+    // `type`: the file type for TKMM's list rules ("Struct" for game data's Struct table);
+    // empty: from `canonical`, as for a whole file.
+    MergeSession(std::string_view canonical, Node* root, std::string type = {});
+    ~MergeSession();
+    void mergeMap(Node& base, const Node& changes);  // a map with a map changelog
+    void merge(Node& base, const Node& changelog);   // any container with its changelog
+    void apply();                                    // once, after all merges
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 // A changelog file for a mod's copy of a game file; nullopt when it's the same as the game's.
 std::optional<std::string> buildChangelog(std::string_view canonical, const std::string& modFile, const std::string& vanilla);
