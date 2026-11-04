@@ -1157,13 +1157,14 @@ std::vector<std::pair<std::string, std::string>> romfsFiles(const ModRecord& m) 
 }  // namespace
 
 std::vector<const ModRecord*> Library::tkmmMods() const {
-    // TKMM packages, and plain TOTK mods (they merge too: the files they share with another
-    // mod, and their sizes in the size table).
+    // TKMM packages, and plain TOTK mods when they merge too (the files they share with
+    // another mod, and their sizes in the size table).
     std::vector<const ModRecord*> on;
     bool packages = false;
     std::map<std::string, int> touched;  // plain mods' files: canonical -> mods
     for (const auto& m : mods_) {
         if (!m.enabled || m.game != Game::Totk) continue;
+        if (m.tkmm.empty() && !mergePlainTotk_) continue;
         on.push_back(&m);
         if (!m.tkmm.empty()) {
             packages = true;
@@ -1309,7 +1310,7 @@ std::vector<Conflict> Library::conflicts(Game game) const {
         for (const auto& t : m->files) {
             auto key = targetKey(t);
             if (key == kSizeTableKey && m->game == Game::Botw) continue;  // merged, not a conflict
-            if (merged.count(key) && (game == Game::Totk || !m->bcmlLogs.empty())) continue;  // part of the merged file
+            if (merged.count(key) && (game == Game::Totk ? mergePlainTotk_ || !m->tkmm.empty() : !m->bcmlLogs.empty())) continue;  // part of the merged file
             auto& c = byKey[key];
             if (c.target.empty()) c.target = t;
             c.modIds.push_back(m->id);

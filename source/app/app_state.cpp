@@ -105,6 +105,7 @@ void AppState::init() {
         auto j = json::parse(mm::readFile(dataDir_ / "settings.json"));
         if (j.contains("seenCrashReports")) settings_.seenCrashReports = j["seenCrashReports"].get<std::vector<std::string>>();
         if (auto g = mm::gameFromKey(j.value("game", "totk"))) game_ = *g;
+        settings_.mergePlainTotk = j.value("mergePlainTotk", false);
     } catch (...) {
         // first run or unreadable: defaults
     }
@@ -147,6 +148,7 @@ void AppState::init() {
     }
     library_->setFreeSpace(platform::freeSpaceBytes);
     library_->setTextLanguage(platform::gameTextLanguage());
+    library_->setMergePlainTotkMods(settings_.mergePlainTotk);
     library_->setTotkPackIndex(platform::resourcePath("totk/PackFileLookup.pkcache.zs"));
     library_->setGameFileReader([gameCache](const std::string& path) {
         using GF = mm::Library::GameFile;
@@ -356,6 +358,7 @@ void AppState::saveSettings() {
     try {
         json j{{"game", std::string(mm::gameInfo(game_).key)}};
         if (settings_.seenCrashReports) j["seenCrashReports"] = *settings_.seenCrashReports;
+        if (settings_.mergePlainTotk) j["mergePlainTotk"] = true;
         mm::writeFileAtomic(dataDir_ / "settings.json", j.dump(1));
     } catch (const std::exception& e) {
         brls::Logger::error("saving settings failed: {}", e.what());

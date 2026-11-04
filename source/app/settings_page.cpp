@@ -115,9 +115,30 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
         content->addView(bcmlHow);
     }
 
-    // TKMM merging is being built: a way to copy the game files its tests need.
+    // TKMM merging (experimental): merging plain mods too, and a way to copy the game files
+    // its tests need (for bug reports).
     if (AppState::get().game() == mm::Game::Totk || platform::runningAsGame(mm::Game::Totk)) {
-        section("TKMM merging · in development");
+        section("TKMM merging · Tears of the Kingdom · experimental");
+        auto* merge = new brls::BooleanCell();
+        merge->init("Merge mods that change the same files", AppState::get().settings().mergePlainTotk, [this, merge](bool on) {
+            auto& st = AppState::get();
+            if (st.installBusy()) {
+                brls::Application::notify("Wait for the current change to finish");
+                merge->setOn(!on, false);
+                return;
+            }
+            st.settings().mergePlainTotk = on;
+            st.saveSettings();
+            recopyMods(merge, [on](mm::Library& lib) { lib.setMergePlainTotkMods(on); });
+        });
+        content->addView(merge);
+        auto* mergeNote = ui::label("Experimental. When two mods (not TKMM packages) change the same files, like Linkle and an armor "
+                                    "mod, their changes are combined as TKMM combines them, instead of the one higher in My mods "
+                                    "winning. TKMM packages (.tkcl) are always merged. If a game crashes or looks wrong, turn this "
+                                    "off, or hold L and R while starting it to play without mods, and please report it with your mod list.",
+                                    14, ui::muted(), false);
+        mergeNote->setMargins(10, 4, 4, 4);
+        content->addView(mergeNote);
         auto* copy = new brls::DetailCell();
         copy->setText("Copy game files for testing");
         copy->setDetailText(platform::runningAsGame(mm::Game::Totk) ? "Ready" : "Open from the game first");
@@ -158,7 +179,7 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
             return true;
         });
         content->addView(copy);
-        auto* how = ui::label("For testing TKMM merging on a computer: hold L and R while starting Tears of the Kingdom (L keeps "
+        auto* how = ui::label("For bug reports and testing TKMM merging on a computer: hold L and R while starting Tears of the Kingdom (L keeps "
                               "mods out of the copy), open Patchwork, then select this. It copies a few hundred MB of the game's own "
                               "files to switch/patchwork/totk-game-files.",
                               14, ui::muted(), false);
@@ -386,7 +407,7 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
 
 // Like any change in My mods: it can re-merge BCML packages, so it can take a while and
 // mustn't be interrupted.
-void SettingsPage::recopyMods(brls::View* cell) {
+void SettingsPage::recopyMods(brls::View* cell, std::function<void(mm::Library&)> before) {
     auto& st = AppState::get();
     if (st.installBusy()) {
         brls::Application::notify("Wait for the current change to finish");
@@ -400,7 +421,8 @@ void SettingsPage::recopyMods(brls::View* cell) {
     brls::Application::giveFocus(busy.box);
     auto alive = alive_;
     st.runFileJob(
-        [busy, alive](mm::Library& lib) {
+        [busy, alive, before](mm::Library& lib) {
+            if (before) before(lib);
             lib.setMergeProgress([busy, alive](float f, const std::string& what) {
                 brls::sync([busy, alive, f, what] {
                     if (!*alive) return;

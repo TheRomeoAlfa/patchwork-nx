@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 
 #include "byml.hpp"
@@ -47,6 +48,7 @@ struct FakeGame {
             addresses.dict[name] = Node::str(name + ".121");
             write(game / (name + ".121.zs"), dicts.compress(bymlOf(Node::makeDict()), 1));
         }
+        addresses.dict["Mals/USen.Product.sarc"] = Node::str("Mals/USen.Product.121.sarc");
         write(game / "System/AddressTable/Product.121.Nin_NX_NVN.atbl.byml.zs", dicts.compress(bymlOf(addresses), 1));
         write(game / "System/Resource/ResourceSizeTable.Product.121.rsizetable.zs", dicts.compress(restbl::Table().write(), 0));
         pack.files.push_back({"Component/Horse.bgyml", bymlOf(dictOf({{"Speed", Node::integer(1)}, {"Name", Node::str("Horse")}}))});
@@ -75,6 +77,30 @@ TEST("tkmm build: canonical names drop .zs and the game version, as TKMM's") {
     CHECK_EQ(tkmm::canonicalName("Model/Armor.bfres.mc", &version, &attributes), std::string("Model/Armor.bfres"));
     CHECK(attributes == tkcl::HasMcExtension);
     CHECK_EQ(tkmm::canonicalName("Tex/Icon.123.txtg"), std::string("Tex/Icon.123.txtg"));
+}
+
+TEST("tkmm build: of a mod's copies for each game version, the one for this game is used") {
+    t::TempDir dir;
+    FakeGame g(dir.path / "game", dir.path / "index.pkcache.zs");
+    auto index = totk::PackIndex::load(readFile(dir.path / "index.pkcache.zs"));
+    totk::FolderGameFiles files(g.root.string());
+    totk::Rom rom(files, index);
+    auto pick = [&](std::vector<std::string> paths) {
+        std::vector<std::pair<std::string, fs::path>> in;
+        for (auto& p : paths) in.push_back({p, dir.path / p});
+        std::vector<std::string> out;
+        for (auto& [p, f] : tkmm::forThisGame(in, rom)) out.push_back(p);
+        return out;
+    };
+    // This game is 1.2.1 (121): its copy, wherever it is in the list.
+    auto chosen = pick({"Mals/USen.Product.100.sarc.zs", "Mals/USen.Product.121.sarc.zs", "Mals/USen.Product.110.sarc.zs", "Model/A.bfres"});
+    CHECK_EQ(chosen.size(), size_t(2));
+    CHECK_EQ(chosen[0], std::string("Mals/USen.Product.121.sarc.zs"));
+    CHECK_EQ(chosen[1], std::string("Model/A.bfres"));
+    // No copy for this game: the newest.
+    chosen = pick({"Mals/USen.Product.112.sarc.zs", "Mals/USen.Product.100.sarc.zs"});
+    CHECK_EQ(chosen.size(), size_t(1));
+    CHECK_EQ(chosen[0], std::string("Mals/USen.Product.112.sarc.zs"));
 }
 
 TEST("tkmm build: two plain mods changing the same pack both end up in it") {
@@ -167,6 +193,7 @@ TEST("tkmm build: plain mods in My mods merge the files they share, and fall bac
 
     Library lib(sd, sd / "switch/patchwork");
     lib.load();
+    lib.setMergePlainTotkMods(true);
     lib.setTotkPackIndex(dir.path / "index.pkcache.zs");
     bool available = true;
     lib.setGameFileReader([&](const std::string& p) {
@@ -225,5 +252,15 @@ TEST("tkmm build: plain mods in My mods merge the files they share, and fall bac
     CHECK(lib.tkmmMergedTargets().empty());
     CHECK(horse().find("Name")->s == "Horse" && horse().find("Speed")->i == 5);
     CHECK(!fs::exists(contents / "Model/B.bfres"));
+    CHECK(fs::exists(sd / "switch/patchwork/tkmm-merged") == false);
+
+    // Merging plain mods turned off (the default): the higher mod wins, as before.
+    lib.setEnabled("b", true);
+    CHECK(horse().find("Speed")->i == 5);
+    lib.setMergePlainTotkMods(false);
+    lib.apply();
+    CHECK(lib.tkmmMergedTargets().empty());
+    CHECK(horse().find("Speed")->i == 1 && horse().find("Name")->s == "B");
+    CHECK(!lib.conflicts(Game::Totk).empty());
     CHECK(fs::exists(sd / "switch/patchwork/tkmm-merged") == false);
 }

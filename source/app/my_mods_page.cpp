@@ -451,8 +451,9 @@ void MyModsPage::showDetails(const std::string& id) {
             addNote(std::string(ui::icon::warning) + "  Not merged yet: " + (snap.tkmmError.empty() ? "waiting for the merge." : snap.tkmmError),
                     ui::warn(), ui::warnBg());
         } else {
-            addNote(std::string(ui::icon::info) + "  Merged with the game's own files, as TKMM does. Patchwork merges again whenever a TKMM "
-                                                  "package is turned on or off or moved in the list.",
+            addNote(std::string(ui::icon::info) + "  Merged with the game's own files, as TKMM does (experimental: please report "
+                                                  "packages that don't work). Patchwork merges again whenever a TKMM package is turned "
+                                                  "on or off or moved in the list.",
                     ui::accent(), ui::accentDim());
             if (m->enabled && !snap.tkmmWarnings.empty()) {
                 std::string text = std::string(ui::icon::warning) + "  The merge left out " + std::to_string(snap.tkmmWarnings.size()) +
@@ -473,6 +474,10 @@ void MyModsPage::showDetails(const std::string& id) {
         else if (merged > 0)
             addNote(std::string(ui::icon::info) + "  " + files(merged) + " merged with other mods' changes to the same files, as TKMM "
                                                   "does. Patchwork merges again whenever one of them is turned on or off or moved in the list.",
+                    ui::accent(), ui::accentDim());
+        else if (!st.settings().mergePlainTotk && (!overriddenBy.empty() || !overrides.empty()))
+            addNote(std::string(ui::icon::info) + "  Changes to the same game data, text and actor packs can be combined instead: "
+                                                  "turn on Settings → Merge mods that change the same files (experimental).",
                     ui::accent(), ui::accentDim());
     }
 

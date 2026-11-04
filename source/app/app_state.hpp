@@ -79,6 +79,8 @@ struct Settings {
     // Atmosphère mod-loader crash reports already told about; null until the first check,
     // so reports from before Patchwork was installed aren't announced.
     std::optional<std::vector<std::string>> seenCrashReports;
+    // Experimental: plain TOTK mods that change the same files merge, as TKMM does.
+    bool mergePlainTotk = false;
 };
 
 class AppState {

@@ -26,6 +26,7 @@
 | Install | Not enough space (`MM_FREE_SPACE=<bytes>`): a small zip that unpacks big is refused before anything is copied; turning a mod on is refused and it stays off; turning one off always works |
 | My mods | On/off, move up/down, remove (dialog), import files already on SD, stop managing; the mod's page (→, B back) |
 | Settings | NSFW toggle persists; delete unfinished downloads; re-copy mods |
+| Settings | TOTK "Merge mods that change the same files": off by default (two plain mods sharing files: higher wins, My mods suggests the setting); on merges and My mods says how many files; persists across a restart; off again removes the merge |
 | Restart | Library, settings and game choice survive a restart |
 | Waikuteru | Source switch (L/R); BOTW list = 12 Switch mods, TOTK = 5; preview image, credit; Wii U file refused; install a small mod |
 | Add mods | Inbox: install a zip, a non-mod zip (clear message), clash warning with installed mods; delete a file |
@@ -157,3 +158,10 @@ Run these after any release build; they cover what the desktop build can't.
    Pick another skill level and untick an add-on, press +: "Options changed", DAR keeps its place and on/off
    state, it merges once, and the game has the new moves. Press Y again: the new choices are ticked (from
    the kept package, no download). B on the options screen changes nothing.
+40. **TKMM package (TOTK):** hold L and R while starting TOTK, open Patchwork, install a `.tkcl`
+   package (e.g. 612870 Hero of the Kingdom Armor Set's TKMM file): it merges, and in the game the
+   armor shows in the inventory with its name and description. Turn it off: it's gone.
+41. **Plain TOTK mods merging:** with Settings → Merge mods that change the same files on, install
+   two standalone armors that share tables and text (e.g. 478736 Nintendo Switch Shirt and 609636
+   Royal Snow Gear): My mods says files were merged; in the game both armors have their names.
+   Turn the setting off: the higher one wins again and the game still loads.

@@ -153,6 +153,10 @@ public:
     // empty to stop.
     using MergeProgressFn = std::function<void(float, const std::string&)>;
     void setMergeProgress(MergeProgressFn progress) { mergeProgress_ = std::move(progress); }
+    // Plain TOTK mods that change the same files merge too (experimental; off: the one
+    // higher in the list wins). Takes effect on the next apply().
+    void setMergePlainTotkMods(bool on) { mergePlainTotk_ = on; }
+    bool mergePlainTotkMods() const { return mergePlainTotk_; }
     // Game files merging would need for a package with these log folders, that can't be read
     // now (package-style paths). Files the game doesn't have don't count.
     std::vector<std::string> missingGameFiles(const std::vector<fs::path>& logDirs) const;
@@ -210,6 +214,7 @@ private:
     fs::path sdRoot_, dataDir_, originalSizeTable_;
     GameFileReader gameFiles_;
     std::string textLanguage_ = "USen";
+    bool mergePlainTotk_ = false;
     MergeProgressFn mergeProgress_;
     FreeSpaceFn freeSpace_;
     // The last BCML merge: its inputs, the SD targets it produced (staged under

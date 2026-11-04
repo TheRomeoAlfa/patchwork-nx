@@ -104,8 +104,29 @@ same file still compete: only the higher one is used.)
 Merging big files like `TitleBG.pack` needs a lot of memory: open Patchwork by holding **R** while starting
 a game. From the Album it may fail with "out of memory" (it warns you first).
 
-This covers 376 of the 383 BCML packages on GameBanana. The rest use BCML 2's old format and, like TKMM
-packages for Tears of the Kingdom (`.tkcl`), are marked as needing those PC tools.
+This covers 376 of the 383 BCML packages on GameBanana. The rest use BCML 2's old format and are marked as
+needing BCML on a PC.
+
+## TKMM packages and merging (Tears of the Kingdom) · experimental
+
+Patchwork merges Tears of the Kingdom mods on the console the way [TKMM](https://github.com/TKMM-Team)
+does on a PC: game data, actor info and tag tables, text (in your console's language), actor packs and other
+archives, code patches and the resource size table. It's tested against the game's real files, but not yet
+in the game on a Switch, so it's **experimental**: please report anything that crashes or looks wrong, with
+your mod list.
+
+- **TKMM packages (`.tkcl`)** install like any other mod, with their options, and are always merged. A few
+  that change combined textures (`*__Combined.bntx`) are still refused, with the reason.
+- **Plain mods that change the same files** (like Linkle 3.0 and a standalone armor) can be merged too:
+  turn on **Settings → Merge mods that change the same files**. It's off by default, so the one higher in
+  My mods wins, as before. Whole files like models and textures can't be merged either way.
+
+Like BCML packages, merging reads the game's own files, once: press **+** to close Patchwork, hold **L and
+R** while starting Tears of the Kingdom, and open Patchwork from the Homebrew Menu. Patchwork says when it's
+needed.
+
+If the game crashes or looks wrong, hold **L and R** while starting it to play without mods, then turn the
+setting or the package off in Patchwork.
 
 ## Controls
 

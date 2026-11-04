@@ -1,4 +1,4 @@
-# TKMM merging on the console (work in progress)
+# TKMM merging on the console (experimental)
 
 Goal: Tears of the Kingdom mods merge on the Switch the way TKMM merges them on a PC, so
 `.tkcl` packages install, and plain romfs mods that change the same files combine instead
@@ -61,6 +61,8 @@ library is AGPL, so Patchwork's BYML code is its own, written from the format.
      files TKMM packages change); the rest go on the SD card as they are, with their sizes
      (and those of the files in their packs) put in the merged size table.
    - When the game's files can't be read, the higher mod wins as before, and My mods says why.
+   - Released in 0.4.0 behind Settings → "Merge mods that change the same files" (off by
+     default: not yet tried in the game on a Switch); packages always merge.
    - Checked on the user's game: two mods changing an armor pack, two RSDB tables, game data
      and text in different places merge to both changes and nothing else; the app's merge on
      the card is identical. Comparing long lists was quadratic: 7.7 s to 0.4 s per mod.
