@@ -6,6 +6,7 @@
 #include "debug_script.hpp"
 #include "platform.hpp"
 #include "sysmodules.hpp"
+#include "totk.hpp"
 #include "ui.hpp"
 
 namespace app {
@@ -112,6 +113,78 @@ SettingsPage::SettingsPage() : brls::Box(brls::Axis::COLUMN) {
                                   14, ui::muted(), false);
         bcmlHow->setMargins(10, 4, 4, 4);
         content->addView(bcmlHow);
+    }
+
+    // TKMM merging (experimental): merging plain mods too, and a way to copy the game files
+    // its tests need (for bug reports).
+    if (AppState::get().game() == mm::Game::Totk || platform::runningAsGame(mm::Game::Totk)) {
+        section("TKMM merging · Tears of the Kingdom · experimental");
+        auto* merge = new brls::BooleanCell();
+        merge->init("Merge mods that change the same files", AppState::get().settings().mergePlainTotk, [this, merge](bool on) {
+            auto& st = AppState::get();
+            if (st.installBusy()) {
+                brls::Application::notify("Wait for the current change to finish");
+                merge->setOn(!on, false);
+                return;
+            }
+            st.settings().mergePlainTotk = on;
+            st.saveSettings();
+            recopyMods(merge, [on](mm::Library& lib) { lib.setMergePlainTotkMods(on); });
+        });
+        content->addView(merge);
+        auto* mergeNote = ui::label("Experimental. When two mods (not TKMM packages) change the same files, like Linkle and an armor "
+                                    "mod, their changes are combined as TKMM combines them, instead of the one higher in My mods "
+                                    "winning. TKMM packages (.tkcl) are always merged. If a game crashes or looks wrong, turn this "
+                                    "off, or hold L and R while starting it to play without mods, and please report it with your mod list.",
+                                    14, ui::muted(), false);
+        mergeNote->setMargins(10, 4, 4, 4);
+        content->addView(mergeNote);
+        auto* copy = new brls::DetailCell();
+        copy->setText("Copy game files for testing");
+        copy->setDetailText(platform::runningAsGame(mm::Game::Totk) ? "Ready" : "Open from the game first");
+        copy->registerClickAction([copy, alive = alive_](brls::View*) {
+            auto& st = AppState::get();
+            if (!platform::runningAsGame(mm::Game::Totk)) {
+                brls::Application::notify("Hold L and R while starting Tears of the Kingdom, then try again");
+                return true;
+            }
+            if (st.fileJobRunning()) {
+                brls::Application::notify("Wait for the current install to finish");
+                return true;
+            }
+            if (platform::freeSpaceBytes() < (1ull << 30)) {
+                brls::Application::notify("Needs about 1 GB free on the SD card");
+                return true;
+            }
+            copy->setDetailText("Starting…");
+            auto dest = mm::fs::path(platform::sdRoot()) / "switch/patchwork/totk-game-files";
+            auto count = std::make_shared<size_t>(0);
+            st.runFileJob(
+                [dest, copy, alive, count](mm::Library&) {
+                    mm::removeTree(dest);
+                    *count = platform::copyGameFiles(mm::Game::Totk, mm::totk::testFilePatterns(), dest,
+                                                     [copy, alive](const std::string&, uint64_t bytes) {
+                                                         static int n = 0;
+                                                         if (++n % 25) return;
+                                                         brls::sync([copy, alive, bytes] {
+                                                             if (*alive) copy->setDetailText(formatSize(bytes) + " copied");
+                                                         });
+                                                     });
+                },
+                [copy, alive, count](const std::string& error) {
+                    if (*alive) copy->setDetailText(error.empty() ? std::to_string(*count) + " files copied" : "Failed");
+                    brls::Application::notify(error.empty() ? "Copied to switch/patchwork/totk-game-files"
+                                                            : "Couldn't copy the game files: " + error);
+                });
+            return true;
+        });
+        content->addView(copy);
+        auto* how = ui::label("For bug reports and testing TKMM merging on a computer: hold L and R while starting Tears of the Kingdom (L keeps "
+                              "mods out of the copy), open Patchwork, then select this. It copies a few hundred MB of the game's own "
+                              "files to switch/patchwork/totk-game-files.",
+                              14, ui::muted(), false);
+        how->setMargins(10, 4, 4, 4);
+        content->addView(how);
     }
 
     section("Background add-ons");
@@ -334,7 +407,7 @@ void SettingsPage::restoreBackup(const mm::SaveBackup& b) {
 
 // Like any change in My mods: it can re-merge BCML packages, so it can take a while and
 // mustn't be interrupted.
-void SettingsPage::recopyMods(brls::View* cell) {
+void SettingsPage::recopyMods(brls::View* cell, std::function<void(mm::Library&)> before) {
     auto& st = AppState::get();
     if (st.installBusy()) {
         brls::Application::notify("Wait for the current change to finish");
@@ -348,7 +421,8 @@ void SettingsPage::recopyMods(brls::View* cell) {
     brls::Application::giveFocus(busy.box);
     auto alive = alive_;
     st.runFileJob(
-        [busy, alive](mm::Library& lib) {
+        [busy, alive, before](mm::Library& lib) {
+            if (before) before(lib);
             lib.setMergeProgress([busy, alive](float f, const std::string& what) {
                 brls::sync([busy, alive, f, what] {
                     if (!*alive) return;

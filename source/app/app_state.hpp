@@ -54,7 +54,11 @@ struct LibrarySnapshot {
     };
     std::map<mm::Game, Unmanaged> unmanaged;  // files on the SD card Patchwork didn't install
     bool bcmlWaiting = false;  // enabled BCML packages not merged yet (game files missing)
+    bool tkmmWaiting = false;                // TKMM packages turned on that couldn't be merged yet
+    std::string tkmmError;                   // why
+    std::vector<std::string> tkmmWarnings;   // changes the last TKMM merge left out
     std::set<std::string> bcmlMerged;  // targets (lowercase) the last BCML merge produced
+    std::set<std::string> tkmmMerged;  // likewise, the last TKMM merge
     bool loaded = false;       // false until the mod list has been read at startup
 };
 
@@ -75,6 +79,8 @@ struct Settings {
     // Atmosphère mod-loader crash reports already told about; null until the first check,
     // so reports from before Patchwork was installed aren't announced.
     std::optional<std::vector<std::string>> seenCrashReports;
+    // Experimental: plain TOTK mods that change the same files merge, as TKMM does.
+    bool mergePlainTotk = false;
 };
 
 class AppState {

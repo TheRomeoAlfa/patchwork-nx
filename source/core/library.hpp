@@ -39,6 +39,10 @@ struct ModRecord {
     // BCML packages that need merging: folders under <mod>/bcml holding the package's logs
     // (the main ones first, then the chosen options'). Empty for everything else.
     std::vector<std::string> bcmlLogs;
+    // TKMM packages (.tkcl): the changelogs to merge, in order ("main" for the package's own,
+    // then the chosen options' ids). The package is kept under <mod>/tkmm: package.tkcl (its
+    // header) and files/ (its files, an option's under files/<id>). Empty for everything else.
+    std::vector<std::string> tkmm;
 };
 
 // BOTW's resource size table. Patchwork merges it from every enabled mod instead of letting
@@ -141,12 +145,18 @@ public:
     void setGameFileReader(GameFileReader reader) { gameFiles_ = std::move(reader); }
     // One game file through the reader (which keeps a copy the first time it can read it).
     GameFile gameFile(const std::string& path) const { return gameFiles_ ? gameFiles_(path) : GameFile{}; }
+    // TKMM's index of which pack holds each Tears of the Kingdom file (shipped with Patchwork).
+    void setTotkPackIndex(fs::path path) { totkPackIndex_ = std::move(path); }
     // The game's text language, for merging BCML packages' text changes.
     void setTextLanguage(std::string language) { textLanguage_ = std::move(language); }
     // Told 0..1 and what's happening while BCML packages are merged (it can take a while);
     // empty to stop.
     using MergeProgressFn = std::function<void(float, const std::string&)>;
     void setMergeProgress(MergeProgressFn progress) { mergeProgress_ = std::move(progress); }
+    // Plain TOTK mods that change the same files merge too (experimental; off: the one
+    // higher in the list wins). Takes effect on the next apply().
+    void setMergePlainTotkMods(bool on) { mergePlainTotk_ = on; }
+    bool mergePlainTotkMods() const { return mergePlainTotk_; }
     // Game files merging would need for a package with these log folders, that can't be read
     // now (package-style paths). Files the game doesn't have don't count.
     std::vector<std::string> missingGameFiles(const std::vector<fs::path>& logDirs) const;
@@ -186,6 +196,14 @@ public:
     // Merge BCML packages again on the next apply() (the game files they read changed).
     void invalidateBcml() { bcmlKey_.clear(); }
     const std::string& bcmlError() const { return bcmlError_; }
+    // The same for TKMM packages (Tears of the Kingdom).
+    bool tkmmPending() const { return tkmmKey() != tkmmKey_; }
+    void invalidateTkmm() { tkmmKey_.clear(); }
+    const std::string& tkmmError() const { return tkmmError_; }
+    // What the last TKMM merge couldn't apply (changes to files it can't merge yet…).
+    const std::vector<std::string>& tkmmWarnings() const { return tkmmWarnings_; }
+    // Targets (lowercase) the last TKMM merge produced.
+    std::set<std::string> tkmmMergedTargets() const;
     // bcmlError() when the merge ran out of memory.
     static constexpr const char* kOutOfMemory = "the merge ran out of memory";
 private:
@@ -196,6 +214,7 @@ private:
     fs::path sdRoot_, dataDir_, originalSizeTable_;
     GameFileReader gameFiles_;
     std::string textLanguage_ = "USen";
+    bool mergePlainTotk_ = false;
     MergeProgressFn mergeProgress_;
     FreeSpaceFn freeSpace_;
     // The last BCML merge: its inputs, the SD targets it produced (staged under
@@ -212,6 +231,14 @@ private:
     bool bcmlMerged(const ModRecord& m) const;  // part of the last merge
     // Every package in the last merge is still enabled (as installed then): its files may stay.
     bool bcmlStillUsable() const;
+    // TKMM packages: merged into <dataDir>/tkmm-merged (files at their SD card paths).
+    std::vector<const ModRecord*> tkmmMods() const;  // in the merge, lowest priority first
+    std::string tkmmKey() const;
+    void refreshTkmm();
+    bool tkmmStillUsable() const;
+    fs::path totkPackIndex_;
+    std::string tkmmKey_, tkmmError_;
+    std::vector<std::string> tkmmOutputs_, tkmmWarnings_;
     std::vector<ModRecord> mods_;
     std::map<std::string, std::string> deployed_;  // target -> mod id currently on SD
     // Originals saved in backup/: lower-cased target (FAT ignores case) -> target as stored.

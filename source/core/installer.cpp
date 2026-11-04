@@ -2,9 +2,13 @@
 
 #include <algorithm>
 #include <map>
+#include <fstream>
+#include <set>
 #include <stdexcept>
 
 #include "bnp.hpp"
+#include "tkcl.hpp"
+#include "tkmm.hpp"
 #include "nlohmann/json.hpp"
 
 namespace mm {
@@ -64,6 +68,89 @@ void applyBnpOptions(const fs::path& workDir, LayoutResult& layout) {
     std::vector<Variant> kept;
     for (auto i : order) kept.push_back(std::move(layout.variants[i]));
     layout.variants = std::move(kept);
+}
+
+// A TKMM package: its header is read (only as much of the file as it takes), the zip of files
+// after it unpacked into `outDir`/files. The package's own files are always merged; its
+// options are offered as BCML packages' are.
+void prepareTkcl(const fs::path& tkclPath, const fs::path& outDir, LayoutResult& layout, const ExtractProgressFn& progress) {
+    std::error_code ec;
+    uint64_t size = fs::file_size(tkclPath, ec);
+    if (ec) throw std::runtime_error("couldn't read the TKMM package");
+    std::string header;
+    tkcl::Package pkg;
+    for (uint64_t want = std::min<uint64_t>(size, 1u << 20);; want = std::min<uint64_t>(size, want * 4)) {
+        std::ifstream in(tkclPath, std::ios::binary);
+        header.assign(size_t(want), '\0');
+        in.read(header.data(), std::streamsize(want));
+        header.resize(size_t(in.gcount()));
+        try {
+            pkg = tkcl::read(header);
+            break;
+        } catch (const std::runtime_error&) {
+            if (want >= size) throw;  // the whole file and still not readable
+        }
+    }
+    header.resize(pkg.zipOffset);
+    fs::create_directories(outDir);
+    writeFileAtomic(outDir / "package.tkcl", header);
+    {
+        // The zip after the header, as a file of its own to unpack.
+        std::ifstream in(tkclPath, std::ios::binary);
+        in.seekg(std::streamoff(pkg.zipOffset));
+        std::ofstream zip(outDir / "files.zip", std::ios::binary);
+        std::vector<char> buf(1 << 20);
+        while (in.read(buf.data(), std::streamsize(buf.size())) || in.gcount() > 0) zip.write(buf.data(), in.gcount());
+        if (!zip) throw std::runtime_error("couldn't unpack the TKMM package (SD card full?)");
+    }
+    extractArchive(outDir / "files.zip", outDir / "files", {}, progress);
+    fs::remove(outDir / "files.zip", ec);
+
+    std::vector<std::string> unsupported = tkmm::unsupportedFiles(pkg.changelog);
+    for (const auto& g : pkg.groups)
+        for (const auto& o : g.options)
+            for (auto& f : tkmm::unsupportedFiles(o.changelog)) unsupported.push_back(f);
+    if (!unsupported.empty()) {
+        std::set<std::string> kinds;
+        for (const auto& f : unsupported) {
+            if (f.rfind("Mals/", 0) == 0 || endsWithI(f, ".msbt")) kinds.insert("text");
+            else kinds.insert("combined textures");
+        }
+        std::string list;
+        for (const auto& k : kinds) list += (list.empty() ? "" : ", ") + k;
+        layout.kind = PackageKind::Tkmm;
+        layout.problem = "This TKMM package changes game files Patchwork can't merge yet (" + list +
+                         "), so for now it still needs TKMM on a PC.";
+        return;
+    }
+
+    layout.kind = PackageKind::Installable;
+    layout.tkmm = true;
+    Variant main;
+    main.name = "main";
+    main.label = pkg.name;
+    main.always = true;
+    layout.variants.push_back(std::move(main));
+    for (size_t gi = 0; gi < pkg.groups.size(); ++gi) {
+        const auto& g = pkg.groups[gi];
+        for (size_t oi = 0; oi < g.options.size(); ++oi) {
+            const auto& o = g.options[oi];
+            Variant v;
+            v.name = o.id;
+            v.label = o.name;
+            v.priority = o.priority;
+            v.groupName = g.name;
+            v.group = g.single() ? int(gi) : -1;
+            v.required = g.single() && g.required();
+            v.preselected = std::find(g.defaults.begin(), g.defaults.end(), oi) != g.defaults.end() ||
+                            (v.required && g.defaults.empty() && oi == 0);
+            layout.variants.push_back(std::move(v));
+        }
+    }
+    layout.internal.push_back({outDir / "package.tkcl", "tkmm/package.tkcl"});
+    for (fs::recursive_directory_iterator it(outDir / "files", ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec))
+            layout.internal.push_back({it->path(), "tkmm/files/" + it->path().lexically_relative(outDir / "files").generic_string()});
 }
 
 }  // namespace
@@ -126,12 +213,27 @@ PreparedArchive prepareArchive(const fs::path& archive, const fs::path& workDir,
         return p;
     }
     if (endsWithI(archive.filename().string(), ".tkcl")) {
-        p.layout.kind = PackageKind::Tkmm;
+        if (game != Game::Totk) {
+            p.layout.problem = "This is a TKMM package, made for Tears of the Kingdom. Switch game with ZL/ZR, then install it again.";
+            return p;
+        }
+        prepareTkcl(archive, workDir, p.layout, progress);
         return p;
     }
     extractArchive(archive, workDir, {}, progress, &p.fileTimes);
     extractNestedArchives(workDir);
     p.layout = detectLayout(workDir, game, modSlug);
+    if (p.layout.kind == PackageKind::Tkmm && game == Game::Totk) {
+        // An archive with a TKMM package inside (how they're usually shared).
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(workDir, ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_regular_file(ec) && endsWithI(it->path().filename().string(), ".tkcl")) {
+                LayoutResult layout;
+                prepareTkcl(it->path(), workDir / ".tkmm-package", layout, progress);
+                p.layout = std::move(layout);
+                break;
+            }
+    }
     return p;
 }
 

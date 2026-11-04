@@ -24,7 +24,7 @@ if(PLATFORM_DESKTOP OR PLATFORM_SWITCH)
     include(${BOREALIS_LIBRARY}/cmake/toolchain.cmake)
 endif()
 
-project(patchwork VERSION 0.3.1 LANGUAGES C CXX)
+project(patchwork VERSION 0.4.0 LANGUAGES C CXX)
 set(APP_TITLE "Patchwork")
 set(APP_AUTHOR "TheRomeoAlfa")
 
@@ -45,9 +45,10 @@ if(NINTENDO_SWITCH OR PLATFORM_SWITCH)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBARCHIVE REQUIRED IMPORTED_TARGET libarchive)
+    pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
     find_package(CURL REQUIRED)
     find_package(ZLIB REQUIRED)
-    target_link_libraries(mmcore PUBLIC PkgConfig::LIBARCHIVE CURL::libcurl ZLIB::ZLIB)
+    target_link_libraries(mmcore PUBLIC PkgConfig::LIBARCHIVE PkgConfig::ZSTD CURL::libcurl ZLIB::ZLIB)
 endif()
 
 # ---------------------------------------------------------------- host tools

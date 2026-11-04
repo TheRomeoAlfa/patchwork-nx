@@ -7,6 +7,10 @@
 
 #include "saves.hpp"
 
+namespace mm {
+class Library;
+}
+
 namespace app {
 
 class SettingsPage : public brls::Box {
@@ -19,7 +23,8 @@ private:
     void revealNsfwSetting();
     void fillBackups();
     void restoreBackup(const mm::SaveBackup& backup);
-    void recopyMods(brls::View* cell);
+    // `before` runs first in the same file job (to change a library setting).
+    void recopyMods(brls::View* cell, std::function<void(mm::Library&)> before = {});
 
     brls::ScrollingFrame* scroll_ = nullptr;
     brls::Box* backups_ = nullptr;        // rows of save backups, rebuilt after changes
