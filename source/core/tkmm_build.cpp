@@ -361,7 +361,31 @@ std::string canonicalName(std::string_view p, int* versionOut, uint32_t* attribu
     return out;
 }
 
-tkcl::Changelog buildChangelog(const std::vector<std::pair<std::string, fs::path>>& files, totk::Rom& rom, const fs::path& outDir) {
+std::vector<std::pair<std::string, fs::path>> forThisGame(const std::vector<std::pair<std::string, fs::path>>& files, const totk::Rom& rom) {
+    struct Best {
+        size_t index;
+        int version;
+        bool real;
+    };
+    std::map<std::string, Best> best;  // canonical -> chosen copy
+    for (size_t i = 0; i < files.size(); ++i) {
+        int version = -1;
+        uint32_t attributes = 0;
+        auto canonical = canonicalName(files[i].first, &version, &attributes);
+        bool real = rom.relativePath(canonical, attributes) == files[i].first;
+        auto [it, fresh] = best.try_emplace(canonical, Best{i, version, real});
+        if (!fresh && !it->second.real && (real || version > it->second.version)) it->second = {i, version, real};
+    }
+    std::vector<bool> keep(files.size());
+    for (const auto& [canonical, b] : best) keep[b.index] = true;
+    std::vector<std::pair<std::string, fs::path>> out;
+    for (size_t i = 0; i < files.size(); ++i)
+        if (keep[i]) out.push_back(files[i]);
+    return out;
+}
+
+tkcl::Changelog buildChangelog(const std::vector<std::pair<std::string, fs::path>>& all, totk::Rom& rom, const fs::path& outDir) {
+    auto files = forThisGame(all, rom);
     Collector c{outDir, {}, {}};
     c.changelog.builderVersion = 200;
     c.changelog.gameVersion = rom.version();

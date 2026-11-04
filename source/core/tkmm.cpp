@@ -403,7 +403,7 @@ Result merge(const std::vector<Input>& inputs, totk::Rom& rom, const fs::path& o
     if (!vanillaSizes) throw std::runtime_error("the game's size table is missing");
     Engine eng(rom, outDir, restbl::Table::parse(*vanillaSizes));
     if (progress) progress(0, "Reading the mods");
-    for (const auto& [path, file] : asIs) eng.sizeOnly(path, file);  // first: merged files' sizes replace these
+    for (const auto& [path, file] : forThisGame(asIs, rom)) eng.sizeOnly(path, file);  // first: merged files' sizes replace these
 
     std::vector<std::map<std::string, uint32_t>> overrides;
     for (const auto& in : inputs) overrides.push_back(readOverrides(in));
